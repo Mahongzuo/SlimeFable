@@ -172,11 +172,20 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 
 	ColliderTimer += StepDelta;
 	const FVector Center = Solver.GetBodyCenter();
+	FVector GatherWatch = Center;
+	if (Solver.HasFragments())
+	{
+		FVector FragCenter;
+		if (Solver.GetFragmentCenter(FragCenter))
+		{
+			GatherWatch = (Center + FragCenter) * 0.5f;
+		}
+	}
 	const float RefreshInterval = Solver.HasFragments()
 		? FMath::Min(ColliderRefreshInterval, 0.08f)
 		: ColliderRefreshInterval;
 	if (ColliderTimer >= RefreshInterval ||
-		FVector::DistSquared(Center, LastColliderGatherCenter) > FMath::Square(ColliderRefreshDistance))
+		FVector::DistSquared(GatherWatch, LastColliderGatherCenter) > FMath::Square(ColliderRefreshDistance))
 	{
 		ColliderTimer = 0.f;
 		RefreshColliders();
@@ -207,13 +216,14 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		Solver.SetGravityScale(1.f);
 	}
 
-	// Recall pulls fragments straight through geometry so none of them can get stranded.
+	// Recall pulls fragments; soft-merge (after Step) finishes the duang before destroy.
 	if (bRecalling)
 	{
 		RecallElapsed += StepDelta;
 		Solver.SetSkipWorldCollision(true);
 		const FVector Home = Solver.GetBodyCenter();
-		if (Solver.RecallFragments(StepDelta, Home, RecallPullSpeed) || RecallElapsed >= RecallTimeout)
+		Solver.RecallFragments(StepDelta, Home, RecallPullSpeed);
+		if (RecallElapsed >= RecallTimeout)
 		{
 			Solver.SnapFragmentsHome(Home);
 			SetRecalling(false);
@@ -222,20 +232,31 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 	else
 	{
 		Solver.SetSkipWorldCollision(false);
-		if (Solver.HasFragments())
-		{
-			const float MergeR = AbsorbMergeRadius > KINDA_SMALL_NUMBER
-				? AbsorbMergeRadius
-				: SolverParams.RestRadius * 1.6f;
-			Solver.AbsorbNearbyFragments(MergeR);
-		}
 	}
 
 	Solver.SetFloorZ(FloorZ);
 	Solver.SetFragmentFloorZ(FragmentFloorZ);
 	Solver.SetCeilingZ(CeilingZ);
 	Solver.SetSqueeze(SqueezeAmount, SqueezeFreeDirection);
+	Solver.SetLaunchFraction(LaunchFraction);
 	Solver.Step(StepDelta);
+
+	// Soft absorb AFTER step so contact/density can wobble before clones commit-destroy.
+	if (Solver.HasFragments())
+	{
+		const float ApproachR = AbsorbMergeRadius > KINDA_SMALL_NUMBER
+			? AbsorbMergeRadius
+			: SolverParams.RestRadius * 1.6f;
+		const float CommitR = AbsorbCommitRadius > KINDA_SMALL_NUMBER
+			? AbsorbCommitRadius
+			: SolverParams.RestRadius * 0.7f;
+		Solver.UpdateSoftAbsorb(StepDelta, ApproachR, CommitR, MergeHoldDuration);
+	}
+
+	if (bRecalling && !Solver.HasFragments())
+	{
+		SetRecalling(false);
+	}
 }
 
 void USlimeBodyComponent::UpdateFloor()
@@ -302,6 +323,21 @@ void USlimeBodyComponent::UpdateFloor()
 	{
 		FragmentFloorZ = FloorZ;
 	}
+
+	Solver.ClearShotFloorOverrides();
+	Solver.RefreshShotStates();
+	for (const FSlimeSolver::FShotState& Shot : Solver.GetShotStates())
+	{
+		const float ProxyR = FragmentProxyRadius > KINDA_SMALL_NUMBER
+			? FragmentProxyRadius
+			: SolverParams.RestRadius * 0.45f;
+		float ShotFloor = FragmentFloorZ;
+		if (!TraceFloorUnder(FVector(Shot.Center), ProxyR, ShotFloor))
+		{
+			ShotFloor = float(Shot.Center.Z - 800.0);
+		}
+		Solver.SetShotFloorZ(Shot.Id, ShotFloor);
+	}
 }
 
 void USlimeBodyComponent::RefreshColliders()
@@ -333,7 +369,7 @@ void USlimeBodyComponent::RefreshColliders()
 	}
 	const FVector Center = QueryBounds.IsValid ? QueryBounds.GetCenter() : GetFootLocation();
 	const FVector Extent = (QueryBounds.IsValid ? QueryBounds.GetExtent() : FVector(SolverParams.RestRadius)) * ColliderQueryScale;
-	LastColliderGatherCenter = Solver.GetBodyCenter();
+	LastColliderGatherCenter = Center;
 
 	FCollisionObjectQueryParams ObjectParams;
 	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
@@ -343,6 +379,21 @@ void USlimeBodyComponent::RefreshColliders()
 
 	TArray<FOverlapResult> Overlaps;
 	World->OverlapMultiByObjectType(Overlaps, Center, FQuat::Identity, ObjectParams, FCollisionShape::MakeBox(FVector3f(Extent)), Query);
+
+	// Extra local queries under each flying shot so distant clones keep floor/wall colliders.
+	const float ShotQueryExtent = FMath::Max(FragmentColliderRadius * 2.5f, SolverParams.RestRadius * 1.2f);
+	for (const FSlimeSolver::FShotState& Shot : Solver.GetShotStates())
+	{
+		TArray<FOverlapResult> ShotOverlaps;
+		World->OverlapMultiByObjectType(
+			ShotOverlaps,
+			FVector(Shot.Center),
+			FQuat::Identity,
+			ObjectParams,
+			FCollisionShape::MakeBox(FVector3f(ShotQueryExtent)),
+			Query);
+		Overlaps.Append(ShotOverlaps);
+	}
 
 	// The floor under our feet must be in the set. The reference implementation calls this
 	// out explicitly: miss it and the body sinks through slopes.
@@ -358,15 +409,18 @@ void USlimeBodyComponent::RefreshColliders()
 
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> Ordered;
 	Ordered.Reserve(Overlaps.Num() + 1);
+	TSet<UPrimitiveComponent*> Seen;
 	if (FloorComponent)
 	{
 		Ordered.Add(FloorComponent);
+		Seen.Add(FloorComponent);
 	}
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
 		UPrimitiveComponent* Component = Overlap.GetComponent();
-		if (Component && Component != FloorComponent && Component->IsCollisionEnabled())
+		if (Component && Component->IsCollisionEnabled() && !Seen.Contains(Component))
 		{
+			Seen.Add(Component);
 			Ordered.Add(Component);
 		}
 	}
@@ -711,7 +765,9 @@ void USlimeBodyComponent::RebuildSurface()
 		Surface.Configure(ActiveSurface, SolverParams.ParticleSpacing);
 	}
 
-	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter());
+	TArray<uint8> MergingIds;
+	Solver.GetMergingShotIds(MergingIds);
+	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter(), MergingIds);
 
 	if (Surface.WasTruncated() && !bWarnedTruncation)
 	{

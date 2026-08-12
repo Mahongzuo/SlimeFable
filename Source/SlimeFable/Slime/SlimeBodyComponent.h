@@ -73,7 +73,7 @@ public:
 	// ---- World collision -------------------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "2", ClampMax = "48"))
-	int32 MaxWorldColliders = 16;
+	int32 MaxWorldColliders = 28;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "0.05", ClampMax = "2.0"))
 	float ColliderRefreshInterval = 0.25f;
@@ -194,11 +194,19 @@ public:
 	float RecallTimeout = 5.f;
 
 	/**
-	 *  Distance from body COM at which flying chunks auto-merge back (metaball absorb).
+	 *  Distance from body COM at which flying chunks start soft-merge (metaball absorb).
 	 *  0 = RestRadius * 1.6.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.0", ClampMax = "120.0"))
 	float AbsorbMergeRadius = 0.f;
+
+	/** Inside this radius (or after hold), clones finally destroy. 0 = RestRadius * 0.7. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.0", ClampMax = "80.0"))
+	float AbsorbCommitRadius = 0.f;
+
+	/** Soft-merge duang window before clones are destroyed, in seconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.1", ClampMax = "2.0"))
+	float MergeHoldDuration = 0.7f;
 
 	// ---- Quality ---------------------------------------------------------------------
 

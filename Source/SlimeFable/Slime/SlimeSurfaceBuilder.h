@@ -22,8 +22,14 @@ public:
 	/** Sizes the fixed buffers and caches derived constants. Call whenever params change. */
 	void Configure(const FSlimeSurfaceParams& InParams, float InParticleSpacing);
 
-	/** Rebuilds the surface (body cluster, then fragment cluster if any). */
+	/** Rebuilds the surface (body cluster, then free-flying fragment clusters). */
 	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor);
+
+	/**
+	 *  Same as Build, but ShotIds in MergingShotIds are splatted into the body density field
+	 *  (metaball fusion) instead of getting their own cluster.
+	 */
+	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds);
 
 	/** World space positions, MaxVertices long. */
 	const TArray<FVector>& GetVertices() const { return Vertices; }
@@ -43,11 +49,14 @@ public:
 	float GetParticleSpacing() const { return ParticleSpacing; }
 
 private:
-	void BuildCluster(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds);
+	void BuildCluster(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds, uint8 ShotFilter = 0);
 	void PrepareGrid(const FBox& Bounds, bool bBodyCluster);
-	void SplatDensity(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset);
+	/** ShotFilter selects one flying shot; MergingShots (when non-null) are included in the body splat. */
+	void SplatDensity(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, uint8 ShotFilter, const TSet<uint8>* MergingShots);
 	void BlurDensity();
 	void Triangulate();
+
+	TSet<uint8> ActiveMergingShots;
 
 	FORCEINLINE int32 SampleIndex(int32 X, int32 Y, int32 Z) const
 	{

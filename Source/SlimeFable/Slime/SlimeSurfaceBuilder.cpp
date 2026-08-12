@@ -347,6 +347,12 @@ void FSlimeSurfaceBuilder::Configure(const FSlimeSurfaceParams& InParams, float 
 
 void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const FVector& DegenerateAnchor)
 {
+	TArray<uint8> NoMerging;
+	Build(Particles, DegenerateAnchor, NoMerging);
+}
+
+void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds)
+{
 	if (!IsConfigured())
 	{
 		return;
@@ -356,20 +362,46 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 	LiveVertexCount = 0;
 	bTruncated = false;
+	ActiveMergingShots.Reset();
+	for (const uint8 ShotId : MergingShotIds)
+	{
+		if (ShotId != 0)
+		{
+			ActiveMergingShots.Add(ShotId);
+		}
+	}
 
 	FBox BodyBounds(ForceInit);
-	FBox FragmentBounds(ForceInit);
+	TMap<uint8, FBox> ShotBounds;
 	for (const FSlimeParticle& Particle : Particles)
 	{
 		if (Particle.IsBallistic())
 		{
-			FragmentBounds += FVector(Particle.Position);
+			if (Particle.ShotId == 0)
+			{
+				continue;
+			}
+			if (ActiveMergingShots.Contains(Particle.ShotId))
+			{
+				// Merging clones join the body metaball field.
+				BodyBounds += FVector(Particle.Position);
+			}
+			else
+			{
+				ShotBounds.FindOrAdd(Particle.ShotId) += FVector(Particle.Position);
+			}
 		}
 		else
 		{
 			BodyBounds += FVector(Particle.Position);
 		}
 	}
+
+	// Reserve ~35% of the vertex budget for free-flying shots so a second Q chunk stays visible.
+	const int32 VertexBudget = Vertices.Num();
+	const int32 BodyVertexCap = ShotBounds.Num() > 0
+		? FMath::Max((VertexBudget * 65) / 100, 3)
+		: VertexBudget;
 
 	if (BodyBounds.IsValid)
 	{
@@ -393,16 +425,31 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 				SmoothedBodyBounds.Max = FMath::Lerp(SmoothedBodyBounds.Max, BodyBounds.Max, BoundsEma);
 			}
 		}
-		// EMA damps grid origin jitter, but the cover volume must include every live particle
-		// or splat drops at the lagging face and MC cuts a flat plane (especially on jump/move).
 		FBox CoverBounds = SmoothedBodyBounds;
 		CoverBounds += BodyBounds;
-		BuildCluster(Particles, false, CoverBounds);
+		BuildCluster(Particles, false, CoverBounds, 0);
+		if (LiveVertexCount > BodyVertexCap)
+		{
+			LiveVertexCount = BodyVertexCap - (BodyVertexCap % 3);
+			bTruncated = true;
+		}
 	}
 
-	if (FragmentBounds.IsValid)
+	TArray<uint8> ShotIds;
+	ShotBounds.GetKeys(ShotIds);
+	ShotIds.Sort();
+	for (const uint8 ShotId : ShotIds)
 	{
-		BuildCluster(Particles, true, FragmentBounds);
+		if (LiveVertexCount + 3 >= VertexBudget)
+		{
+			bTruncated = true;
+			break;
+		}
+		const FBox* Bounds = ShotBounds.Find(ShotId);
+		if (Bounds && Bounds->IsValid)
+		{
+			BuildCluster(Particles, true, *Bounds, ShotId);
+		}
 	}
 
 	if (bTruncated)
@@ -426,10 +473,10 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 	}
 }
 
-void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds)
+void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds, uint8 ShotFilter)
 {
 	PrepareGrid(Bounds, !bBallisticSubset);
-	SplatDensity(Particles, bBallisticSubset);
+	SplatDensity(Particles, bBallisticSubset, ShotFilter, bBallisticSubset ? nullptr : &ActiveMergingShots);
 	BlurDensity();
 	Triangulate();
 }
@@ -544,7 +591,7 @@ void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 	TouchedMax = FIntVector(-1);
 }
 
-void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset)
+void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset, uint8 ShotFilter, const TSet<uint8>* MergingShots)
 {
 	const float InvCell = 1.f / ActiveCellSize;
 	const float RadiusXY = SplatRadius;
@@ -556,9 +603,27 @@ void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles,
 
 	for (const FSlimeParticle& Particle : Particles)
 	{
-		if (Particle.IsBallistic() != bBallisticSubset)
+		if (bBallisticSubset)
 		{
-			continue;
+			if (!Particle.IsBallistic())
+			{
+				continue;
+			}
+			if (ShotFilter != 0 && Particle.ShotId != ShotFilter)
+			{
+				continue;
+			}
+		}
+		else
+		{
+			// Body cluster: attached particles + any soft-merging clones.
+			if (Particle.IsBallistic())
+			{
+				if (!MergingShots || !MergingShots->Contains(Particle.ShotId))
+				{
+					continue;
+				}
+			}
 		}
 
 		const FVector Local = FVector(Particle.Position) - GridOrigin;

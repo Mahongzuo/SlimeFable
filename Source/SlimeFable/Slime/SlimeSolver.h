@@ -19,6 +19,17 @@
 class SLIMEFABLE_API FSlimeSolver
 {
 public:
+	struct FShotState
+	{
+		uint8 Id = 0;
+		FVector3f Center = FVector3f::ZeroVector;
+		FVector3f Velocity = FVector3f::ZeroVector;
+		float FloorZ = -1.e9f;
+		float MergeElapsed = -1.f;
+		bool bImpactApplied = false;
+		int32 Count = 0;
+	};
+
 	/** Builds the particle set as a dome resting on RestCenter's Z. */
 	void Initialize(const FSlimeSolverParams& InParams, const FVector& RestCenter);
 
@@ -40,8 +51,13 @@ public:
 	/** Hard floor plane for the attached body. Particles never go below this. */
 	void SetFloorZ(float InFloorZ) { FloorZ = float(InFloorZ); }
 
-	/** Floor under the launched chunk COM. Ballistic particles use this instead of FloorZ. */
+	/** Fallback floor when a shot has no per-shot trace yet. */
 	void SetFragmentFloorZ(float InFloorZ) { FragmentFloorZ = float(InFloorZ); }
+
+	/** Per-shot floor plane for ballistic clones. */
+	void SetShotFloorZ(uint8 ShotId, float InFloorZ);
+
+	void ClearShotFloorOverrides();
 
 	/** Hard ceiling plane, or a large value when the sky is clear. */
 	void SetCeilingZ(float InCeilingZ) { CeilingZ = float(InCeilingZ); }
@@ -63,6 +79,9 @@ public:
 
 	/** Extra gravity multiplier, used while spreading. */
 	void SetGravityScale(float InScale) { GravityScale = InScale; }
+
+	/** Mini-slime membrane radius from launch particle fraction (cbrt volume scale). */
+	void SetLaunchFraction(float Fraction);
 
 	/**
 	 *  Impact response: kills upward spray and arms a short settle window with boosted
@@ -92,6 +111,21 @@ public:
 	/** Bounds over ballistic fragments only. */
 	FBox GetFragmentBounds() const;
 
+	/** Snapshot of active clone shots (COM / counts). */
+	const TArray<FShotState>& GetShotStates() const { return ShotStates; }
+
+	/** Refresh shot COM cache (call before reading GetShotStates outside Step). */
+	void RefreshShotStates() { RebuildShotStates(); }
+
+	/** True while a clone shot is in the soft-merge absorb window. */
+	bool IsShotMerging(uint8 ShotId) const;
+
+	/** Fills OutIds with shot ids currently soft-merging. */
+	void GetMergingShotIds(TArray<uint8>& OutIds) const;
+
+	/** Fills OutCenters with each active shot COM. */
+	void GetShotCenters(TArray<FVector>& OutCenters) const;
+
 	int32 GetNumBallistic() const { return NumBallistic; }
 
 	bool HasFragments() const { return NumBallistic > 0; }
@@ -109,17 +143,17 @@ public:
 	 */
 	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots);
 
-	/** Steers fragments home. Returns true once every one of them has rejoined / been removed. */
+	/** Steers fragments home. Returns true once every clone has entered soft-merge or been removed. */
 	bool RecallFragments(float Dt, const FVector& Target, float PullSpeed);
 
-	/** Removes every flying clone (metaball absorb finish / recall snap). */
+	/** Hard-clears every flying clone (recall timeout). */
 	void SnapFragmentsHome(const FVector& Target);
 
 	/**
-	 *  Destroys clone fragments whose COM is within MergeRadius of the body COM.
-	 *  Returns how many particles were absorbed. Skipped while world collision is gated for recall.
+	 *  Soft-merge: approach → impact duang → hold → destroy.
+	 *  Call AFTER Step so contact wobble can land. Returns particles destroyed this tick.
 	 */
-	int32 AbsorbNearbyFragments(float MergeRadius);
+	int32 UpdateSoftAbsorb(float Dt, float ApproachRadius, float CommitRadius, float HoldDuration);
 
 	/** Concentration multiplier applied while spread (body feeds this each step). */
 	void SetSpreadConcentrationScale(float InScale) { SpreadConcentrationScale = FMath::Max(InScale, 0.1f); }
@@ -129,7 +163,12 @@ private:
 	void BuildDome(const FVector& RestCenter);
 	void EnsureScratchCapacity(int32 Count);
 	void RemoveAllClones();
+	void RemoveShotParticles(uint8 ShotId);
 	void RecountActiveShots();
+	void RebuildShotStates();
+	void ApplyMergeImpact(const FShotState& Shot);
+	void ClampToShotShell(FVector3f& InOutPoint, const FVector3f& ShotCenter) const;
+	void LiftShotCentersAboveFloor();
 	void BuildGrid();
 	void SolveDensity();
 	void ResolveCollisions();
@@ -191,10 +230,17 @@ private:
 	float SpreadHalfHeight = 2.5f;
 	float SpreadConcentrationScale = 1.15f;
 	float GravityScale = 1.f;
+	float MiniMembraneRadius = 18.f;
+	float LaunchFractionCached = 0.3f;
 	bool bSpread = false;
 	bool bSkipWorldCollision = false;
 
 	TArray<SlimeSim::FSlimeCollider> Colliders;
+	TArray<FShotState> ShotStates;
+	TMap<uint8, float> ShotFloorOverrides;
+	/** Persist merge timers across RebuildShotStates. */
+	TMap<uint8, float> ShotMergeElapsed;
+	TSet<uint8> ShotImpactApplied;
 
 	int32 NumBallistic = 0;
 	int32 ActiveShotCount = 0;
