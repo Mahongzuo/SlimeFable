@@ -8,6 +8,7 @@
 #include "SlimeElementComponent.generated.h"
 
 class UMaterialInstanceDynamic;
+class UNiagaraSystem;
 class UProceduralMeshComponent;
 class USlimeBodyComponent;
 
@@ -47,6 +48,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Element", meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float TransitionDuration = 0.25f;
 
+	/**
+	 *  Dash / blink Niagara per element. Empty slots fall back to built-in soft defaults
+	 *  under /Game/BlinkAndDashVFX/VFX_Niagara/.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|VFX")
+	TMap<ESlimeElement, TSoftObjectPtr<UNiagaraSystem>> DashNiagaraByElement;
+
 	UPROPERTY(BlueprintAssignable, Category = "Slime|Element")
 	FOnSlimeElementChanged OnElementChanged;
 
@@ -81,7 +89,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime|Element")
 	FSlimeElementProfile GetCurrentProfile() const { return GetProfile(CurrentElement); }
 
+	/** Niagara system for the current element's dash / blink FX (loads soft ptr on demand). */
+	UFUNCTION(BlueprintPure, Category = "Slime|VFX")
+	UNiagaraSystem* GetDashNiagara() const;
+
+	UFUNCTION(BlueprintPure, Category = "Slime|VFX")
+	UNiagaraSystem* GetDashNiagaraForElement(ESlimeElement Element) const;
+
 private:
+	void EnsureDashNiagaraDefaults();
+
 	/** The material instance only exists once the body has created its mesh section. */
 	bool EnsureDynamicMaterial();
 	void ApplyProfileToMaterial(const FSlimeElementProfile& Profile) const;

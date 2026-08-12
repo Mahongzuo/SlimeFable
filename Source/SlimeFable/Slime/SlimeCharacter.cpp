@@ -34,11 +34,12 @@ ASlimeCharacter::ASlimeCharacter()
 	// The camera sits low and close so the deformation stays readable.
 	if (USpringArmComponent* Boom = GetCameraBoom())
 	{
-		Boom->TargetArmLength = 260.f;
+		Boom->TargetArmLength = CameraArmLengthDefault;
 		Boom->SocketOffset = FVector(0.f, 0.f, 40.f);
 		Boom->bEnableCameraLag = true;
 		Boom->CameraLagSpeed = 12.f;
 	}
+	DesiredCameraArmLength = CameraArmLengthDefault;
 
 	// The skeletal mesh stays for future accessories but the body itself is the procedural
 	// surface, so nothing on it should render, tick, or cast shadows into the jelly.
@@ -117,6 +118,12 @@ void ASlimeCharacter::BeginPlay()
 		Movement->JumpZVelocity = JumpZVelocity;
 	}
 
+	DesiredCameraArmLength = FMath::Clamp(CameraArmLengthDefault, CameraArmLengthMin, CameraArmLengthMax);
+	if (USpringArmComponent* Boom = GetCameraBoom())
+	{
+		Boom->TargetArmLength = DesiredCameraArmLength;
+	}
+
 	// Runs before the body component's BeginPlay creates its section, which needs the mesh
 	// transform to already be identity.
 	Super::BeginPlay();
@@ -127,6 +134,48 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 {
 	LastVelocity = GetVelocity();
 	Super::Tick(DeltaSeconds);
+	UpdateCameraZoom(DeltaSeconds);
+}
+
+void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
+{
+	USpringArmComponent* Boom = GetCameraBoom();
+	if (!Boom)
+	{
+		return;
+	}
+
+	// Element wheel owns the scroll wheel while open.
+	const bool bWheelOpen = SlimeAbilities && SlimeAbilities->IsWheelOpen();
+	if (!bWheelOpen)
+	{
+		if (const APlayerController* PC = Cast<APlayerController>(GetController()))
+		{
+			if (PC->IsLocalController())
+			{
+				if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp))
+				{
+					DesiredCameraArmLength = FMath::Clamp(
+						DesiredCameraArmLength - CameraZoomStep,
+						CameraArmLengthMin,
+						CameraArmLengthMax);
+				}
+				else if (PC->WasInputKeyJustPressed(EKeys::MouseScrollDown))
+				{
+					DesiredCameraArmLength = FMath::Clamp(
+						DesiredCameraArmLength + CameraZoomStep,
+						CameraArmLengthMin,
+						CameraArmLengthMax);
+				}
+			}
+		}
+	}
+
+	Boom->TargetArmLength = FMath::FInterpTo(
+		Boom->TargetArmLength,
+		DesiredCameraArmLength,
+		DeltaSeconds,
+		CameraZoomInterpSpeed);
 }
 
 void ASlimeCharacter::NotifyControllerChanged()

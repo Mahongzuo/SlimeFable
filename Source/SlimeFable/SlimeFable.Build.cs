@@ -21,7 +21,8 @@ public class SlimeFable : ModuleRules
 			"UMG",
 			"Slate",
 			"SlateCore",
-			"ProceduralMeshComponent"
+			"ProceduralMeshComponent",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

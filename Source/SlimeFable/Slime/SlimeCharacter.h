@@ -40,6 +40,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Jump", meta = (ClampMin = "100.0"))
 	float AirJumpZVelocity = 520.f;
 
+	// ---- Camera zoom (mouse wheel) ---------------------------------------------------
+
+	/** Default spring-arm length at spawn, in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "50.0"))
+	float CameraArmLengthDefault = 260.f;
+
+	/** Closest zoom (shortest arm), in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "50.0"))
+	float CameraArmLengthMin = 120.f;
+
+	/** Farthest zoom (longest arm), in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "100.0"))
+	float CameraArmLengthMax = 520.f;
+
+	/** Arm-length change per mouse-wheel notch, in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "5.0"))
+	float CameraZoomStep = 40.f;
+
+	/** How quickly the boom eases toward the desired length (higher = snappier). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "1.0", ClampMax = "30.0"))
+	float CameraZoomInterpSpeed = 8.f;
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeBodyComponent* GetSlimeBody() const { return SlimeBody; }
 
@@ -57,6 +79,8 @@ public:
 
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+	void UpdateCameraZoom(float DeltaSeconds);
 
 	/** Surface mesh. Vertices are world space, so this component sits at the world origin. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
@@ -80,4 +104,7 @@ protected:
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;
+
+	/** Desired spring-arm length the boom smoothly follows. */
+	float DesiredCameraArmLength = 260.f;
 };

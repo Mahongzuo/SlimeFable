@@ -3,6 +3,7 @@
 #include "SlimeElementComponent.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
+#include "NiagaraSystem.h"
 #include "ProceduralMeshComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeFable.h"
@@ -23,15 +24,60 @@ namespace SlimeElementParams
 	static const FName SqueezeAmount(TEXT("SqueezeAmount"));
 }
 
+namespace SlimeDashNiagaraDefaults
+{
+	static FSoftObjectPath PathFor(ESlimeElement Element)
+	{
+		switch (Element)
+		{
+		case ESlimeElement::Fire:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Dash_Fire.NS_Dash_Fire"));
+		case ESlimeElement::Dark:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Dash_Vampire.NS_Dash_Vampire"));
+		case ESlimeElement::Lightning:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Blink_Psionic.NS_Blink_Psionic"));
+		case ESlimeElement::Physical:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Dash_Paladin.NS_Dash_Paladin"));
+		case ESlimeElement::Water:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Dash_Mana.NS_Dash_Mana"));
+		case ESlimeElement::Wind:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Dash_Wind.NS_Dash_Wind"));
+		default:
+			return FSoftObjectPath(TEXT("/Game/BlinkAndDashVFX/VFX_Niagara/NS_Dash_Mana.NS_Dash_Mana"));
+		}
+	}
+}
+
 USlimeElementComponent::USlimeElementComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
+	EnsureDashNiagaraDefaults();
+}
+
+void USlimeElementComponent::EnsureDashNiagaraDefaults()
+{
+	auto AddIfMissing = [this](ESlimeElement Element)
+	{
+		if (!DashNiagaraByElement.Contains(Element) || DashNiagaraByElement.FindRef(Element).IsNull())
+		{
+			DashNiagaraByElement.Add(Element, TSoftObjectPtr<UNiagaraSystem>(SlimeDashNiagaraDefaults::PathFor(Element)));
+		}
+	};
+
+	AddIfMissing(ESlimeElement::Water);
+	AddIfMissing(ESlimeElement::Wind);
+	AddIfMissing(ESlimeElement::Fire);
+	AddIfMissing(ESlimeElement::Lightning);
+	AddIfMissing(ESlimeElement::Dark);
+	AddIfMissing(ESlimeElement::Physical);
 }
 
 void USlimeElementComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	EnsureDashNiagaraDefaults();
 
 	ResolvedLibrary = ElementLibrary;
 	if (!ResolvedLibrary && !ElementLibraryPath.IsNull())
@@ -56,6 +102,21 @@ void USlimeElementComponent::BeginPlay()
 	{
 		ApplyProfileToMaterial(TransitionTo);
 	}
+}
+
+UNiagaraSystem* USlimeElementComponent::GetDashNiagara() const
+{
+	return GetDashNiagaraForElement(CurrentElement);
+}
+
+UNiagaraSystem* USlimeElementComponent::GetDashNiagaraForElement(ESlimeElement Element) const
+{
+	TSoftObjectPtr<UNiagaraSystem> Soft = DashNiagaraByElement.FindRef(Element);
+	if (Soft.IsNull())
+	{
+		Soft = TSoftObjectPtr<UNiagaraSystem>(SlimeDashNiagaraDefaults::PathFor(Element));
+	}
+	return Soft.LoadSynchronous();
 }
 
 void USlimeElementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
