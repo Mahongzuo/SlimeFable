@@ -23,6 +23,10 @@ public:
 	virtual void NativeConstruct() override;
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
+	/** Show the level-select calendar overlay (also used when returning from a day level). */
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void OpenLevelSelect();
+
 protected:
 	void BuildLayoutIfNeeded();
 	void ApplyMaterialLabLook();

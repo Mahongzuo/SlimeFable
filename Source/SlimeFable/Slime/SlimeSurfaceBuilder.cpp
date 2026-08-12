@@ -390,7 +390,11 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 				SmoothedBodyBounds.Max = FMath::Lerp(SmoothedBodyBounds.Max, BodyBounds.Max, BoundsEma);
 			}
 		}
-		BuildCluster(Particles, false, SmoothedBodyBounds);
+		// EMA damps grid origin jitter, but the cover volume must include every live particle
+		// or splat drops at the lagging face and MC cuts a flat plane (especially on jump/move).
+		FBox CoverBounds = SmoothedBodyBounds;
+		CoverBounds += BodyBounds;
+		BuildCluster(Particles, false, CoverBounds);
 	}
 
 	if (FragmentBounds.IsValid)
@@ -467,13 +471,18 @@ void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 
 	ActiveCellSize = ActiveCell;
 
-	// Only clip when the cluster is truly huge; do not hard-crop a stretched body.
+	// Prefer growing the cell over hard-cropping Region (cropping cuts horizontal planes).
 	const double MaxSpan = double(Usable) * double(ActiveCell) * double(GMaxCellSizeScale);
 	if (RegionSizeRaw.GetMax() > MaxSpan)
 	{
-		const FVector Center = Region.GetCenter();
-		const FVector Half(MaxSpan * 0.5);
-		Region = FBox(Center - Half, Center + Half);
+		const float FitCell = float(RegionSizeRaw.GetMax()) / float(Usable);
+		ActiveCell = FMath::Max(ActiveCell, FitCell);
+		if (bBodyCluster)
+		{
+			HeldRequiredCell = ActiveCell;
+			RequiredGrowStreak = 0;
+		}
+		ActiveCellSize = ActiveCell;
 	}
 
 	const FVector PaddedMin = Region.Min - FVector(double(ActiveCell) * GGridPadding);

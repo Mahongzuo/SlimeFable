@@ -274,7 +274,7 @@ void UMainMenuWidget::OnPlayTodayClicked()
 	}
 }
 
-void UMainMenuWidget::OnSelectLevelClicked()
+void UMainMenuWidget::OpenLevelSelect()
 {
 	ResolveLevelSelectClass();
 	if (!LevelSelectWidget)
@@ -301,6 +301,11 @@ void UMainMenuWidget::OnSelectLevelClicked()
 		}
 		LevelSelectWidget->RefreshForCurrentMonth();
 	}
+}
+
+void UMainMenuWidget::OnSelectLevelClicked()
+{
+	OpenLevelSelect();
 }
 
 void UMainMenuWidget::OnQuitClicked()

@@ -149,7 +149,29 @@ bool UDayLevelSubsystem::TravelToToday(const UObject* WorldContextObject)
 	return TravelToDayId(WorldContextObject, GetTodayDayId().Id);
 }
 
+const TCHAR* UDayLevelSubsystem::OpenLevelSelectOption = TEXT("OpenLevelSelect");
+
 void UDayLevelSubsystem::TravelToMainMenu(const UObject* WorldContextObject)
 {
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
+	{
+		UGameplayStatics::SetGamePaused(WorldContextObject, false);
+		FInputModeUIOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = true;
+	}
 	UGameplayStatics::OpenLevel(WorldContextObject, FName(DayLevelSubsystemPrivate::MainMenuMapName));
+}
+
+void UDayLevelSubsystem::TravelToLevelSelect(const UObject* WorldContextObject)
+{
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
+	{
+		UGameplayStatics::SetGamePaused(WorldContextObject, false);
+		FInputModeUIOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = true;
+	}
+	const FString Options = FString::Printf(TEXT("%s=1"), OpenLevelSelectOption);
+	UGameplayStatics::OpenLevel(WorldContextObject, FName(DayLevelSubsystemPrivate::MainMenuMapName), true, Options);
 }

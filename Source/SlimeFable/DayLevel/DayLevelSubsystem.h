@@ -63,6 +63,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
 	void TravelToMainMenu(const UObject* WorldContextObject);
 
+	/** Hard-travel to Main and open the level-select calendar overlay. */
+	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	void TravelToLevelSelect(const UObject* WorldContextObject);
+
+	static const TCHAR* OpenLevelSelectOption;
+
 protected:
 	void LoadDefaultRegistry();
 

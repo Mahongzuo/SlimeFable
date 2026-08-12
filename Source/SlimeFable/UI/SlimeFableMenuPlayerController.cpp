@@ -2,7 +2,9 @@
 
 #include "UI/SlimeFableMenuPlayerController.h"
 #include "UI/MainMenuWidget.h"
+#include "DayLevel/DayLevelSubsystem.h"
 #include "Blueprint/UserWidget.h"
+#include "Engine/World.h"
 #include "UObject/SoftObjectPath.h"
 
 ASlimeFableMenuPlayerController::ASlimeFableMenuPlayerController()
@@ -39,5 +41,10 @@ void ASlimeFableMenuPlayerController::BeginPlay()
 		MainMenuWidget->AddToViewport(0);
 		InputMode.SetWidgetToFocus(MainMenuWidget->TakeWidget());
 		SetInputMode(InputMode);
+
+		if (GetWorld() && GetWorld()->URL.HasOption(UDayLevelSubsystem::OpenLevelSelectOption))
+		{
+			MainMenuWidget->OpenLevelSelect();
+		}
 	}
 }

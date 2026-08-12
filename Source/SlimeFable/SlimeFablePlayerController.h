@@ -8,16 +8,17 @@
 
 class UInputMappingContext;
 class UUserWidget;
+class UPauseMenuWidget;
 
 /**
  *  Basic PlayerController class for a third person game
- *  Manages input mappings
+ *  Manages input mappings and in-game pause menu (ESC).
  */
 UCLASS(abstract)
 class ASlimeFablePlayerController : public APlayerController
 {
 	GENERATED_BODY()
-	
+
 protected:
 
 	/** Input Mapping Contexts */
@@ -40,6 +41,15 @@ protected:
 	UPROPERTY(EditAnywhere, Config, Category = "Input|Touch Controls")
 	bool bForceTouchControls = false;
 
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSubclassOf<UPauseMenuWidget> PauseMenuClass;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSoftClassPtr<UPauseMenuWidget> PauseMenuClassPath;
+
+	UPROPERTY()
+	TObjectPtr<UPauseMenuWidget> PauseMenuWidget;
+
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
 
@@ -49,4 +59,16 @@ protected:
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
 
+	void TogglePauseMenu();
+	void OpenPauseMenu();
+	void ClosePauseMenu();
+
+	UFUNCTION()
+	void HandlePauseContinue();
+
+	UFUNCTION()
+	void HandlePauseLevelSelect();
+
+	UFUNCTION()
+	void HandlePauseMainMenu();
 };
