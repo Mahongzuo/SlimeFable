@@ -189,6 +189,13 @@ struct SLIMEFABLE_API FSlimeSurfaceParams
 	/** Separable 1-2-1 smoothing passes over the density field. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface", meta = (ClampMin = "0", ClampMax = "3"))
 	int32 BlurPasses = 2;
+
+	/**
+	 *  Vertical splat radius scale (1 = isotropic). Values below 1 flatten the metaball
+	 *  vertically — used while pancaked so the puddle stays thin without punching a hole.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface", meta = (ClampMin = "0.25", ClampMax = "1.5"))
+	float SplatZScale = 1.f;
 };
 
 namespace SlimeSim
@@ -200,7 +207,9 @@ namespace SlimeSim
 		/** Bound to the core: excluded from launches so the body can never be emptied out. */
 		PF_Core = 1 << 0,
 		/** Detached chunk in flight. Ignores the membrane and the anchor spring. */
-		PF_Ballistic = 1 << 1
+		PF_Ballistic = 1 << 1,
+		/** Cloned launch particle — destroyed on absorb/expire, never rejoins the body pool. */
+		PF_Clone = 1 << 2
 	};
 
 	struct FSlimeParticle
@@ -210,9 +219,12 @@ namespace SlimeSim
 		FVector3f Velocity = FVector3f::ZeroVector;
 		float BallisticLife = 0.f;
 		uint8 Flags = PF_None;
+		/** Non-zero while this particle belongs to a cloned launch shot. */
+		uint8 ShotId = 0;
 
 		FORCEINLINE bool IsCore() const { return (Flags & PF_Core) != 0; }
 		FORCEINLINE bool IsBallistic() const { return (Flags & PF_Ballistic) != 0; }
+		FORCEINLINE bool IsClone() const { return (Flags & PF_Clone) != 0; }
 	};
 
 	enum class EColliderShape : uint8

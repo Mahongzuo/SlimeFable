@@ -79,6 +79,7 @@ private:
 	float CellSize = 4.6f;
 	float ActiveCellSize = 4.6f;
 	float SplatRadius = 8.5f;
+	float SplatZScale = 1.f;
 	float InvInteriorValue = 1.f;
 
 	/** Truncation coarsening multiplier (body cluster). */
@@ -92,6 +93,10 @@ private:
 	/** EMA of body bounds; snaps on fast movement. */
 	FBox SmoothedBodyBounds = FBox(ForceInit);
 	bool bHaveSmoothedBodyBounds = false;
+
+	/** EMA of body grid origin to damp cell-boundary flicker. */
+	FVector SmoothedGridOrigin = FVector::ZeroVector;
+	bool bHaveSmoothedGridOrigin = false;
 
 	int32 LiveVertexCount = 0;
 	bool bTruncated = false;

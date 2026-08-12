@@ -146,13 +146,22 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	const bool bVisible = !SurfaceMesh || SurfaceMesh->WasRecentlyRendered(0.3f);
 	SurfaceAccumulator += DeltaTime;
 	const float SurfaceDelta = 1.f / FMath::Max(SurfaceRate, 1.f);
+	bool bRebuilt = false;
 	if (SurfaceAccumulator >= SurfaceDelta)
 	{
 		SurfaceAccumulator = FMath::Fmod(SurfaceAccumulator, SurfaceDelta);
 		if (bVisible)
 		{
 			RebuildSurface();
+			bRebuilt = true;
 		}
+	}
+
+	// Between rebuilds, slide the world-space mesh with the body COM so 60 Hz surfaces do not
+	// freeze against a 120 Hz display. Skip while fragments fly — one mesh holds both clusters.
+	if (!bRebuilt)
+	{
+		UpdateMeshFollow();
 	}
 }
 
@@ -176,10 +185,11 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 	UpdateAnchor();
 
 	// Pancake state, including the soft reform after the key is released.
-	const float HalfHeight = FMath::Max(SpreadHalfHeight, 1.f);
+	const float HalfHeight = FMath::Max(SpreadHalfHeight, 0.5f);
 	if (bSpread)
 	{
 		Solver.SetSpread(true, SolverParams.RestRadius * SpreadRadiusScale, SpreadPush, HalfHeight);
+		Solver.SetSpreadConcentrationScale(SpreadConcentrationScale);
 		Solver.SetGravityScale(SpreadGravityScale);
 	}
 	else if (SpreadRecoverRemaining > 0.f)
@@ -187,11 +197,13 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		SpreadRecoverRemaining = FMath::Max(SpreadRecoverRemaining - StepDelta, 0.f);
 		const float Alpha = SpreadRecoverDuration > 0.f ? SpreadRecoverRemaining / SpreadRecoverDuration : 0.f;
 		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
+		Solver.SetSpreadConcentrationScale(1.f);
 		Solver.SetGravityScale(FMath::Lerp(1.f, SpreadGravityScale, Alpha));
 	}
 	else
 	{
 		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
+		Solver.SetSpreadConcentrationScale(1.f);
 		Solver.SetGravityScale(1.f);
 	}
 
@@ -665,17 +677,30 @@ void USlimeBodyComponent::RebuildSurface()
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(SlimeBody_RebuildSurface);
 
+	RebuildBodyCOM = Solver.GetBodyCenter();
+	bHaveRebuildBodyCOM = true;
+	SurfaceMesh->SetWorldLocation(FVector::ZeroVector);
+	if (ShadowMesh)
+	{
+		ShadowMesh->SetWorldLocation(FVector::ZeroVector);
+	}
+
 	FSlimeSurfaceParams ActiveSurface = SurfaceParams;
 	if (bSpread || Solver.GetLandingSettleRemaining() > 0.f)
 	{
-		// Keep the iso-surface one connected sheet while flattened or settling from a fall.
+		// Thin connected sheet: wider XY splat, flatter Z, lower iso, lighter blur.
 		ActiveSurface.SplatRadiusMultiplier = FMath::Max(ActiveSurface.SplatRadiusMultiplier, SpreadSplatMultiplier);
-		ActiveSurface.IsoThreshold = FMath::Min(ActiveSurface.IsoThreshold, 0.22f);
+		ActiveSurface.SplatZScale = FMath::Min(ActiveSurface.SplatZScale, SpreadSplatZScale);
+		ActiveSurface.IsoThreshold = FMath::Min(ActiveSurface.IsoThreshold, 0.17f);
+		ActiveSurface.BlurPasses = FMath::Min(ActiveSurface.BlurPasses, 1);
+		ActiveSurface.MaxGridDim = FMath::Max(ActiveSurface.MaxGridDim, 44);
+		ActiveSurface.CellSizeMultiplier = FMath::Min(ActiveSurface.CellSizeMultiplier, 0.75f);
 	}
 
 	const bool bNeedConfigure = !Surface.IsConfigured()
 		|| !FMath::IsNearlyEqual(Surface.GetParticleSpacing(), SolverParams.ParticleSpacing)
 		|| !FMath::IsNearlyEqual(Surface.GetParams().SplatRadiusMultiplier, ActiveSurface.SplatRadiusMultiplier)
+		|| !FMath::IsNearlyEqual(Surface.GetParams().SplatZScale, ActiveSurface.SplatZScale)
 		|| !FMath::IsNearlyEqual(Surface.GetParams().IsoThreshold, ActiveSurface.IsoThreshold)
 		|| Surface.GetParams().MaxGridDim != ActiveSurface.MaxGridDim
 		|| Surface.GetParams().MaxVertices != ActiveSurface.MaxVertices
@@ -695,6 +720,21 @@ void USlimeBodyComponent::RebuildSurface()
 	}
 
 	PushMeshSection();
+}
+
+void USlimeBodyComponent::UpdateMeshFollow()
+{
+	if (!bHaveRebuildBodyCOM || !SurfaceMesh || Solver.HasFragments())
+	{
+		return;
+	}
+
+	const FVector Offset = Solver.GetBodyCenter() - RebuildBodyCOM;
+	SurfaceMesh->SetWorldLocation(Offset);
+	if (ShadowMesh)
+	{
+		ShadowMesh->SetWorldLocation(Offset);
+	}
 }
 
 void USlimeBodyComponent::PushMeshSection()
@@ -838,8 +878,8 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 	switch (Quality)
 	{
 	case ESlimeSimQuality::High:
-		StepRate = 40.f;
-		SurfaceRate = 40.f;
+		StepRate = 60.f;
+		SurfaceRate = 60.f;
 		SolverParams.DensityIterations = 2;
 		SurfaceParams.CellSizeMultiplier = 0.85f;
 		SurfaceParams.MaxGridDim = 36;
@@ -847,8 +887,8 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 		break;
 
 	case ESlimeSimQuality::Medium:
-		StepRate = 30.f;
-		SurfaceRate = 30.f;
+		StepRate = 40.f;
+		SurfaceRate = 40.f;
 		SolverParams.DensityIterations = 1;
 		SurfaceParams.CellSizeMultiplier = 1.0f;
 		SurfaceParams.MaxGridDim = 28;
@@ -856,8 +896,8 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 		break;
 
 	case ESlimeSimQuality::Low:
-		StepRate = 20.f;
-		SurfaceRate = 20.f;
+		StepRate = 24.f;
+		SurfaceRate = 24.f;
 		SolverParams.DensityIterations = 1;
 		SurfaceParams.CellSizeMultiplier = 1.2f;
 		SurfaceParams.MaxGridDim = 14;
@@ -919,7 +959,7 @@ void USlimeBodyComponent::ResetBody()
 
 int32 USlimeBodyComponent::LaunchChunk(const FVector& LaunchVelocity)
 {
-	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, LaunchFraction, MinAttachedParticles, FragmentLifetime);
+	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, LaunchFraction, FragmentLifetime, MaxActiveShots);
 	if (Launched > 0)
 	{
 		SetRecalling(false);

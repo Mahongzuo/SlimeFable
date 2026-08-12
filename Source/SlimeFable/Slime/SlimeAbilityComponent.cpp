@@ -352,8 +352,7 @@ void USlimeAbilityComponent::HandleLaunchCompleted()
 
 	if (Launched == 0)
 	{
-		// Hit the minimum particle floor: the body refuses to hollow itself out.
-		UE_LOG(LogSlimeFable, Verbose, TEXT("Slime launch rejected: not enough spare particles."));
+		UE_LOG(LogSlimeFable, Verbose, TEXT("Slime launch rejected: active shot limit or clone pool full."));
 	}
 }
 

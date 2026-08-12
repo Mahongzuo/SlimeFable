@@ -305,6 +305,7 @@ void FSlimeSurfaceBuilder::Configure(const FSlimeSurfaceParams& InParams, float 
 
 	CellSize = FMath::Max(ParticleSpacing * Params.CellSizeMultiplier, 0.5f);
 	SplatRadius = FMath::Max(ParticleSpacing * Params.SplatRadiusMultiplier, CellSize);
+	SplatZScale = FMath::Clamp(Params.SplatZScale, 0.25f, 1.5f);
 	// Preserve CellScale across per-frame Configure (spread splat tweaks). Reset only on first
 	// configure or when particle spacing changes.
 	if (bResetScale)
@@ -314,12 +315,14 @@ void FSlimeSurfaceBuilder::Configure(const FSlimeSurfaceParams& InParams, float 
 		HeldRequiredCell = CellSize;
 		RequiredGrowStreak = 0;
 		bHaveSmoothedBodyBounds = false;
+		bHaveSmoothedGridOrigin = false;
 	}
 
 	// Field value a fully enclosed sample would reach at the rest packing density, so the
 	// iso threshold means the same thing regardless of particle count or spacing.
+	const float EffectiveSplatR = SplatRadius * FMath::Pow(SplatZScale, 1.f / 3.f);
 	const float ParticlesPerVolume = 1.f / (ParticleSpacing * ParticleSpacing * ParticleSpacing);
-	const float KernelIntegral = (64.f * PI * SplatRadius * SplatRadius * SplatRadius) / 315.f;
+	const float KernelIntegral = (64.f * PI * EffectiveSplatR * EffectiveSplatR * EffectiveSplatR) / 315.f;
 	InvInteriorValue = 1.f / FMath::Max(ParticlesPerVolume * KernelIntegral, KINDA_SMALL_NUMBER);
 
 	// The soup never shares vertices, so the index buffer is a constant and is built once.
@@ -488,26 +491,47 @@ void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 	const FVector PaddedMin = Region.Min - FVector(double(ActiveCell) * GGridPadding);
 	const FVector PaddedMax = Region.Max + FVector(double(ActiveCell) * GGridPadding);
 
-	// Prefer SIM-style block quantization; fall back to per-cell snap on axes that would
-	// otherwise overflow MaxGridDim and clip the volume.
-	const float Block = ActiveCell * 4.f;
-	auto QuantizeOrigin = [ActiveCell, Block, MaxDim = Params.MaxGridDim](double MinCoord, double MaxCoord) -> double
+	// Continuous cell snap (no block quantization) — block snapping caused walking flicker.
+	auto QuantizeOrigin = [ActiveCell](double MinCoord) -> double
 	{
-		const double BlockOrigin = FMath::FloorToDouble(MinCoord / Block) * Block;
-		const int32 CellsIfBlock = FMath::CeilToInt((MaxCoord - BlockOrigin) / ActiveCell) + 1;
-		if (CellsIfBlock <= MaxDim)
-		{
-			return BlockOrigin;
-		}
 		return FMath::FloorToDouble(MinCoord / ActiveCell) * ActiveCell;
 	};
 
-	GridOrigin = FVector(
-		QuantizeOrigin(PaddedMin.X, PaddedMax.X),
-		QuantizeOrigin(PaddedMin.Y, PaddedMax.Y),
-		QuantizeOrigin(PaddedMin.Z, PaddedMax.Z));
+	FVector DesiredOrigin(
+		QuantizeOrigin(PaddedMin.X),
+		QuantizeOrigin(PaddedMin.Y),
+		QuantizeOrigin(PaddedMin.Z));
 
-	// Dims must span GridOrigin → padded max (not Region.Size alone), or Block snap clips the far side.
+	if (bBodyCluster)
+	{
+		constexpr float OriginEma = 0.35f;
+		constexpr float OriginSnap = 40.f;
+		if (!bHaveSmoothedGridOrigin)
+		{
+			SmoothedGridOrigin = DesiredOrigin;
+			bHaveSmoothedGridOrigin = true;
+		}
+		else if (FVector::DistSquared(SmoothedGridOrigin, DesiredOrigin) > FMath::Square(OriginSnap))
+		{
+			SmoothedGridOrigin = DesiredOrigin;
+		}
+		else
+		{
+			SmoothedGridOrigin = FMath::Lerp(SmoothedGridOrigin, DesiredOrigin, OriginEma);
+			// Re-snap after EMA so samples stay on the cell lattice.
+			SmoothedGridOrigin = FVector(
+				QuantizeOrigin(SmoothedGridOrigin.X),
+				QuantizeOrigin(SmoothedGridOrigin.Y),
+				QuantizeOrigin(SmoothedGridOrigin.Z));
+		}
+		GridOrigin = SmoothedGridOrigin;
+	}
+	else
+	{
+		GridOrigin = DesiredOrigin;
+	}
+
+	// Dims must span GridOrigin → padded max (not Region.Size alone), or snap clips the far side.
 	Dims = FIntVector(
 		FMath::Clamp(FMath::CeilToInt((PaddedMax.X - GridOrigin.X) / ActiveCell) + 1, 4, Params.MaxGridDim),
 		FMath::Clamp(FMath::CeilToInt((PaddedMax.Y - GridOrigin.Y) / ActiveCell) + 1, 4, Params.MaxGridDim),
@@ -523,8 +547,12 @@ void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset)
 {
 	const float InvCell = 1.f / ActiveCellSize;
-	const float RadiusSq = SplatRadius * SplatRadius;
-	const int32 Reach = FMath::CeilToInt(SplatRadius * InvCell);
+	const float RadiusXY = SplatRadius;
+	const float RadiusZ = SplatRadius * SplatZScale;
+	const float InvRadiusXYSq = 1.f / FMath::Max(RadiusXY * RadiusXY, KINDA_SMALL_NUMBER);
+	const float InvRadiusZSq = 1.f / FMath::Max(RadiusZ * RadiusZ, KINDA_SMALL_NUMBER);
+	const int32 ReachXY = FMath::CeilToInt(RadiusXY * InvCell);
+	const int32 ReachZ = FMath::CeilToInt(RadiusZ * InvCell);
 
 	for (const FSlimeParticle& Particle : Particles)
 	{
@@ -539,12 +567,12 @@ void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles,
 			FMath::FloorToInt(Local.Y * InvCell),
 			FMath::FloorToInt(Local.Z * InvCell));
 
-		const int32 MinX = FMath::Max(Base.X - Reach, 0);
-		const int32 MaxX = FMath::Min(Base.X + Reach + 1, Dims.X - 1);
-		const int32 MinY = FMath::Max(Base.Y - Reach, 0);
-		const int32 MaxY = FMath::Min(Base.Y + Reach + 1, Dims.Y - 1);
-		const int32 MinZ = FMath::Max(Base.Z - Reach, 0);
-		const int32 MaxZ = FMath::Min(Base.Z + Reach + 1, Dims.Z - 1);
+		const int32 MinX = FMath::Max(Base.X - ReachXY, 0);
+		const int32 MaxX = FMath::Min(Base.X + ReachXY + 1, Dims.X - 1);
+		const int32 MinY = FMath::Max(Base.Y - ReachXY, 0);
+		const int32 MaxY = FMath::Min(Base.Y + ReachXY + 1, Dims.Y - 1);
+		const int32 MinZ = FMath::Max(Base.Z - ReachZ, 0);
+		const int32 MaxZ = FMath::Min(Base.Z + ReachZ + 1, Dims.Z - 1);
 
 		if (MaxX < MinX || MaxY < MinY || MaxZ < MinZ)
 		{
@@ -556,12 +584,16 @@ void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles,
 		for (int32 X = MinX; X <= MaxX; ++X)
 		{
 			const FVector Sample(X * ActiveCellSize, Y * ActiveCellSize, Z * ActiveCellSize);
-			const float DistSq = float(FVector::DistSquared(Sample, Local));
-			if (DistSq >= RadiusSq)
+			const FVector Delta = Sample - Local;
+			// Anisotropic metaball: wider in XY, flatter in Z while pancaked.
+			const float NormDistSq =
+				float(Delta.X * Delta.X + Delta.Y * Delta.Y) * InvRadiusXYSq +
+				float(Delta.Z * Delta.Z) * InvRadiusZSq;
+			if (NormDistSq >= 1.f)
 			{
 				continue;
 			}
-			const float Falloff = 1.f - DistSq / RadiusSq;
+			const float Falloff = 1.f - NormDistSq;
 			Density[SampleIndex(X, Y, Z)] += Falloff * Falloff * Falloff;
 		}
 

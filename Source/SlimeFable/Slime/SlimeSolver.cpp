@@ -3,7 +3,6 @@
 #include "SlimeSolver.h"
 
 #include "Async/ParallelFor.h"
-#include "Math/RandomStream.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
 using namespace SlimeSim;
@@ -141,6 +140,7 @@ void FSlimeSolver::BuildDome(const FVector& RestCenter)
 		Particle.PredictedPosition = Particle.Position;
 		Particle.Velocity = FVector3f::ZeroVector;
 		Particle.BallisticLife = 0.f;
+		Particle.ShotId = 0;
 		// Candidates are sorted by distance, so the first slice is the innermost shell.
 		Particle.Flags = (Index < NumCore) ? PF_Core : PF_None;
 	}
@@ -154,10 +154,26 @@ void FSlimeSolver::BuildDome(const FVector& RestCenter)
 	ParticleCell.SetNumUninitialized(Count, EAllowShrinking::No);
 
 	NumBallistic = 0;
+	ActiveShotCount = 0;
+	NextShotId = 1;
 	ContactLoad = 0.f;
 	bSpread = false;
 	SqueezeAmount = 0.f;
 	GravityScale = 1.f;
+}
+
+void FSlimeSolver::EnsureScratchCapacity(int32 Count)
+{
+	if (Lambdas.Num() < Count)
+	{
+		Lambdas.SetNumUninitialized(Count, EAllowShrinking::No);
+		ContactLoads.SetNumUninitialized(Count, EAllowShrinking::No);
+		DeltaPositions.SetNumUninitialized(Count, EAllowShrinking::No);
+		ContactNormals.SetNumUninitialized(Count, EAllowShrinking::No);
+		ViscosityDelta.SetNumUninitialized(Count, EAllowShrinking::No);
+		CellEntries.SetNumUninitialized(Count, EAllowShrinking::No);
+		ParticleCell.SetNumUninitialized(Count, EAllowShrinking::No);
+	}
 }
 
 void FSlimeSolver::Reset(const FVector& RestCenter)
@@ -263,7 +279,7 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 	{
 		// Thin pancake disk: deform into a puddle, never leave the disk.
 		const float Radius = FMath::Max(SpreadRadius, Params.RestRadius) * Params.TetherSlack;
-		const float HalfH = FMath::Max(SpreadHalfHeight, 1.f);
+		const float HalfH = FMath::Max(SpreadHalfHeight, 0.5f);
 		FVector3f Local = InOutPoint - Center;
 		FVector3f Radial(Local.X, Local.Y, 0.f);
 		const float R = Radial.Size();
@@ -319,7 +335,7 @@ void FSlimeSolver::SetSpread(bool bInSpread, float InSpreadRadius, float InSprea
 	bSpread = bInSpread;
 	SpreadRadius = InSpreadRadius;
 	SpreadPush = InSpreadPush;
-	SpreadHalfHeight = FMath::Max(InSpreadHalfHeight, 1.f);
+	SpreadHalfHeight = FMath::Max(InSpreadHalfHeight, 0.5f);
 }
 
 void FSlimeSolver::SetSqueeze(float InAmount, const FVector& InFreeDirection)
@@ -407,6 +423,8 @@ void FSlimeSolver::Step(float Dt)
 		return;
 	}
 
+	EnsureScratchCapacity(Count);
+
 	TRACE_CPUPROFILER_EVENT_SCOPE(SlimeSolver_Step);
 
 	if (LandingSettleRemaining > 0.f)
@@ -478,8 +496,8 @@ void FSlimeSolver::Step(float Dt)
 
 	const float MembraneK = Params.MembraneStiffness * (1.f + SqueezeAmount * 1.5f);
 	const float SettleBoost = LandingSettleRemaining > 0.f ? Params.LandingCohesionBoost : 1.f;
-	// Keep enough concentration while spread so the centre stays filled (no doughnut).
-	const float Concentration = Params.Concentration * SettleBoost * (bSpread ? 0.85f : 1.f);
+	// Keep the centre filled while spread (no doughnut): boost concentration, do not weaken it.
+	const float Concentration = Params.Concentration * SettleBoost * (bSpread ? SpreadConcentrationScale : 1.f);
 	const float GripRadius = MembraneRadius * Params.GripRadiusScale;
 	const float UpwardRestore = bSpread ? 0.f : Params.UpwardRestore * SettleBoost;
 	const float Gravity = Params.Gravity * GravityScale;
@@ -529,7 +547,7 @@ void FSlimeSolver::Step(float Dt)
 				// Edge-only push: centre stays dense; outer ring expands into a pancake.
 				FVector3f Radial(Offset.X, Offset.Y, 0.f);
 				const float RadialLength = Radial.Size();
-				const float InnerR = MembraneRadius * 0.55f;
+				const float InnerR = MembraneRadius * 0.65f;
 				const float OuterR = MembraneRadius * 0.92f;
 				if (RadialLength > InnerR && RadialLength < OuterR)
 				{
@@ -644,25 +662,48 @@ void FSlimeSolver::Step(float Dt)
 
 	if (NumBallistic > 0)
 	{
-		int32 StillFlying = 0;
-		for (FSlimeParticle& Particle : Particles)
+		bool bRemovedAny = false;
+		for (int32 Index = Particles.Num() - 1; Index >= 0; --Index)
 		{
+			FSlimeParticle& Particle = Particles[Index];
 			if (!Particle.IsBallistic())
 			{
 				continue;
 			}
 			Particle.BallisticLife -= Dt;
-			if (Particle.BallisticLife <= 0.f)
+			if (Particle.BallisticLife > 0.f)
 			{
-				Particle.BallisticLife = 0.f;
-				Particle.Flags &= ~PF_Ballistic;
+				continue;
+			}
+
+			if (Particle.IsClone())
+			{
+				Particles.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+				bRemovedAny = true;
 			}
 			else
+			{
+				// Legacy peel path (should not spawn after clone launch).
+				Particle.BallisticLife = 0.f;
+				Particle.Flags &= ~(PF_Ballistic | PF_Clone);
+				Particle.ShotId = 0;
+			}
+		}
+
+		int32 StillFlying = 0;
+		for (const FSlimeParticle& Particle : Particles)
+		{
+			if (Particle.IsBallistic())
 			{
 				++StillFlying;
 			}
 		}
 		NumBallistic = StillFlying;
+		if (bRemovedAny || StillFlying == 0)
+		{
+			RecountActiveShots();
+			EnsureScratchCapacity(Particles.Num());
+		}
 	}
 }
 
@@ -1033,10 +1074,15 @@ void FSlimeSolver::ApplyViscosity()
 	}, Flags);
 }
 
-int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, int32 MinRemaining, float Life)
+int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots)
 {
-	const int32 Count = Particles.Num();
-	if (Count == 0)
+	const int32 BodyCount = Params.NumParticles;
+	if (BodyCount <= 0 || Particles.Num() < BodyCount)
+	{
+		return 0;
+	}
+
+	if (ActiveShotCount >= FMath::Max(MaxActiveShots, 1))
 	{
 		return 0;
 	}
@@ -1051,25 +1097,20 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, i
 	};
 
 	TArray<FPick> Picks;
-	Picks.Reserve(Count);
+	Picks.Reserve(BodyCount);
 
-	int32 Attached = 0;
-	for (int32 Index = 0; Index < Count; ++Index)
+	// Templates are attached body particles only (never peel them).
+	for (int32 Index = 0; Index < BodyCount && Index < Particles.Num(); ++Index)
 	{
 		const FSlimeParticle& Particle = Particles[Index];
-		if (!Particle.IsBallistic())
-		{
-			++Attached;
-		}
-		if (Particle.IsCore() || Particle.IsBallistic())
+		if (Particle.IsCore() || Particle.IsBallistic() || Particle.IsClone())
 		{
 			continue;
 		}
-		// Prefer the particles already on the leading side so the chunk peels off, not tears out.
 		Picks.Add({ Index, (Particle.Position - Center) | Direction });
 	}
 
-	const int32 Budget = FMath::Min(FMath::FloorToInt(Count * FMath::Clamp(Fraction, 0.f, 0.9f)), Attached - MinRemaining);
+	const int32 Budget = FMath::FloorToInt(float(BodyCount) * FMath::Clamp(Fraction, 0.05f, 0.6f));
 	if (Budget <= 0 || Picks.Num() == 0)
 	{
 		return 0;
@@ -1078,21 +1119,73 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, i
 	Picks.Sort([](const FPick& A, const FPick& B) { return A.Score > B.Score; });
 
 	const int32 Launched = FMath::Min(Budget, Picks.Num());
-	const FVector3f LaunchVel(LaunchVelocity);
-	const FVector3f Away = Direction.IsNearlyZero() ? FVector3f::ForwardVector : Direction;
-	for (int32 I = 0; I < Launched; ++I)
+	const int32 MaxClonePool = FMath::Max(Budget * FMath::Max(MaxActiveShots, 1), Budget);
+	const int32 CurrentClones = Particles.Num() - BodyCount;
+	if (CurrentClones + Launched > MaxClonePool)
 	{
-		FSlimeParticle& Particle = Particles[Picks[I].Index];
-		Particle.Flags |= PF_Ballistic;
-		Particle.BallisticLife = Life;
-		Particle.Velocity = LaunchVel;
-		// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
-		Particle.Position += Away * (Params.RestRadius * 2.4f);
-		Particle.PredictedPosition = Particle.Position;
+		return 0;
 	}
 
+	const uint8 ShotId = NextShotId;
+	NextShotId = (NextShotId == 255) ? 1 : uint8(NextShotId + 1);
+
+	const FVector3f LaunchVel(LaunchVelocity);
+	const FVector3f Away = Direction.IsNearlyZero() ? FVector3f::ForwardVector : Direction;
+
+	Particles.Reserve(Particles.Num() + Launched);
+	for (int32 I = 0; I < Launched; ++I)
+	{
+		const FSlimeParticle& Template = Particles[Picks[I].Index];
+		FSlimeParticle Clone = Template;
+		Clone.Flags = PF_Ballistic | PF_Clone;
+		Clone.ShotId = ShotId;
+		Clone.BallisticLife = Life;
+		Clone.Velocity = LaunchVel;
+		// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
+		Clone.Position = Template.Position + Away * (Params.RestRadius * 2.4f);
+		Clone.PredictedPosition = Clone.Position;
+		Particles.Add(Clone);
+	}
+
+	EnsureScratchCapacity(Particles.Num());
 	NumBallistic += Launched;
+	++ActiveShotCount;
 	return Launched;
+}
+
+void FSlimeSolver::RecountActiveShots()
+{
+	TSet<uint8> Shots;
+	Shots.Reserve(8);
+	NumBallistic = 0;
+	for (const FSlimeParticle& Particle : Particles)
+	{
+		if (!Particle.IsBallistic())
+		{
+			continue;
+		}
+		++NumBallistic;
+		if (Particle.ShotId != 0)
+		{
+			Shots.Add(Particle.ShotId);
+		}
+	}
+	ActiveShotCount = Shots.Num();
+}
+
+void FSlimeSolver::RemoveAllClones()
+{
+	for (int32 Index = Particles.Num() - 1; Index >= 0; --Index)
+	{
+		const FSlimeParticle& Particle = Particles[Index];
+		if (Particle.IsClone() || Particle.IsBallistic())
+		{
+			Particles.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+		}
+	}
+	NumBallistic = 0;
+	ActiveShotCount = 0;
+	EnsureScratchCapacity(Particles.Num());
 }
 
 int32 FSlimeSolver::AbsorbNearbyFragments(float MergeRadius)
@@ -1102,36 +1195,54 @@ int32 FSlimeSolver::AbsorbNearbyFragments(float MergeRadius)
 		return 0;
 	}
 
-	FVector FragmentCenter;
-	if (!GetFragmentCenter(FragmentCenter))
-	{
-		return 0;
-	}
-
 	const FVector BodyCenter = GetBodyCenter();
-	if (FVector::DistSquared(FragmentCenter, BodyCenter) > FMath::Square(double(MergeRadius)))
-	{
-		return 0;
-	}
+	const float MergeRadiusSq = FMath::Square(MergeRadius);
 
-	const FVector3f Home(BodyCenter);
-	const FVector3f HomeVel(AnchorVelocity);
-	int32 Absorbed = 0;
-	for (FSlimeParticle& Particle : Particles)
+	TMap<uint8, FVector> ShotCenters;
+	TMap<uint8, int32> ShotCounts;
+	for (const FSlimeParticle& Particle : Particles)
 	{
-		if (!Particle.IsBallistic())
+		if (!Particle.IsBallistic() || Particle.ShotId == 0)
 		{
 			continue;
 		}
-		Particle.Flags &= ~PF_Ballistic;
-		Particle.BallisticLife = 0.f;
-		Particle.Velocity = FMath::Lerp(Particle.Velocity, HomeVel, 0.65f);
-		// Soft nudge toward the body so the shell can finish the merge without a pop.
-		Particle.Position = FMath::Lerp(Particle.Position, Home, 0.2f);
-		Particle.PredictedPosition = Particle.Position;
-		++Absorbed;
+		ShotCenters.FindOrAdd(Particle.ShotId) += FVector(Particle.Position);
+		ShotCounts.FindOrAdd(Particle.ShotId) += 1;
 	}
-	NumBallistic = 0;
+
+	TSet<uint8> AbsorbShots;
+	for (const TPair<uint8, FVector>& Pair : ShotCenters)
+	{
+		const int32 Count = ShotCounts.FindRef(Pair.Key);
+		if (Count <= 0)
+		{
+			continue;
+		}
+		const FVector Center = Pair.Value / float(Count);
+		if (FVector::DistSquared(Center, BodyCenter) <= MergeRadiusSq)
+		{
+			AbsorbShots.Add(Pair.Key);
+		}
+	}
+
+	if (AbsorbShots.Num() == 0)
+	{
+		return 0;
+	}
+
+	int32 Absorbed = 0;
+	for (int32 Index = Particles.Num() - 1; Index >= 0; --Index)
+	{
+		const FSlimeParticle& Particle = Particles[Index];
+		if (Particle.IsBallistic() && AbsorbShots.Contains(Particle.ShotId))
+		{
+			Particles.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+			++Absorbed;
+		}
+	}
+
+	RecountActiveShots();
+	EnsureScratchCapacity(Particles.Num());
 	return Absorbed;
 }
 
@@ -1145,9 +1256,11 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 	const FVector3f Home(Target);
 	const float ArriveRadius = Params.RestRadius * 0.8f;
 	int32 StillOut = 0;
+	bool bRemovedAny = false;
 
-	for (FSlimeParticle& Particle : Particles)
+	for (int32 Index = Particles.Num() - 1; Index >= 0; --Index)
 	{
+		FSlimeParticle& Particle = Particles[Index];
 		if (!Particle.IsBallistic())
 		{
 			continue;
@@ -1157,8 +1270,17 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 		const float Distance = Delta.Size();
 		if (Distance <= ArriveRadius)
 		{
-			Particle.Flags &= ~PF_Ballistic;
-			Particle.BallisticLife = 0.f;
+			if (Particle.IsClone())
+			{
+				Particles.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+				bRemovedAny = true;
+			}
+			else
+			{
+				Particle.Flags &= ~(PF_Ballistic | PF_Clone);
+				Particle.BallisticLife = 0.f;
+				Particle.ShotId = 0;
+			}
 			continue;
 		}
 
@@ -1170,33 +1292,25 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 		++StillOut;
 	}
 
-	NumBallistic = StillOut;
-	return StillOut == 0;
+	if (bRemovedAny)
+	{
+		RecountActiveShots();
+		EnsureScratchCapacity(Particles.Num());
+	}
+	else
+	{
+		NumBallistic = StillOut;
+		if (StillOut == 0)
+		{
+			ActiveShotCount = 0;
+		}
+	}
+
+	return StillOut == 0 && NumBallistic == 0;
 }
 
 void FSlimeSolver::SnapFragmentsHome(const FVector& Target)
 {
-	if (NumBallistic <= 0)
-	{
-		return;
-	}
-
-	const FVector3f Home(Target);
-	const float Radius = Params.RestRadius * 0.6f;
-	FRandomStream Stream(0x5EED);
-
-	for (FSlimeParticle& Particle : Particles)
-	{
-		if (!Particle.IsBallistic())
-		{
-			continue;
-		}
-		Particle.Position = Home + FVector3f(Stream.GetUnitVector()) * (Radius * Stream.GetFraction());
-		Particle.PredictedPosition = Particle.Position;
-		Particle.Velocity = FVector3f::ZeroVector;
-		Particle.BallisticLife = 0.f;
-		Particle.Flags &= ~PF_Ballistic;
-	}
-
-	NumBallistic = 0;
+	(void)Target;
+	RemoveAllClones();
 }

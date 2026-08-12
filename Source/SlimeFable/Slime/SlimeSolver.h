@@ -96,32 +96,40 @@ public:
 
 	bool HasFragments() const { return NumBallistic > 0; }
 
+	int32 GetActiveShotCount() const { return ActiveShotCount; }
+
 	/** Average penetration depth resolved last step; a cheap read on how hard it is pinched. */
 	float GetContactLoad() const { return ContactLoad; }
 
 	// ---- Abilities -------------------------------------------------------------------
 
 	/**
-	 *  Detaches the non-core particles closest to the aim direction and throws them.
-	 *  Returns how many were launched, honouring MinRemaining.
+	 *  Clones ~Fraction of body particles into a ballistic mini-slime without shrinking the body.
+	 *  Honours MaxActiveShots. Returns how many clone particles were spawned.
 	 */
-	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, int32 MinRemaining, float Life);
+	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots);
 
-	/** Steers fragments home. Returns true once every one of them has rejoined. */
+	/** Steers fragments home. Returns true once every one of them has rejoined / been removed. */
 	bool RecallFragments(float Dt, const FVector& Target, float PullSpeed);
 
-	/** Teleports every fragment back into the body. */
+	/** Removes every flying clone (metaball absorb finish / recall snap). */
 	void SnapFragmentsHome(const FVector& Target);
 
 	/**
-	 *  Clears ballistic on fragments whose COM is within MergeRadius of the body COM.
+	 *  Destroys clone fragments whose COM is within MergeRadius of the body COM.
 	 *  Returns how many particles were absorbed. Skipped while world collision is gated for recall.
 	 */
 	int32 AbsorbNearbyFragments(float MergeRadius);
 
+	/** Concentration multiplier applied while spread (body feeds this each step). */
+	void SetSpreadConcentrationScale(float InScale) { SpreadConcentrationScale = FMath::Max(InScale, 0.1f); }
+
 private:
 	void RebuildDerived();
 	void BuildDome(const FVector& RestCenter);
+	void EnsureScratchCapacity(int32 Count);
+	void RemoveAllClones();
+	void RecountActiveShots();
 	void BuildGrid();
 	void SolveDensity();
 	void ResolveCollisions();
@@ -181,6 +189,7 @@ private:
 	float SpreadRadius = 0.f;
 	float SpreadPush = 0.f;
 	float SpreadHalfHeight = 2.5f;
+	float SpreadConcentrationScale = 1.15f;
 	float GravityScale = 1.f;
 	bool bSpread = false;
 	bool bSkipWorldCollision = false;
@@ -188,6 +197,8 @@ private:
 	TArray<SlimeSim::FSlimeCollider> Colliders;
 
 	int32 NumBallistic = 0;
+	int32 ActiveShotCount = 0;
+	uint8 NextShotId = 1;
 	float ContactLoad = 0.f;
 
 	/** Smoothed horizontal move direction for inertia deformation. */

@@ -60,11 +60,11 @@ public:
 
 	/** Solver steps per second. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "20.0", ClampMax = "90.0"))
-	float StepRate = 40.f;
+	float StepRate = 60.f;
 
 	/** Surface rebuilds per second. Match StepRate so mesh resolution does not stutter against the solve. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "5.0", ClampMax = "60.0"))
-	float SurfaceRate = 40.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "5.0", ClampMax = "90.0"))
+	float SurfaceRate = 60.f;
 
 	/** Guards against a spiral of death after a hitch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "1", ClampMax = "4"))
@@ -142,14 +142,14 @@ public:
 	// ---- Pancake ---------------------------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "8.0"))
-	float SpreadRadiusScale = 4.2f;
+	float SpreadRadiusScale = 5.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0"))
-	float SpreadPush = 380.f;
+	float SpreadPush = 300.f;
 
 	/** Half-thickness of the pancake disk, in cm. Thin sheet ~ SIM DomeHeight. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.5", ClampMax = "12.0"))
-	float SpreadHalfHeight = 1.4f;
+	float SpreadHalfHeight = 0.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "4.0"))
 	float SpreadGravityScale = 1.8f;
@@ -157,9 +157,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float SpreadRecoverDuration = 0.45f;
 
-	/** Extra splat while pancaked so the puddle stays one visual sheet. */
+	/** Extra XY splat while pancaked so the puddle stays one visual sheet. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "4.0"))
-	float SpreadSplatMultiplier = 2.8f;
+	float SpreadSplatMultiplier = 2.0f;
+
+	/** Vertical splat scale while pancaked (keeps the pie thin). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.25", ClampMax = "1.0"))
+	float SpreadSplatZScale = 0.55f;
+
+	/** Concentration multiplier while spread (keeps the centre filled). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.5", ClampMax = "2.0"))
+	float SpreadConcentrationScale = 1.15f;
 
 	// ---- Landing ---------------------------------------------------------------------
 
@@ -168,11 +176,13 @@ public:
 
 	// ---- Launch and recall -----------------------------------------------------------
 
+	/** Clone particle count as a fraction of the body particle budget (~30% mini slime). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.05", ClampMax = "0.6"))
-	float LaunchFraction = 0.2f;
+	float LaunchFraction = 0.3f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "32"))
-	int32 MinAttachedParticles = 96;
+	/** Max simultaneous unrecovered clone shots. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "1", ClampMax = "12"))
+	int32 MaxActiveShots = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.5"))
 	float FragmentLifetime = 6.f;
@@ -235,7 +245,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ResetBody();
 
-	/** Throws a chunk of non core particles. Returns how many left the body. */
+	/** Spawns a cloned mini-slime shot without shrinking the body. Returns clone particle count. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	int32 LaunchChunk(const FVector& LaunchVelocity);
 
@@ -247,6 +257,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool HasFragments() const { return Solver.HasFragments(); }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	int32 GetActiveShotCount() const { return Solver.GetActiveShotCount(); }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	int32 GetMaxActiveShots() const { return MaxActiveShots; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	FVector GetBlobCenter() const { return Solver.GetBodyCenter(); }
@@ -285,6 +301,7 @@ private:
 	void UpdateAnchor();
 	void RebuildSurface();
 	void PushMeshSection();
+	void UpdateMeshFollow();
 	void UpdateQuality();
 	void ResolveMaterial();
 	FVector GetFootLocation() const;
@@ -314,6 +331,10 @@ private:
 	float SurfaceAccumulator = 0.f;
 	float ColliderTimer = 0.f;
 	FVector LastColliderGatherCenter = FVector::ZeroVector;
+
+	/** Body COM at the last surface rebuild; mesh slides by (CurrentCOM - this) between rebuilds. */
+	FVector RebuildBodyCOM = FVector::ZeroVector;
+	bool bHaveRebuildBodyCOM = false;
 
 	float FloorZ = -1.e9f;
 	float FragmentFloorZ = -1.e9f;
