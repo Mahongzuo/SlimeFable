@@ -297,12 +297,24 @@ const int32 FSlimeSurfaceBuilder::TriangleTable[256][16] =
 
 void FSlimeSurfaceBuilder::Configure(const FSlimeSurfaceParams& InParams, float InParticleSpacing)
 {
+	const float NewSpacing = FMath::Max(InParticleSpacing, 0.5f);
+	const bool bResetScale = !IsConfigured() || !FMath::IsNearlyEqual(ParticleSpacing, NewSpacing);
+
 	Params = InParams;
-	ParticleSpacing = FMath::Max(InParticleSpacing, 0.5f);
+	ParticleSpacing = NewSpacing;
 
 	CellSize = FMath::Max(ParticleSpacing * Params.CellSizeMultiplier, 0.5f);
 	SplatRadius = FMath::Max(ParticleSpacing * Params.SplatRadiusMultiplier, CellSize);
-	CellScale = 1.f;
+	// Preserve CellScale across per-frame Configure (spread splat tweaks). Reset only on first
+	// configure or when particle spacing changes.
+	if (bResetScale)
+	{
+		CellScale = 1.f;
+		TruncationStreak = 0;
+		HeldRequiredCell = CellSize;
+		RequiredGrowStreak = 0;
+		bHaveSmoothedBodyBounds = false;
+	}
 
 	// Field value a fully enclosed sample would reach at the rest packing density, so the
 	// iso threshold means the same thing regardless of particle count or spacing.
@@ -358,26 +370,48 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 	if (BodyBounds.IsValid)
 	{
-		BuildCluster(Particles, false, BodyBounds);
+		constexpr float BoundsEma = 0.45f;
+		constexpr float SnapDistance = 25.f;
+		if (!bHaveSmoothedBodyBounds)
+		{
+			SmoothedBodyBounds = BodyBounds;
+			bHaveSmoothedBodyBounds = true;
+		}
+		else
+		{
+			const float CenterDrift = float(FVector::Dist(SmoothedBodyBounds.GetCenter(), BodyBounds.GetCenter()));
+			if (CenterDrift > SnapDistance)
+			{
+				SmoothedBodyBounds = BodyBounds;
+			}
+			else
+			{
+				SmoothedBodyBounds.Min = FMath::Lerp(SmoothedBodyBounds.Min, BodyBounds.Min, BoundsEma);
+				SmoothedBodyBounds.Max = FMath::Lerp(SmoothedBodyBounds.Max, BodyBounds.Max, BoundsEma);
+			}
+		}
+		BuildCluster(Particles, false, SmoothedBodyBounds);
 	}
+
 	if (FragmentBounds.IsValid)
 	{
 		BuildCluster(Particles, true, FragmentBounds);
 	}
 
-	// When the budget clips the iso-surface, coarsen the next rebuild so the mesh closes.
-	// Otherwise ease CellScale back toward 1 so detail returns after a squeeze ends.
 	if (bTruncated)
 	{
-		CellScale = FMath::Min(CellScale * 1.25f, 3.f);
+		++TruncationStreak;
+		if (TruncationStreak >= 3)
+		{
+			CellScale = FMath::Min(CellScale * 1.25f, 3.f);
+		}
 	}
 	else
 	{
-		CellScale = FMath::Max(FMath::Lerp(CellScale, 1.f, 0.15f), 1.f);
+		TruncationStreak = 0;
+		CellScale = FMath::Max(FMath::Lerp(CellScale, 1.f, 0.05f), 1.f);
 	}
 
-	// Collapse the unused budget onto one point: zero area triangles cost nothing to raster
-	// and keep the vertex count constant so the section can be updated instead of rebuilt.
 	for (int32 Index = LiveVertexCount; Index < Vertices.Num(); ++Index)
 	{
 		Vertices[Index] = DegenerateAnchor;
@@ -387,40 +421,88 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds)
 {
-	PrepareGrid(Bounds);
+	PrepareGrid(Bounds, !bBallisticSubset);
 	SplatDensity(Particles, bBallisticSubset);
 	BlurDensity();
 	Triangulate();
 }
 
-void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds)
+void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 {
 	const int32 Usable = FMath::Max(Params.MaxGridDim - 2 * GGridPadding - 1, 2);
-	const float ScaledCellSize = CellSize * FMath::Max(CellScale, 1.f);
+	const float BaseCell = CellSize * (bBodyCluster ? FMath::Max(CellScale, 1.f) : 1.f);
+	if (bBodyCluster && HeldRequiredCell < BaseCell)
+	{
+		HeldRequiredCell = BaseCell;
+	}
 
 	FBox Region = Bounds;
-	const double MaxSpan = double(Usable) * double(ScaledCellSize * GMaxCellSizeScale);
-	const FVector Size = Region.GetSize();
-	if (Size.GetMax() > MaxSpan)
+	const FVector RegionSizeRaw = Region.GetSize();
+	const float NeededCell = float(RegionSizeRaw.GetMax()) / float(Usable);
+
+	float ActiveCell = BaseCell;
+	if (bBodyCluster)
 	{
-		// Rather than let one distant particle coarsen the whole grid, keep the resolution
-		// and clip. Anything outside is only ever a particle on its way home.
+		// Hysteresis: only grow RequiredCell after several consecutive frames that need it.
+		if (NeededCell > HeldRequiredCell + 0.05f)
+		{
+			++RequiredGrowStreak;
+			if (RequiredGrowStreak >= 3)
+			{
+				HeldRequiredCell = NeededCell;
+				RequiredGrowStreak = 0;
+			}
+		}
+		else
+		{
+			RequiredGrowStreak = 0;
+			HeldRequiredCell = FMath::Max(FMath::Lerp(HeldRequiredCell, NeededCell, 0.05f), BaseCell);
+		}
+		ActiveCell = FMath::Max(BaseCell, HeldRequiredCell);
+	}
+	else
+	{
+		ActiveCell = FMath::Max(BaseCell, NeededCell);
+	}
+
+	ActiveCellSize = ActiveCell;
+
+	// Only clip when the cluster is truly huge; do not hard-crop a stretched body.
+	const double MaxSpan = double(Usable) * double(ActiveCell) * double(GMaxCellSizeScale);
+	if (RegionSizeRaw.GetMax() > MaxSpan)
+	{
 		const FVector Center = Region.GetCenter();
 		const FVector Half(MaxSpan * 0.5);
 		Region = FBox(Center - Half, Center + Half);
 	}
 
-	const FVector RegionSize = Region.GetSize();
-	const float RequiredCell = float(RegionSize.GetMax()) / float(Usable);
-	const float ActiveCell = FMath::Max(ScaledCellSize, RequiredCell);
+	const FVector PaddedMin = Region.Min - FVector(double(ActiveCell) * GGridPadding);
+	const FVector PaddedMax = Region.Max + FVector(double(ActiveCell) * GGridPadding);
 
-	GridOrigin = Region.Min - FVector(double(ActiveCell) * GGridPadding);
+	// Prefer SIM-style block quantization; fall back to per-cell snap on axes that would
+	// otherwise overflow MaxGridDim and clip the volume.
+	const float Block = ActiveCell * 4.f;
+	auto QuantizeOrigin = [ActiveCell, Block, MaxDim = Params.MaxGridDim](double MinCoord, double MaxCoord) -> double
+	{
+		const double BlockOrigin = FMath::FloorToDouble(MinCoord / Block) * Block;
+		const int32 CellsIfBlock = FMath::CeilToInt((MaxCoord - BlockOrigin) / ActiveCell) + 1;
+		if (CellsIfBlock <= MaxDim)
+		{
+			return BlockOrigin;
+		}
+		return FMath::FloorToDouble(MinCoord / ActiveCell) * ActiveCell;
+	};
+
+	GridOrigin = FVector(
+		QuantizeOrigin(PaddedMin.X, PaddedMax.X),
+		QuantizeOrigin(PaddedMin.Y, PaddedMax.Y),
+		QuantizeOrigin(PaddedMin.Z, PaddedMax.Z));
+
+	// Dims must span GridOrigin → padded max (not Region.Size alone), or Block snap clips the far side.
 	Dims = FIntVector(
-		FMath::Clamp(FMath::CeilToInt(RegionSize.X / ActiveCell) + 2 * GGridPadding + 1, 4, Params.MaxGridDim),
-		FMath::Clamp(FMath::CeilToInt(RegionSize.Y / ActiveCell) + 2 * GGridPadding + 1, 4, Params.MaxGridDim),
-		FMath::Clamp(FMath::CeilToInt(RegionSize.Z / ActiveCell) + 2 * GGridPadding + 1, 4, Params.MaxGridDim));
-
-	ActiveCellSize = ActiveCell;
+		FMath::Clamp(FMath::CeilToInt((PaddedMax.X - GridOrigin.X) / ActiveCell) + 1, 4, Params.MaxGridDim),
+		FMath::Clamp(FMath::CeilToInt((PaddedMax.Y - GridOrigin.Y) / ActiveCell) + 1, 4, Params.MaxGridDim),
+		FMath::Clamp(FMath::CeilToInt((PaddedMax.Z - GridOrigin.Z) / ActiveCell) + 1, 4, Params.MaxGridDim));
 
 	const int32 NumSamples = Dims.X * Dims.Y * Dims.Z;
 	FMemory::Memzero(Density.GetData(), NumSamples * sizeof(float));
@@ -454,6 +536,11 @@ void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles,
 		const int32 MaxY = FMath::Min(Base.Y + Reach + 1, Dims.Y - 1);
 		const int32 MinZ = FMath::Max(Base.Z - Reach, 0);
 		const int32 MaxZ = FMath::Min(Base.Z + Reach + 1, Dims.Z - 1);
+
+		if (MaxX < MinX || MaxY < MinY || MaxZ < MinZ)
+		{
+			continue;
+		}
 
 		for (int32 Z = MinZ; Z <= MaxZ; ++Z)
 		for (int32 Y = MinY; Y <= MaxY; ++Y)

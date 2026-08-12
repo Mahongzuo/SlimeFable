@@ -37,8 +37,11 @@ public:
 	/** Capsule anchor the centre of mass is sprung towards. */
 	void SetAnchor(const FVector& InCenter, const FVector& InVelocity);
 
-	/** Hard floor plane. Particles never go below this. */
+	/** Hard floor plane for the attached body. Particles never go below this. */
 	void SetFloorZ(float InFloorZ) { FloorZ = float(InFloorZ); }
+
+	/** Floor under the launched chunk COM. Ballistic particles use this instead of FloorZ. */
+	void SetFragmentFloorZ(float InFloorZ) { FragmentFloorZ = float(InFloorZ); }
 
 	/** Hard ceiling plane, or a large value when the sky is clear. */
 	void SetCeilingZ(float InCeilingZ) { CeilingZ = float(InCeilingZ); }
@@ -47,7 +50,10 @@ public:
 	void SetColliders(TArray<SlimeSim::FSlimeCollider>&& InColliders) { Colliders = MoveTemp(InColliders); }
 
 	/** Pancake mode: widen the membrane and push outwards along the ground plane. */
-	void SetSpread(bool bInSpread, float InSpreadRadius, float InSpreadPush);
+	void SetSpread(bool bInSpread, float InSpreadRadius, float InSpreadPush, float InSpreadHalfHeight);
+
+	/** Light air "duang" on double jump — far milder than landing squash. */
+	void ApplyAirBounce();
 
 	/** 0 = free, 1 = crushed. Stiffens cohesion so a gap cannot tear the body in half. */
 	void SetSqueeze(float InAmount, const FVector& InFreeDirection);
@@ -80,6 +86,12 @@ public:
 	/** Bounds over the attached body only. */
 	FBox GetBodyBounds() const;
 
+	/** Centre of mass of ballistic fragments only. Returns false when none are flying. */
+	bool GetFragmentCenter(FVector& OutCenter) const;
+
+	/** Bounds over ballistic fragments only. */
+	FBox GetFragmentBounds() const;
+
 	int32 GetNumBallistic() const { return NumBallistic; }
 
 	bool HasFragments() const { return NumBallistic > 0; }
@@ -100,6 +112,12 @@ public:
 
 	/** Teleports every fragment back into the body. */
 	void SnapFragmentsHome(const FVector& Target);
+
+	/**
+	 *  Clears ballistic on fragments whose COM is within MergeRadius of the body COM.
+	 *  Returns how many particles were absorbed. Skipped while world collision is gated for recall.
+	 */
+	int32 AbsorbNearbyFragments(float MergeRadius);
 
 private:
 	void RebuildDerived();
@@ -157,10 +175,12 @@ private:
 	FVector3f AnchorVelocity = FVector3f::ZeroVector;
 	FVector3f SqueezeFreeDirection = FVector3f::ZeroVector;
 	float FloorZ = -1.e9f;
+	float FragmentFloorZ = -1.e9f;
 	float CeilingZ = 1.e9f;
 	float SqueezeAmount = 0.f;
 	float SpreadRadius = 0.f;
 	float SpreadPush = 0.f;
+	float SpreadHalfHeight = 2.5f;
 	float GravityScale = 1.f;
 	bool bSpread = false;
 	bool bSkipWorldCollision = false;

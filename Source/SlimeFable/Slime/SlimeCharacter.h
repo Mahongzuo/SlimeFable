@@ -30,6 +30,15 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void NotifyControllerChanged() override;
 	virtual void Landed(const FHitResult& Hit) override;
+	virtual void OnJumped_Implementation() override;
+
+	/** Ground / first jump vertical impulse written into CharacterMovement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Jump", meta = (ClampMin = "100.0"))
+	float JumpZVelocity = 620.f;
+
+	/** Second jump vertical speed (replaces CMC JumpZVelocity for air jumps). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Jump", meta = (ClampMin = "100.0"))
+	float AirJumpZVelocity = 520.f;
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeBodyComponent* GetSlimeBody() const { return SlimeBody; }

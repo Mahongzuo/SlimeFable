@@ -8,8 +8,9 @@
 /**
  *  Turns the particle set into a triangle soup with marching cubes.
  *
- *  Isotropic splat only: the anisotropic covariance fit in the reference implementation runs a
- *  Jacobi eigen decomposition per particle, which buys detail this project does not need.
+ *  Body and ballistic fragments each get their own grid so a distant Q chunk cannot
+ *  coarsen or clip the main blob. Active cell size follows body bounds with hysteresis
+ *  so walking does not flicker while spreads/jumps still fit the volume.
  *
  *  Output buffers are always exactly MaxVertices long. Unused slots collapse onto a single
  *  point so their triangles have zero area, which lets the render section be updated in place
@@ -21,11 +22,7 @@ public:
 	/** Sizes the fixed buffers and caches derived constants. Call whenever params change. */
 	void Configure(const FSlimeSurfaceParams& InParams, float InParticleSpacing);
 
-	/**
-	 *  Rebuilds the surface.
-	 *  The attached body and any fragments in flight get their own grid, so a chunk thrown
-	 *  across the room cannot drag the shared grid's cell size up and turn everything to mush.
-	 */
+	/** Rebuilds the surface (body cluster, then fragment cluster if any). */
 	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor);
 
 	/** World space positions, MaxVertices long. */
@@ -42,10 +39,12 @@ public:
 
 	bool IsConfigured() const { return Indices.Num() > 0; }
 
+	const FSlimeSurfaceParams& GetParams() const { return Params; }
+	float GetParticleSpacing() const { return ParticleSpacing; }
+
 private:
-	/** Runs splat, blur and marching cubes for one particle subset, appending vertices. */
 	void BuildCluster(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds);
-	void PrepareGrid(const FBox& Bounds);
+	void PrepareGrid(const FBox& Bounds, bool bBodyCluster);
 	void SplatDensity(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset);
 	void BlurDensity();
 	void Triangulate();
@@ -77,19 +76,22 @@ private:
 	FIntVector Dims = FIntVector(1);
 	FIntVector TouchedMin = FIntVector(0);
 	FIntVector TouchedMax = FIntVector(0);
-	/** Base cell size from the params. */
 	float CellSize = 4.6f;
-	/** Cell size actually in use, grown when the cluster does not fit the grid. */
 	float ActiveCellSize = 4.6f;
 	float SplatRadius = 8.5f;
 	float InvInteriorValue = 1.f;
 
-	/**
-	 *  Extra multiplier applied on top of CellSize when marching cubes hits the vertex budget.
-	 *  Grows after a truncated build and slowly decays back so the mesh stays hole-free without
-	 *  staying permanently coarse.
-	 */
+	/** Truncation coarsening multiplier (body cluster). */
 	float CellScale = 1.f;
+	int32 TruncationStreak = 0;
+
+	/** Hysteresis on the AABB-driven cell requirement. */
+	float HeldRequiredCell = 0.f;
+	int32 RequiredGrowStreak = 0;
+
+	/** EMA of body bounds; snaps on fast movement. */
+	FBox SmoothedBodyBounds = FBox(ForceInit);
+	bool bHaveSmoothedBodyBounds = false;
 
 	int32 LiveVertexCount = 0;
 	bool bTruncated = false;

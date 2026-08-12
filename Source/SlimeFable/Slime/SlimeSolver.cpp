@@ -209,6 +209,25 @@ void FSlimeSolver::ApplyLandingSquash(float ImpactSpeed)
 	}
 }
 
+void FSlimeSolver::ApplyAirBounce()
+{
+	// Double-jump "duang": brief squash then springy recover, much milder than a landing.
+	LandingSettleRemaining = FMath::Max(LandingSettleRemaining, 0.55f);
+	const FVector3f Center = FVector3f(GetBodyCenter());
+	for (FSlimeParticle& Particle : Particles)
+	{
+		if (Particle.IsBallistic())
+		{
+			continue;
+		}
+		FVector3f Offset = Particle.Position - Center;
+		Offset.Z *= 0.55f;
+		Particle.Position = Center + Offset;
+		Particle.PredictedPosition = Particle.Position;
+		Particle.Velocity.Z = FMath::Max(Particle.Velocity.Z, 0.f) + 120.f;
+	}
+}
+
 FVector3f FSlimeSolver::UpdateInertiaShape(float Dt)
 {
 	FVector3f Horizontal(AnchorVelocity.X, AnchorVelocity.Y, 0.f);
@@ -242,9 +261,9 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 {
 	if (bSpread)
 	{
-		// Flat disk: deform into a puddle, never leave the disk.
+		// Thin pancake disk: deform into a puddle, never leave the disk.
 		const float Radius = FMath::Max(SpreadRadius, Params.RestRadius) * Params.TetherSlack;
-		const float HalfH = FMath::Max(Params.ParticleSpacing * 1.25f, 3.f);
+		const float HalfH = FMath::Max(SpreadHalfHeight, 1.f);
 		FVector3f Local = InOutPoint - Center;
 		FVector3f Radial(Local.X, Local.Y, 0.f);
 		const float R = Radial.Size();
@@ -295,11 +314,12 @@ void FSlimeSolver::SetAnchor(const FVector& InCenter, const FVector& InVelocity)
 	AnchorVelocity = FVector3f(InVelocity);
 }
 
-void FSlimeSolver::SetSpread(bool bInSpread, float InSpreadRadius, float InSpreadPush)
+void FSlimeSolver::SetSpread(bool bInSpread, float InSpreadRadius, float InSpreadPush, float InSpreadHalfHeight)
 {
 	bSpread = bInSpread;
 	SpreadRadius = InSpreadRadius;
 	SpreadPush = InSpreadPush;
+	SpreadHalfHeight = FMath::Max(InSpreadHalfHeight, 1.f);
 }
 
 void FSlimeSolver::SetSqueeze(float InAmount, const FVector& InFreeDirection)
@@ -344,6 +364,39 @@ FBox FSlimeSolver::GetBodyBounds() const
 		}
 	}
 	return Box.ExpandBy(ContactRadius);
+}
+
+bool FSlimeSolver::GetFragmentCenter(FVector& OutCenter) const
+{
+	FVector3f Sum = FVector3f::ZeroVector;
+	int32 Count = 0;
+	for (const FSlimeParticle& Particle : Particles)
+	{
+		if (Particle.IsBallistic())
+		{
+			Sum += Particle.Position;
+			++Count;
+		}
+	}
+	if (Count <= 0)
+	{
+		return false;
+	}
+	OutCenter = FVector(Sum / float(Count));
+	return true;
+}
+
+FBox FSlimeSolver::GetFragmentBounds() const
+{
+	FBox Box(ForceInit);
+	for (const FSlimeParticle& Particle : Particles)
+	{
+		if (Particle.IsBallistic())
+		{
+			Box += FVector(Particle.Position);
+		}
+	}
+	return Box.IsValid ? Box.ExpandBy(ContactRadius) : Box;
 }
 
 void FSlimeSolver::Step(float Dt)
@@ -425,7 +478,8 @@ void FSlimeSolver::Step(float Dt)
 
 	const float MembraneK = Params.MembraneStiffness * (1.f + SqueezeAmount * 1.5f);
 	const float SettleBoost = LandingSettleRemaining > 0.f ? Params.LandingCohesionBoost : 1.f;
-	const float Concentration = Params.Concentration * SettleBoost * (bSpread ? 0.35f : 1.f);
+	// Keep enough concentration while spread so the centre stays filled (no doughnut).
+	const float Concentration = Params.Concentration * SettleBoost * (bSpread ? 0.85f : 1.f);
 	const float GripRadius = MembraneRadius * Params.GripRadiusScale;
 	const float UpwardRestore = bSpread ? 0.f : Params.UpwardRestore * SettleBoost;
 	const float Gravity = Params.Gravity * GravityScale;
@@ -472,11 +526,15 @@ void FSlimeSolver::Step(float Dt)
 
 			if (bSpread && SpreadPush > 0.f)
 			{
+				// Edge-only push: centre stays dense; outer ring expands into a pancake.
 				FVector3f Radial(Offset.X, Offset.Y, 0.f);
 				const float RadialLength = Radial.Size();
-				if (RadialLength > KINDA_SMALL_NUMBER && RadialLength < MembraneRadius)
+				const float InnerR = MembraneRadius * 0.55f;
+				const float OuterR = MembraneRadius * 0.92f;
+				if (RadialLength > InnerR && RadialLength < OuterR)
 				{
-					Accel += (Radial / RadialLength) * SpreadPush;
+					const float Edge = 1.f - ((RadialLength - InnerR) / FMath::Max(OuterR - InnerR, KINDA_SMALL_NUMBER));
+					Accel += (Radial / RadialLength) * (SpreadPush * Edge);
 				}
 			}
 			else if (SqueezeAmount > 0.05f && !SqueezeFreeDirection.IsNearlyZero())
@@ -861,15 +919,13 @@ void FSlimeSolver::ResolveCollisions()
 	FMemory::Memzero(ContactNormals.GetData(), Count * sizeof(FVector3f));
 
 	const int32 Passes = FMath::Max(Params.CollisionPasses, 1);
-	// While pancaked the floor plane is dropped so the body can pour over a ledge.
-	const bool bUseFloorPlane = !bSpread;
 	const float LocalContactRadius = ContactRadius;
 
 	FMemory::Memzero(ContactLoads.GetData(), Count * sizeof(float));
 
 	for (int32 Pass = 0; Pass < Passes; ++Pass)
 	{
-		ParallelFor(Count, [this, LocalContactRadius, bUseFloorPlane](int32 Index)
+		ParallelFor(Count, [this, LocalContactRadius](int32 Index)
 		{
 			FSlimeParticle& Particle = Particles[Index];
 			FVector3f Point = Particle.PredictedPosition;
@@ -894,12 +950,12 @@ void FSlimeSolver::ResolveCollisions()
 				}
 			}
 
-			// Fragments in flight rely on real geometry only: the character's floor plane
-			// would leave them hovering in mid air after they clear a ledge.
-			if (bUseFloorPlane && !Particle.IsBallistic() && Point.Z - LocalContactRadius < FloorZ)
+			// Body uses the capsule floor; ballistic chunks use a floor traced under the chunk COM.
+			const float PlaneZ = Particle.IsBallistic() ? FragmentFloorZ : FloorZ;
+			if (Point.Z - LocalContactRadius < PlaneZ)
 			{
-				Load += FloorZ + LocalContactRadius - Point.Z;
-				Point.Z = FloorZ + LocalContactRadius;
+				Load += PlaneZ + LocalContactRadius - Point.Z;
+				Point.Z = PlaneZ + LocalContactRadius;
 				Accumulated += FVector3f::UpVector;
 			}
 
@@ -1022,16 +1078,61 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, i
 	Picks.Sort([](const FPick& A, const FPick& B) { return A.Score > B.Score; });
 
 	const int32 Launched = FMath::Min(Budget, Picks.Num());
+	const FVector3f LaunchVel(LaunchVelocity);
+	const FVector3f Away = Direction.IsNearlyZero() ? FVector3f::ForwardVector : Direction;
 	for (int32 I = 0; I < Launched; ++I)
 	{
 		FSlimeParticle& Particle = Particles[Picks[I].Index];
 		Particle.Flags |= PF_Ballistic;
 		Particle.BallisticLife = Life;
-		Particle.Velocity = FVector3f(LaunchVelocity);
+		Particle.Velocity = LaunchVel;
+		// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
+		Particle.Position += Away * (Params.RestRadius * 2.4f);
+		Particle.PredictedPosition = Particle.Position;
 	}
 
 	NumBallistic += Launched;
 	return Launched;
+}
+
+int32 FSlimeSolver::AbsorbNearbyFragments(float MergeRadius)
+{
+	if (NumBallistic <= 0 || MergeRadius <= KINDA_SMALL_NUMBER || bSkipWorldCollision)
+	{
+		return 0;
+	}
+
+	FVector FragmentCenter;
+	if (!GetFragmentCenter(FragmentCenter))
+	{
+		return 0;
+	}
+
+	const FVector BodyCenter = GetBodyCenter();
+	if (FVector::DistSquared(FragmentCenter, BodyCenter) > FMath::Square(double(MergeRadius)))
+	{
+		return 0;
+	}
+
+	const FVector3f Home(BodyCenter);
+	const FVector3f HomeVel(AnchorVelocity);
+	int32 Absorbed = 0;
+	for (FSlimeParticle& Particle : Particles)
+	{
+		if (!Particle.IsBallistic())
+		{
+			continue;
+		}
+		Particle.Flags &= ~PF_Ballistic;
+		Particle.BallisticLife = 0.f;
+		Particle.Velocity = FMath::Lerp(Particle.Velocity, HomeVel, 0.65f);
+		// Soft nudge toward the body so the shell can finish the merge without a pop.
+		Particle.Position = FMath::Lerp(Particle.Position, Home, 0.2f);
+		Particle.PredictedPosition = Particle.Position;
+		++Absorbed;
+	}
+	NumBallistic = 0;
+	return Absorbed;
 }
 
 bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSpeed)

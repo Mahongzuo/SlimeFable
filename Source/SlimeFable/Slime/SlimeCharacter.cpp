@@ -20,7 +20,9 @@ ASlimeCharacter::ASlimeCharacter()
 	// A 40 cm tall dome, not a humanoid.
 	GetCapsuleComponent()->InitCapsuleSize(32.f, 26.f);
 
-	GetCharacterMovement()->JumpZVelocity = 460.f;
+	// ACharacter::JumpMaxCount is already exposed; default to double jump.
+	JumpMaxCount = 2;
+	GetCharacterMovement()->JumpZVelocity = JumpZVelocity;
 	GetCharacterMovement()->AirControl = 0.4f;
 	GetCharacterMovement()->MaxWalkSpeed = 420.f;
 	GetCharacterMovement()->GravityScale = 1.6f;
@@ -63,6 +65,9 @@ ASlimeCharacter::ASlimeCharacter()
 	SurfaceMesh->SetGenerateOverlapEvents(false);
 	SurfaceMesh->bUseAsyncCooking = false;
 	SurfaceMesh->SetCastShadow(true);
+	SurfaceMesh->bCastDynamicShadow = true;
+	SurfaceMesh->bCastVolumetricTranslucentShadow = true;
+	SurfaceMesh->bCastContactShadow = true;
 
 	SlimeBody = CreateDefaultSubobject<USlimeBodyComponent>(TEXT("SlimeBody"));
 	SlimeBody->SetSurfaceMesh(SurfaceMesh);
@@ -76,6 +81,11 @@ void ASlimeCharacter::BeginPlay()
 	if (SurfaceMesh)
 	{
 		SurfaceMesh->SetWorldTransform(FTransform::Identity);
+	}
+
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->JumpZVelocity = JumpZVelocity;
 	}
 
 	// Runs before the body component's BeginPlay creates its section, which needs the mesh
@@ -107,6 +117,31 @@ void ASlimeCharacter::Landed(const FHitResult& Hit)
 	if (SlimeBody)
 	{
 		SlimeBody->ApplyLandingSquash(FMath::Abs(LastVelocity.Z));
+	}
+}
+
+void ASlimeCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!Movement)
+	{
+		return;
+	}
+
+	// First jump uses CMC JumpZVelocity (kept in sync with JumpZVelocity). Air jump overrides.
+	// JumpCurrentCount lives on ACharacter, not the movement component.
+	if (JumpCurrentCount >= 2)
+	{
+		FVector Velocity = Movement->Velocity;
+		Velocity.Z = AirJumpZVelocity;
+		Movement->Velocity = Velocity;
+
+		if (SlimeBody)
+		{
+			SlimeBody->ApplyAirBounce();
+		}
 	}
 }
 

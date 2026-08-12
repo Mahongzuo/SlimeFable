@@ -2,6 +2,7 @@
 
 #include "SlimeBodyComponent.h"
 
+#include "CollisionShape.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
@@ -155,7 +156,10 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 
 	ColliderTimer += StepDelta;
 	const FVector Center = Solver.GetBodyCenter();
-	if (ColliderTimer >= ColliderRefreshInterval ||
+	const float RefreshInterval = Solver.HasFragments()
+		? FMath::Min(ColliderRefreshInterval, 0.08f)
+		: ColliderRefreshInterval;
+	if (ColliderTimer >= RefreshInterval ||
 		FVector::DistSquared(Center, LastColliderGatherCenter) > FMath::Square(ColliderRefreshDistance))
 	{
 		ColliderTimer = 0.f;
@@ -165,21 +169,22 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 	UpdateAnchor();
 
 	// Pancake state, including the soft reform after the key is released.
+	const float HalfHeight = FMath::Max(SpreadHalfHeight, 1.f);
 	if (bSpread)
 	{
-		Solver.SetSpread(true, SolverParams.RestRadius * SpreadRadiusScale, SpreadPush);
+		Solver.SetSpread(true, SolverParams.RestRadius * SpreadRadiusScale, SpreadPush, HalfHeight);
 		Solver.SetGravityScale(SpreadGravityScale);
 	}
 	else if (SpreadRecoverRemaining > 0.f)
 	{
 		SpreadRecoverRemaining = FMath::Max(SpreadRecoverRemaining - StepDelta, 0.f);
 		const float Alpha = SpreadRecoverDuration > 0.f ? SpreadRecoverRemaining / SpreadRecoverDuration : 0.f;
-		Solver.SetSpread(false, 0.f, 0.f);
+		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
 		Solver.SetGravityScale(FMath::Lerp(1.f, SpreadGravityScale, Alpha));
 	}
 	else
 	{
-		Solver.SetSpread(false, 0.f, 0.f);
+		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
 		Solver.SetGravityScale(1.f);
 	}
 
@@ -198,9 +203,17 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 	else
 	{
 		Solver.SetSkipWorldCollision(false);
+		if (Solver.HasFragments())
+		{
+			const float MergeR = AbsorbMergeRadius > KINDA_SMALL_NUMBER
+				? AbsorbMergeRadius
+				: SolverParams.RestRadius * 1.6f;
+			Solver.AbsorbNearbyFragments(MergeR);
+		}
 	}
 
 	Solver.SetFloorZ(FloorZ);
+	Solver.SetFragmentFloorZ(FragmentFloorZ);
 	Solver.SetCeilingZ(CeilingZ);
 	Solver.SetSqueeze(SqueezeAmount, SqueezeFreeDirection);
 	Solver.Step(StepDelta);
@@ -210,34 +223,65 @@ void USlimeBodyComponent::UpdateFloor()
 {
 	const FVector Foot = GetFootLocation();
 
+	auto TraceFloorUnder = [this](const FVector& Origin, float ProxyRadius, float& OutZ)
+	{
+		UWorld* World = GetWorld();
+		if (!World)
+		{
+			return false;
+		}
+
+		FCollisionQueryParams Query(TEXT("SlimeFloor"), false, GetOwner());
+		FHitResult Hit;
+		const FVector Start = Origin + FVector(0.0, 0.0, 40.0);
+		const FVector End = Origin - FVector(0.0, 0.0, 800.0);
+		const float Radius = FMath::Max(ProxyRadius, 2.f);
+		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(Radius), Query))
+		{
+			OutZ = float(Hit.ImpactPoint.Z);
+			return true;
+		}
+		if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Query))
+		{
+			OutZ = float(Hit.ImpactPoint.Z);
+			return true;
+		}
+		return false;
+	};
+
+	bool bBodyFloor = false;
 	if (OwnerCharacter)
 	{
 		const UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
 		if (Movement && Movement->CurrentFloor.bBlockingHit)
 		{
 			FloorZ = float(Movement->CurrentFloor.HitResult.ImpactPoint.Z);
-			return;
+			bBodyFloor = true;
+		}
+	}
+	if (!bBodyFloor)
+	{
+		if (!TraceFloorUnder(Foot, 4.f, FloorZ))
+		{
+			// Airborne over a void: keep the plane below the body so it does not clamp anything.
+			FloorZ = float(Foot.Z - 400.0);
 		}
 	}
 
-	UWorld* World = GetWorld();
-	if (!World)
+	FVector FragmentCenter;
+	if (Solver.GetFragmentCenter(FragmentCenter))
 	{
-		return;
-	}
-
-	FCollisionQueryParams Query(TEXT("SlimeFloor"), false, GetOwner());
-	FHitResult Hit;
-	const FVector Start = Foot + FVector(0.0, 0.0, 20.0);
-	const FVector End = Foot - FVector(0.0, 0.0, 400.0);
-	if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Query))
-	{
-		FloorZ = float(Hit.ImpactPoint.Z);
+		const float ProxyR = FragmentProxyRadius > KINDA_SMALL_NUMBER
+			? FragmentProxyRadius
+			: SolverParams.RestRadius * 0.45f;
+		if (!TraceFloorUnder(FragmentCenter, ProxyR, FragmentFloorZ))
+		{
+			FragmentFloorZ = float(FragmentCenter.Z - 800.0);
+		}
 	}
 	else
 	{
-		// Airborne over a void: keep the plane below the body so it does not clamp anything.
-		FloorZ = float(Foot.Z - 400.0);
+		FragmentFloorZ = FloorZ;
 	}
 }
 
@@ -251,9 +295,25 @@ void USlimeBodyComponent::RefreshColliders()
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(SlimeBody_RefreshColliders);
 
-	const FBox BodyBounds = Solver.GetBodyBounds();
-	const FVector Center = BodyBounds.IsValid ? BodyBounds.GetCenter() : GetFootLocation();
-	const FVector Extent = (BodyBounds.IsValid ? BodyBounds.GetExtent() : FVector(SolverParams.RestRadius)) * ColliderQueryScale;
+	FBox QueryBounds = Solver.GetBodyBounds();
+	if (Solver.HasFragments())
+	{
+		const FBox FragmentBounds = Solver.GetFragmentBounds();
+		if (FragmentBounds.IsValid)
+		{
+			if (QueryBounds.IsValid)
+			{
+				QueryBounds += FragmentBounds;
+			}
+			else
+			{
+				QueryBounds = FragmentBounds;
+			}
+			QueryBounds = QueryBounds.ExpandBy(FragmentColliderRadius);
+		}
+	}
+	const FVector Center = QueryBounds.IsValid ? QueryBounds.GetCenter() : GetFootLocation();
+	const FVector Extent = (QueryBounds.IsValid ? QueryBounds.GetExtent() : FVector(SolverParams.RestRadius)) * ColliderQueryScale;
 	LastColliderGatherCenter = Solver.GetBodyCenter();
 
 	FCollisionObjectQueryParams ObjectParams;
@@ -584,6 +644,11 @@ void USlimeBodyComponent::ApplyLandingSquash(float ImpactSpeed)
 	Solver.ApplyLandingSquash(ImpactSpeed);
 }
 
+void USlimeBodyComponent::ApplyAirBounce()
+{
+	Solver.ApplyAirBounce();
+}
+
 void USlimeBodyComponent::RebuildSurface()
 {
 	if (!SurfaceMesh)
@@ -600,7 +665,19 @@ void USlimeBodyComponent::RebuildSurface()
 		ActiveSurface.SplatRadiusMultiplier = FMath::Max(ActiveSurface.SplatRadiusMultiplier, SpreadSplatMultiplier);
 		ActiveSurface.IsoThreshold = FMath::Min(ActiveSurface.IsoThreshold, 0.22f);
 	}
-	Surface.Configure(ActiveSurface, SolverParams.ParticleSpacing);
+
+	const bool bNeedConfigure = !Surface.IsConfigured()
+		|| !FMath::IsNearlyEqual(Surface.GetParticleSpacing(), SolverParams.ParticleSpacing)
+		|| !FMath::IsNearlyEqual(Surface.GetParams().SplatRadiusMultiplier, ActiveSurface.SplatRadiusMultiplier)
+		|| !FMath::IsNearlyEqual(Surface.GetParams().IsoThreshold, ActiveSurface.IsoThreshold)
+		|| Surface.GetParams().MaxGridDim != ActiveSurface.MaxGridDim
+		|| Surface.GetParams().MaxVertices != ActiveSurface.MaxVertices
+		|| Surface.GetParams().BlurPasses != ActiveSurface.BlurPasses
+		|| !FMath::IsNearlyEqual(Surface.GetParams().CellSizeMultiplier, ActiveSurface.CellSizeMultiplier);
+	if (bNeedConfigure)
+	{
+		Surface.Configure(ActiveSurface, SolverParams.ParticleSpacing);
+	}
 
 	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter());
 
@@ -699,7 +776,7 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 	{
 	case ESlimeSimQuality::High:
 		StepRate = 40.f;
-		SurfaceRate = 30.f;
+		SurfaceRate = 40.f;
 		SolverParams.DensityIterations = 2;
 		SurfaceParams.MaxGridDim = 24;
 		SurfaceParams.BlurPasses = 1;
@@ -707,7 +784,7 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 
 	case ESlimeSimQuality::Medium:
 		StepRate = 30.f;
-		SurfaceRate = 15.f;
+		SurfaceRate = 30.f;
 		SolverParams.DensityIterations = 1;
 		SurfaceParams.MaxGridDim = 18;
 		SurfaceParams.BlurPasses = 1;
@@ -715,7 +792,7 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 
 	case ESlimeSimQuality::Low:
 		StepRate = 20.f;
-		SurfaceRate = 8.f;
+		SurfaceRate = 20.f;
 		SolverParams.DensityIterations = 1;
 		SurfaceParams.MaxGridDim = 14;
 		SurfaceParams.BlurPasses = 0;

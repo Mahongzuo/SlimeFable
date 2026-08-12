@@ -54,9 +54,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "20.0", ClampMax = "90.0"))
 	float StepRate = 40.f;
 
-	/** Surface rebuilds per second. Cheaper than the solver rate on purpose. */
+	/** Surface rebuilds per second. Match StepRate so mesh resolution does not stutter against the solve. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "5.0", ClampMax = "60.0"))
-	float SurfaceRate = 30.f;
+	float SurfaceRate = 40.f;
 
 	/** Guards against a spiral of death after a hitch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "1", ClampMax = "4"))
@@ -77,6 +77,14 @@ public:
 	/** Query box scale over the body bounds. Above 1 so walls enter the set before contact. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "1.0", ClampMax = "3.0"))
 	float ColliderQueryScale = 1.5f;
+
+	/** Extra query padding around launched chunks so distant walls stay in the collider set. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "4.0", ClampMax = "80.0"))
+	float FragmentColliderRadius = 18.f;
+
+	/** Analytic floor-proxy radius under the chunk COM (≈ RestRadius * 0.45 when left at default). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "2.0", ClampMax = "40.0"))
+	float FragmentProxyRadius = 12.f;
 
 	// ---- Adaptive capsule and squeeze ------------------------------------------------
 
@@ -125,11 +133,15 @@ public:
 
 	// ---- Pancake ---------------------------------------------------------------------
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "5.0"))
-	float SpreadRadiusScale = 2.3f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "8.0"))
+	float SpreadRadiusScale = 4.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0"))
-	float SpreadPush = 900.f;
+	float SpreadPush = 380.f;
+
+	/** Half-thickness of the pancake disk, in cm. Thin sheet ~ SIM DomeHeight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.5", ClampMax = "12.0"))
+	float SpreadHalfHeight = 1.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "4.0"))
 	float SpreadGravityScale = 1.8f;
@@ -162,6 +174,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.5"))
 	float RecallTimeout = 5.f;
+
+	/**
+	 *  Distance from body COM at which flying chunks auto-merge back (metaball absorb).
+	 *  0 = RestRadius * 1.6.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.0", ClampMax = "120.0"))
+	float AbsorbMergeRadius = 0.f;
 
 	// ---- Quality ---------------------------------------------------------------------
 
@@ -230,6 +249,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ApplyLandingSquash(float ImpactSpeed);
 
+	/** Light double-jump "duang"; far milder than a landing squash. */
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void ApplyAirBounce();
+
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetQuality(ESlimeSimQuality InQuality);
 
@@ -274,6 +297,7 @@ private:
 	FVector LastColliderGatherCenter = FVector::ZeroVector;
 
 	float FloorZ = -1.e9f;
+	float FragmentFloorZ = -1.e9f;
 	float CeilingZ = 1.e9f;
 	float SqueezeAmount = 0.f;
 	float ReportedSqueeze = 0.f;

@@ -342,6 +342,7 @@ void USlimeAbilityComponent::HandleLaunchCompleted()
 	FVector Direction;
 	if (!Body || !GetAimDirection(Direction))
 	{
+		ChargeElapsed = 0.f;
 		return;
 	}
 
