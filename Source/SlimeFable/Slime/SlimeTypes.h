@@ -165,7 +165,7 @@ struct SLIMEFABLE_API FSlimeSurfaceParams
 
 	/** Density grid cell size as a multiple of ParticleSpacing. Larger is cheaper and blobbier. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface", meta = (ClampMin = "0.5", ClampMax = "2.5"))
-	float CellSizeMultiplier = 1.2f;
+	float CellSizeMultiplier = 0.85f;
 
 	/** Splat radius as a multiple of ParticleSpacing. Below ~1.5 the surface breaks into lumps. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface", meta = (ClampMin = "1.2", ClampMax = "3.5"))
@@ -177,7 +177,7 @@ struct SLIMEFABLE_API FSlimeSurfaceParams
 
 	/** Hard cap on grid samples per axis. Cell size grows rather than exceeding this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface", meta = (ClampMin = "8", ClampMax = "48"))
-	int32 MaxGridDim = 24;
+	int32 MaxGridDim = 36;
 
 	/**
 	 *  Vertex budget. Kept fixed so the render section can be updated in place instead of
@@ -188,7 +188,7 @@ struct SLIMEFABLE_API FSlimeSurfaceParams
 
 	/** Separable 1-2-1 smoothing passes over the density field. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface", meta = (ClampMin = "0", ClampMax = "3"))
-	int32 BlurPasses = 1;
+	int32 BlurPasses = 2;
 };
 
 namespace SlimeSim

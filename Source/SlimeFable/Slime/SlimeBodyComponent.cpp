@@ -81,6 +81,7 @@ void USlimeBodyComponent::ApplyParams()
 	Surface.Configure(SurfaceParams, SolverParams.ParticleSpacing);
 	// The vertex budget defines the index buffer, so the section has to be recreated.
 	bMeshSectionCreated = false;
+	bShadowMeshSectionCreated = false;
 }
 
 void USlimeBodyComponent::ResolveMaterial()
@@ -93,6 +94,12 @@ void USlimeBodyComponent::ResolveMaterial()
 	if (!ResolvedMaterial)
 	{
 		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: no body material assigned on '%s'; the surface will use the engine default."), *GetNameSafe(GetOwner()));
+	}
+
+	ResolvedShadowMaterial = ShadowCasterMaterial;
+	if (!ResolvedShadowMaterial && !ShadowCasterMaterialPath.IsNull())
+	{
+		ResolvedShadowMaterial = ShadowCasterMaterialPath.LoadSynchronous();
 	}
 }
 
@@ -693,7 +700,7 @@ void USlimeBodyComponent::RebuildSurface()
 void USlimeBodyComponent::PushMeshSection()
 {
 	const TArray<FVector>& Vertices = Surface.GetVertices();
-	if (Vertices.Num() == 0)
+	if (Vertices.Num() == 0 || !SurfaceMesh)
 	{
 		return;
 	}
@@ -703,24 +710,80 @@ void USlimeBodyComponent::PushMeshSection()
 	const TArray<FVector2D> NoUVs;
 	const TArray<FLinearColor> NoColors;
 	const TArray<FProcMeshTangent> NoTangents;
+	const TArray<FVector>& Normals = Surface.GetNormals();
+	const TArray<int32>& Indices = Surface.GetIndices();
 
 	if (!bMeshSectionCreated)
 	{
 		SurfaceMesh->ClearAllMeshSections();
 		SurfaceMesh->CreateMeshSection_LinearColor(
-			0, Vertices, Surface.GetIndices(), Surface.GetNormals(),
+			0, Vertices, Indices, Normals,
 			NoUVs, NoColors, NoTangents, false);
 		if (ResolvedMaterial)
 		{
 			SurfaceMesh->SetMaterial(0, ResolvedMaterial);
 		}
 		bMeshSectionCreated = true;
+	}
+	else
+	{
+		// Vertex count is constant by design, so this is an in place update: no reallocation and
+		// no collision cook, which is what made the reference implementation expensive.
+		SurfaceMesh->UpdateMeshSection_LinearColor(0, Vertices, Normals, NoUVs, NoColors, NoTangents);
+	}
+
+	// CreateMeshSection can reset component shadow flags; keep the jelly casting-free.
+	SurfaceMesh->SetCastShadow(false);
+	SurfaceMesh->bCastDynamicShadow = false;
+	SurfaceMesh->bCastVolumetricTranslucentShadow = false;
+	SurfaceMesh->bCastContactShadow = false;
+	SurfaceMesh->bReceiveMobileCSMShadows = false;
+
+	if (!ShadowMesh)
+	{
 		return;
 	}
 
-	// Vertex count is constant by design, so this is an in place update: no reallocation and
-	// no collision cook, which is what made the reference implementation expensive.
-	SurfaceMesh->UpdateMeshSection_LinearColor(0, Vertices, Surface.GetNormals(), NoUVs, NoColors, NoTangents);
+	// Slightly shrink the opaque proxy so its CSM does not stick to the translucent shell.
+	constexpr float ShadowProxyScale = 0.92f;
+	FVector ShadowCentroid = FVector::ZeroVector;
+	for (const FVector& Vertex : Vertices)
+	{
+		ShadowCentroid += Vertex;
+	}
+	ShadowCentroid /= float(Vertices.Num());
+
+	TArray<FVector> ShadowVertices;
+	ShadowVertices.Reserve(Vertices.Num());
+	for (const FVector& Vertex : Vertices)
+	{
+		ShadowVertices.Add(ShadowCentroid + (Vertex - ShadowCentroid) * ShadowProxyScale);
+	}
+
+	if (!bShadowMeshSectionCreated)
+	{
+		ShadowMesh->ClearAllMeshSections();
+		ShadowMesh->CreateMeshSection_LinearColor(
+			0, ShadowVertices, Indices, Normals,
+			NoUVs, NoColors, NoTangents, false);
+		if (ResolvedShadowMaterial)
+		{
+			ShadowMesh->SetMaterial(0, ResolvedShadowMaterial);
+		}
+		bShadowMeshSectionCreated = true;
+	}
+	else
+	{
+		ShadowMesh->UpdateMeshSection_LinearColor(0, ShadowVertices, Normals, NoUVs, NoColors, NoTangents);
+	}
+
+	ShadowMesh->SetHiddenInGame(true);
+	ShadowMesh->SetVisibility(false);
+	ShadowMesh->bCastHiddenShadow = true;
+	ShadowMesh->SetCastShadow(true);
+	ShadowMesh->bCastDynamicShadow = true;
+	ShadowMesh->bCastVolumetricTranslucentShadow = false;
+	ShadowMesh->bCastContactShadow = false;
 }
 
 void USlimeBodyComponent::UpdateQuality()
@@ -778,22 +841,25 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 		StepRate = 40.f;
 		SurfaceRate = 40.f;
 		SolverParams.DensityIterations = 2;
-		SurfaceParams.MaxGridDim = 24;
-		SurfaceParams.BlurPasses = 1;
+		SurfaceParams.CellSizeMultiplier = 0.85f;
+		SurfaceParams.MaxGridDim = 36;
+		SurfaceParams.BlurPasses = 2;
 		break;
 
 	case ESlimeSimQuality::Medium:
 		StepRate = 30.f;
 		SurfaceRate = 30.f;
 		SolverParams.DensityIterations = 1;
-		SurfaceParams.MaxGridDim = 18;
-		SurfaceParams.BlurPasses = 1;
+		SurfaceParams.CellSizeMultiplier = 1.0f;
+		SurfaceParams.MaxGridDim = 28;
+		SurfaceParams.BlurPasses = 2;
 		break;
 
 	case ESlimeSimQuality::Low:
 		StepRate = 20.f;
 		SurfaceRate = 20.f;
 		SolverParams.DensityIterations = 1;
+		SurfaceParams.CellSizeMultiplier = 1.2f;
 		SurfaceParams.MaxGridDim = 14;
 		SurfaceParams.BlurPasses = 0;
 		break;

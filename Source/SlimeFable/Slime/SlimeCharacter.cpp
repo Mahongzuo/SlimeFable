@@ -41,13 +41,16 @@ ASlimeCharacter::ASlimeCharacter()
 	}
 
 	// The skeletal mesh stays for future accessories but the body itself is the procedural
-	// surface, so nothing on it should render or tick.
+	// surface, so nothing on it should render, tick, or cast shadows into the jelly.
 	if (USkeletalMeshComponent* SkeletalBody = GetMesh())
 	{
 		SkeletalBody->SetHiddenInGame(true);
 		SkeletalBody->SetVisibility(false);
 		SkeletalBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		SkeletalBody->SetComponentTickEnabled(false);
+		SkeletalBody->SetCastShadow(false);
+		SkeletalBody->bCastDynamicShadow = false;
+		SkeletalBody->bCastContactShadow = false;
 	}
 
 	SurfaceMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SlimeSurface"));
@@ -64,13 +67,35 @@ ASlimeCharacter::ASlimeCharacter()
 	SurfaceMesh->bUseComplexAsSimpleCollision = false;
 	SurfaceMesh->SetGenerateOverlapEvents(false);
 	SurfaceMesh->bUseAsyncCooking = false;
-	SurfaceMesh->SetCastShadow(true);
-	SurfaceMesh->bCastDynamicShadow = true;
-	SurfaceMesh->bCastVolumetricTranslucentShadow = true;
-	SurfaceMesh->bCastContactShadow = true;
+	// Visible jelly does not cast — the opaque ShadowMesh proxy owns ground shadows.
+	SurfaceMesh->SetCastShadow(false);
+	SurfaceMesh->bCastDynamicShadow = false;
+	SurfaceMesh->bCastVolumetricTranslucentShadow = false;
+	SurfaceMesh->bCastContactShadow = false;
+	// Avoid CSM speckles on the translucent shell (proxy still shades the ground).
+	SurfaceMesh->bReceiveMobileCSMShadows = false;
+
+	ShadowMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SlimeShadow"));
+	ShadowMesh->SetupAttachment(RootComponent);
+	ShadowMesh->SetUsingAbsoluteLocation(true);
+	ShadowMesh->SetUsingAbsoluteRotation(true);
+	ShadowMesh->SetUsingAbsoluteScale(true);
+	ShadowMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ShadowMesh->bUseComplexAsSimpleCollision = false;
+	ShadowMesh->SetGenerateOverlapEvents(false);
+	ShadowMesh->bUseAsyncCooking = false;
+	ShadowMesh->SetHiddenInGame(true);
+	ShadowMesh->SetVisibility(false);
+	ShadowMesh->bCastHiddenShadow = true;
+	ShadowMesh->SetCastShadow(true);
+	ShadowMesh->bCastDynamicShadow = true;
+	// Contact / volumetric casts paint black noise back onto the translucent SurfaceMesh.
+	ShadowMesh->bCastVolumetricTranslucentShadow = false;
+	ShadowMesh->bCastContactShadow = false;
 
 	SlimeBody = CreateDefaultSubobject<USlimeBodyComponent>(TEXT("SlimeBody"));
 	SlimeBody->SetSurfaceMesh(SurfaceMesh);
+	SlimeBody->SetShadowMesh(ShadowMesh);
 
 	SlimeElement = CreateDefaultSubobject<USlimeElementComponent>(TEXT("SlimeElement"));
 	SlimeAbilities = CreateDefaultSubobject<USlimeAbilityComponent>(TEXT("SlimeAbilities"));
@@ -81,6 +106,10 @@ void ASlimeCharacter::BeginPlay()
 	if (SurfaceMesh)
 	{
 		SurfaceMesh->SetWorldTransform(FTransform::Identity);
+	}
+	if (ShadowMesh)
+	{
+		ShadowMesh->SetWorldTransform(FTransform::Identity);
 	}
 
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())

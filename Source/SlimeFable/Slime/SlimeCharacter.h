@@ -52,12 +52,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetSurfaceMesh() const { return SurfaceMesh; }
 
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	UProceduralMeshComponent* GetShadowMesh() const { return ShadowMesh; }
+
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	/** Surface mesh. Vertices are world space, so this component sits at the world origin. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<UProceduralMeshComponent> SurfaceMesh;
+
+	/**
+	 *  Hidden opaque copy that only casts shadows — avoids translucent self-shadow speckles
+	 *  while keeping a readable ground blob.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
+	TObjectPtr<UProceduralMeshComponent> ShadowMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<USlimeBodyComponent> SlimeBody;

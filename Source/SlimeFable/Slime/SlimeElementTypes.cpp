@@ -42,7 +42,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("A8C4F0")));
 		Profile.EmissiveColor = FLinearColor::Black;
 		Profile.EmissiveIntensity = 0.f;
-		Profile.Opacity = 0.8f;
+		Profile.Opacity = 0.62f;
 		Profile.Roughness = 0.18f;
 		Profile.Refraction = 1.08f;
 		Profile.FlowSpeed = 0.35f;
@@ -53,12 +53,12 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 	case ESlimeElement::Wind:
 		Profile.DisplayName = LOCTEXT("Wind", "风");
 		Profile.Tag = TEXT("WIND");
-		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("8FBA96")));
-		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("C2D6C6")));
-		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("DCE9DD")));
+		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("3D9B5C")));
+		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("6BCF84")));
+		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("A8E6B8")));
 		Profile.EmissiveColor = FLinearColor::Black;
 		Profile.EmissiveIntensity = 0.f;
-		Profile.Opacity = 0.78f;
+		Profile.Opacity = 0.6f;
 		Profile.Roughness = 0.15f;
 		Profile.Refraction = 1.04f;
 		Profile.FlowSpeed = 1.1f;
@@ -69,13 +69,12 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 	case ESlimeElement::Fire:
 		Profile.DisplayName = LOCTEXT("Fire", "火");
 		Profile.Tag = TEXT("FIRE");
-		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("C0562A")));
-		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("E08A50")));
-		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("E08A50")));
-		// Embers glowing under the surface, not a neon shell.
-		Profile.EmissiveColor = FLinearColor(FColor::FromHex(TEXT("7A1E0A")));
+		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("E67A1A")));
+		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("F0A83A")));
+		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("FFC857")));
+		Profile.EmissiveColor = FLinearColor(FColor::FromHex(TEXT("C45A10")));
 		Profile.EmissiveIntensity = 1.6f;
-		Profile.Opacity = 0.72f;
+		Profile.Opacity = 0.58f;
 		Profile.Roughness = 0.3f;
 		Profile.Refraction = 1.06f;
 		Profile.FlowSpeed = 0.7f;
@@ -86,12 +85,12 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 	case ESlimeElement::Lightning:
 		Profile.DisplayName = LOCTEXT("Lightning", "雷");
 		Profile.Tag = TEXT("VOLT");
-		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("D2A03C")));
-		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("F2E2A0")));
-		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("F0D890")));
-		Profile.EmissiveColor = FLinearColor(FColor::FromHex(TEXT("F2E2A0")));
+		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("7B4DDB")));
+		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("A78BFA")));
+		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("C4B5FD")));
+		Profile.EmissiveColor = FLinearColor(FColor::FromHex(TEXT("9F7AEA")));
 		Profile.EmissiveIntensity = 2.2f;
-		Profile.Opacity = 0.7f;
+		Profile.Opacity = 0.58f;
 		Profile.Roughness = 0.22f;
 		Profile.Refraction = 1.07f;
 		Profile.FlowSpeed = 1.4f;
@@ -102,12 +101,12 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 	case ESlimeElement::Dark:
 		Profile.DisplayName = LOCTEXT("Dark", "暗");
 		Profile.Tag = TEXT("DARK");
-		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("3B3145")));
-		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("4A3B57")));
-		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("6B4E7A")));
-		Profile.EmissiveColor = FLinearColor(FColor::FromHex(TEXT("6B4E7A")));
-		Profile.EmissiveIntensity = 0.35f;
-		Profile.Opacity = 0.65f;
+		Profile.BaseColor = FLinearColor(FColor::FromHex(TEXT("2A2A2E")));
+		Profile.SubsurfaceColor = FLinearColor(FColor::FromHex(TEXT("3A3A40")));
+		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("5A5A62")));
+		Profile.EmissiveColor = FLinearColor(FColor::FromHex(TEXT("5A5A62")));
+		Profile.EmissiveIntensity = 0.25f;
+		Profile.Opacity = 0.55f;
 		Profile.Roughness = 0.35f;
 		Profile.Refraction = 1.1f;
 		Profile.FlowSpeed = 0.25f;
@@ -125,7 +124,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.RimColor = FLinearColor(FColor::FromHex(TEXT("A08A66")));
 		Profile.EmissiveColor = FLinearColor::Black;
 		Profile.EmissiveIntensity = 0.f;
-		Profile.Opacity = 0.7f;
+		Profile.Opacity = 0.6f;
 		Profile.Roughness = 0.55f;
 		Profile.Refraction = 1.02f;
 		Profile.FlowSpeed = 0.08f;

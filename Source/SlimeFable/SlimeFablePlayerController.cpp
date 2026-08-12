@@ -4,6 +4,7 @@
 #include "SlimeFablePlayerController.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
 #include "InputMappingContext.h"
 #include "Blueprint/UserWidget.h"
 #include "SlimeFable.h"
@@ -12,6 +13,15 @@
 void ASlimeFablePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Menu sets FInputModeUIOnly; the viewport IgnoreInput flag survives hard level travel.
+	// Always reclaim game input when a gameplay controller starts.
+	if (IsLocalPlayerController())
+	{
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+		bShowMouseCursor = false;
+	}
 
 	// only spawn touch controls on local player controllers
 	if (IsLocalPlayerController() && ShouldUseTouchControls())

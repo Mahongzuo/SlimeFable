@@ -2,6 +2,7 @@
 
 #include "DayLevel/DayLevelSubsystem.h"
 #include "SlimeFable.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/DateTime.h"
 #include "UObject/SoftObjectPath.h"
@@ -129,6 +130,14 @@ bool UDayLevelSubsystem::TravelToDayId(const UObject* WorldContextObject, FName 
 	{
 		UE_LOG(LogSlimeFable, Warning, TEXT("DayLevelSubsystem: No level for DayId %s"), *DayId.ToString());
 		return false;
+	}
+
+	// Clear menu UIOnly before hard travel so the new world's viewport is not left IgnoreInput.
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
+	{
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = false;
 	}
 
 	UGameplayStatics::OpenLevelBySoftObjectPtr(WorldContextObject, Level);

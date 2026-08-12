@@ -50,6 +50,14 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
 	TSoftObjectPtr<UMaterialInterface> BodyMaterialPath;
 
+	/** Opaque material on the hidden shadow-proxy mesh. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface")
+	TObjectPtr<UMaterialInterface> ShadowCasterMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
+	TSoftObjectPtr<UMaterialInterface> ShadowCasterMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeShadowCaster.M_SlimeShadowCaster")));
+
 	/** Solver steps per second. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "20.0", ClampMax = "90.0"))
 	float StepRate = 40.f;
@@ -208,8 +216,13 @@ public:
 	/** Assigned by the owning character in its constructor. */
 	void SetSurfaceMesh(UProceduralMeshComponent* InMesh) { SurfaceMesh = InMesh; }
 
+	void SetShadowMesh(UProceduralMeshComponent* InMesh) { ShadowMesh = InMesh; }
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetSurfaceMesh() const { return SurfaceMesh; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	UProceduralMeshComponent* GetShadowMesh() const { return ShadowMesh; }
 
 	/** Pancake mode. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
@@ -283,6 +296,9 @@ private:
 	TObjectPtr<UProceduralMeshComponent> SurfaceMesh;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> ShadowMesh;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ACharacter> OwnerCharacter;
 
 	UPROPERTY(Transient)
@@ -290,6 +306,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ResolvedMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedShadowMaterial;
 
 	float StepAccumulator = 0.f;
 	float SurfaceAccumulator = 0.f;
@@ -312,6 +331,7 @@ private:
 	bool bSpread = false;
 	bool bRecalling = false;
 	bool bMeshSectionCreated = false;
+	bool bShadowMeshSectionCreated = false;
 	bool bWarnedTruncation = false;
 
 	ESlimeSimQuality Quality = ESlimeSimQuality::High;
