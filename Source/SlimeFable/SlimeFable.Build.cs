@@ -17,6 +17,7 @@ public class SlimeFable : ModuleRules
 			"AIModule",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
+			"GameplayTags",
 			"UMG",
 			"Slate"
 		});
@@ -25,6 +26,7 @@ public class SlimeFable : ModuleRules
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SlimeFable",
+			"SlimeFable/DayLevel",
 			"SlimeFable/Variant_Platforming",
 			"SlimeFable/Variant_Platforming/Animation",
 			"SlimeFable/Variant_Combat",
