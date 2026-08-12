@@ -1,0 +1,38 @@
+# Unreal Engine — source-only (exclude Content & build artifacts)
+
+# Project assets (uasset/umap etc.)
+/Content/
+
+# Compiled / generated
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
+/Build/
+/Packaged/
+/Releases/
+
+# Visual Studio / Rider / IDE
+.vs/
+.idea/
+*.sln
+*.slnx
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.xcodeproj
+*.xcworkspace
+
+# Local / OS
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*~
+
+# Crash / dumps
+*.dmp
+*.mdmp
