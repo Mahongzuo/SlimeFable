@@ -20,7 +20,8 @@ public class SlimeFable : ModuleRules
 			"GameplayTags",
 			"UMG",
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"ProceduralMeshComponent"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -28,6 +29,7 @@ public class SlimeFable : ModuleRules
 		PublicIncludePaths.AddRange(new string[] {
 			"SlimeFable",
 			"SlimeFable/DayLevel",
+			"SlimeFable/Slime",
 			"SlimeFable/UI",
 			"SlimeFable/Variant_Platforming",
 			"SlimeFable/Variant_Platforming/Animation",
