@@ -8,10 +8,8 @@
 #include "DayLevelSubsystem.generated.h"
 
 /**
- * Lightweight day-level lookup for "this day in history" entry points.
+ * Day-level lookup and travel for "this day in history".
  * Save slot key convention: DayId string (e.g. "0812").
- * Exploration tags (to hang on Actors later):
- *   Exploration.Objective.*, Exploration.Collectible.*, Exploration.Boss.*
  */
 UCLASS()
 class SLIMEFABLE_API UDayLevelSubsystem : public UGameInstanceSubsystem
@@ -26,6 +24,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Day Level")
 	UDayLevelRegistry* GetRegistry() const { return Registry; }
+
+	UFUNCTION(BlueprintPure, Category = "Day Level")
+	bool HasRegistry() const { return Registry != nullptr; }
 
 	/** Returns today's DayId from local system date (MMDD, includes 0229 on leap days). */
 	UFUNCTION(BlueprintPure, Category = "Day Level")
@@ -43,11 +44,31 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Day Level")
 	bool GetTodayLevel(TSoftObjectPtr<UWorld>& OutLevel) const;
 
-	/** SaveGame slot name for a day level (same as DayId string). */
 	UFUNCTION(BlueprintPure, Category = "Day Level")
 	static FString GetSaveSlotKeyForDayId(FName DayId);
 
+	/** e.g. "8月12日 (0812)" */
+	UFUNCTION(BlueprintPure, Category = "Day Level")
+	FString GetTodayDisplayString() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Day Level")
+	void GetEntriesForMonth(int32 Month, TArray<FDayLevelEntry>& OutEntries) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	bool TravelToDayId(const UObject* WorldContextObject, FName DayId);
+
+	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	bool TravelToToday(const UObject* WorldContextObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	void TravelToMainMenu(const UObject* WorldContextObject);
+
 protected:
+	void LoadDefaultRegistry();
+
 	UPROPERTY()
 	TObjectPtr<UDayLevelRegistry> Registry;
+
+	UPROPERTY()
+	TSoftObjectPtr<UDayLevelRegistry> DefaultRegistryPath;
 };

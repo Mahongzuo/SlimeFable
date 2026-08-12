@@ -8,6 +8,7 @@
 2. 按任务继续：
    - 编辑器 / MCP → [`.cursor/skills/slimefable-unreal-mcp/SKILL.md`](.cursor/skills/slimefable-unreal-mcp/SKILL.md)
    - 日关卡 / 探索 Tag / 按日存档 → [`.cursor/skills/slimefable-day-levels/SKILL.md`](.cursor/skills/slimefable-day-levels/SKILL.md)
+   - 菜单 / HUD / UI 视觉 → [`.cursor/skills/slimefable-ui/SKILL.md`](.cursor/skills/slimefable-ui/SKILL.md)
 
 Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefable-agent-spec.mdc)（`alwaysApply`）会要求遵守上述流程。
 
@@ -25,6 +26,6 @@ Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefab
 
 ## Cursor 用法
 
-- 打开本仓库后，Customize → Skills 应可见三个 `slimefable-*` skill。
-- 聊天中可 `/slimefable-spec` 等手动调用。
+- 打开本仓库后，Customize → Skills 应可见四个 `slimefable-*` skill。
+- 聊天中可 `/slimefable-spec`、`/slimefable-ui` 等手动调用。
 - 细节文档在各 skill 的 `references/` 下，按需再读。

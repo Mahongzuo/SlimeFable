@@ -24,9 +24,10 @@ description: >-
 |------|--------|
 | 编辑器操作、刷资产、查 Actor、跑 Python、MCP | 读并遵循 `slimefable-unreal-mcp` |
 | `/Game/Maps/Days`、DayId、Registry、探索 Tag、按日存档 | 读并遵循 `slimefable-day-levels` |
-| 通用玩法 / UI / 模板变体 | 以本 spec + coding-conventions 为准 |
+| 主菜单 / 选关 / HUD / 字体与 UI 视觉 | 读并遵循 `slimefable-ui` |
+| 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
-手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`。
+手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-ui`。
 
 ## 项目硬事实
 
@@ -47,6 +48,6 @@ description: >-
 
 ## 当前阶段边界
 
-已做：空日关卡骨架、Registry、DayLevelSubsystem、Exploration Tag 命名预留。
+已做：空日关卡骨架、Registry、DayLevelSubsystem、Exploration Tag 命名预留、Main 主菜单与选关日历 UI（见 `slimefable-ui`）。
 
-未做（勿擅自铺开）：关卡美术内容、完整 SaveGame/探索度统计、选关 UI、Boss/收集物玩法实现。
+未做（勿擅自铺开）：关卡美术内容、完整 SaveGame/探索度统计、Boss/收集物玩法实现。

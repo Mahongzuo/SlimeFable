@@ -61,9 +61,17 @@ py E:/UE/SlimeFable/Content/Python/create_day_levels.py
 
 计入探索度的逻辑尚未实现；扩展时沿用上述根，并按 DayId 分存档。
 
+## 菜单入口（已实现）
+
+- Main 使用 `ASlimeFableMenuGameMode` + `/Game/UI/WBP_MainMenu`（今日进入 / 选关 / 退出）
+- 选关：`/Game/UI/WBP_LevelSelect` + `/Game/UI/WBP_DaySlot`
+- 视觉：迁入 `/Game/UIMaterialLab`（Halftone / MI_UI_Button / Slot / Roboto / PermanentMarker）
+- Travel：`UDayLevelSubsystem::TravelToToday` / `TravelToDayId`
+- 日关卡仍用全局 `BP_ThirdPersonGameMode`（勿把菜单 GM 设成 GlobalDefault）
+
 ## 不要做
 
 - 用 MCP 循环创建 366 个关卡
 - 把日关卡改回单目录平铺或改名脱离 `MMDD`
-- 在未设计 UI 前塞完整选关界面/存档系统（除非用户明确要求）
+- 擅自铺开完整 SaveGame / 探索度统计（除非用户明确要求）
 - 往空日关卡里塞大量占位美术（用户自行制作场景）

@@ -10,12 +10,14 @@ alwaysApply: true
 1. 先用 Read 工具阅读 `.cursor/skills/slimefable-spec/SKILL.md`。
 2. 涉及 Unreal MCP / 编辑器操作时，再读 `.cursor/skills/slimefable-unreal-mcp/SKILL.md`。
 3. 涉及日关卡、DayId、Registry、Exploration Tag、按日存档时，再读 `.cursor/skills/slimefable-day-levels/SKILL.md`。
+4. 涉及主菜单、选关、HUD、UI 字体/背景/按钮风格时，再读 `.cursor/skills/slimefable-ui/SKILL.md`。
 
 ## 硬约束（摘要）
 
 - 引擎 UE 5.8；默认地图 `/Game/Maps/Main`；日关卡 `/Game/Maps/Days/MM/MMDD`。
 - MCP 使用 `http://127.0.0.1:8010/mcp`；Tool 串行调用，禁止并行叠 MCP。
 - 批量日关卡用 `Content/Python/create_day_levels.py`，禁止 MCP 逐关创建 366 张图。
+- UI 遵循 `slimefable-ui`：土色 NPR 底、墨迹按钮、Marker+KuaiLe 字体，禁用 Halftone 霓虹默认皮。
 - 与用户用中文沟通；勿改 `~/.cursor/skills-cursor/`。
 
-需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`。
+需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-ui`。
