@@ -12,6 +12,7 @@
 #include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeElementComponent.h"
+#include "SlimeTrailComponent.h"
 
 ASlimeCharacter::ASlimeCharacter()
 {
@@ -100,6 +101,7 @@ ASlimeCharacter::ASlimeCharacter()
 
 	SlimeElement = CreateDefaultSubobject<USlimeElementComponent>(TEXT("SlimeElement"));
 	SlimeAbilities = CreateDefaultSubobject<USlimeAbilityComponent>(TEXT("SlimeAbilities"));
+	SlimeTrail = CreateDefaultSubobject<USlimeTrailComponent>(TEXT("SlimeTrail"));
 }
 
 void ASlimeCharacter::BeginPlay()

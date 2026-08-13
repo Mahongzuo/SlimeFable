@@ -275,6 +275,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	FVector GetBlobCenter() const { return Solver.GetBodyCenter(); }
 
+	/** COM of each active ballistic mini-slime shot (refreshes shot cache). */
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	void GetActiveShotCenters(TArray<FVector>& OutCenters) const;
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	float GetSqueezeAmount() const { return SqueezeAmount; }
 

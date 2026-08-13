@@ -10,6 +10,7 @@ class UProceduralMeshComponent;
 class USlimeAbilityComponent;
 class USlimeBodyComponent;
 class USlimeElementComponent;
+class USlimeTrailComponent;
 
 /**
  *  The slime pawn.
@@ -72,6 +73,9 @@ public:
 	USlimeElementComponent* GetSlimeElement() const { return SlimeElement; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeTrailComponent* GetSlimeTrail() const { return SlimeTrail; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetSurfaceMesh() const { return SurfaceMesh; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
@@ -101,6 +105,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<USlimeElementComponent> SlimeElement;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
+	TObjectPtr<USlimeTrailComponent> SlimeTrail;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

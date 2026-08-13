@@ -112,6 +112,12 @@ FVector USlimeBodyComponent::GetFootLocation() const
 	return GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
 }
 
+void USlimeBodyComponent::GetActiveShotCenters(TArray<FVector>& OutCenters) const
+{
+	const_cast<FSlimeSolver&>(Solver).RefreshShotStates();
+	Solver.GetShotCenters(OutCenters);
+}
+
 void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
