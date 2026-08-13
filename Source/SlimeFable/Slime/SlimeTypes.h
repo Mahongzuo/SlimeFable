@@ -14,6 +14,37 @@ enum class ESlimeSimQuality : uint8
 	Low
 };
 
+/** Transient solver overlay used by combat attacks instead of skeletal montages. */
+USTRUCT(BlueprintType)
+struct SLIMEFABLE_API FSlimeCombatPoseState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	bool bActive = false;
+
+	/** World-space strike direction (XY). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	FVector Forward = FVector::ForwardVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.2", ClampMax = "4.0"))
+	float StretchForward = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.2", ClampMax = "4.0"))
+	float StretchSide = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.2", ClampMax = "4.0"))
+	float StretchUp = 1.f;
+
+	/** Inflates every axis. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+	float Pulse = 0.f;
+
+	/** Squashes height for slams. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Flatten = 0.f;
+};
+
 /**
  *  Tunable solver settings.
  *  Everything here is runtime data so particle budget and resolution can be changed

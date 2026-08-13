@@ -3,13 +3,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CombatDamageable.h"
 #include "SlimeFableCharacter.h"
+#include "SlimeCombatTypes.h"
 #include "SlimeCharacter.generated.h"
 
 class UProceduralMeshComponent;
 class USlimeAbilityComponent;
 class USlimeBodyComponent;
+class USlimeCombatComponent;
 class USlimeElementComponent;
+class USlimeHealthComponent;
+class USlimeLockOnComponent;
+class USlimeStatusComponent;
 class USlimeTrailComponent;
 
 /**
@@ -20,7 +26,7 @@ class USlimeTrailComponent;
  *  by dropping in more components rather than editing this class.
  */
 UCLASS()
-class SLIMEFABLE_API ASlimeCharacter : public ASlimeFableCharacter
+class SLIMEFABLE_API ASlimeCharacter : public ASlimeFableCharacter, public ICombatDamageable
 {
 	GENERATED_BODY()
 
@@ -76,10 +82,31 @@ public:
 	USlimeTrailComponent* GetSlimeTrail() const { return SlimeTrail; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeHealthComponent* GetSlimeHealth() const { return SlimeHealth; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeStatusComponent* GetSlimeStatus() const { return SlimeStatus; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeCombatComponent* GetSlimeCombat() const { return SlimeCombat; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeLockOnComponent* GetSlimeLockOn() const { return SlimeLockOn; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetSurfaceMesh() const { return SurfaceMesh; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetShadowMesh() const { return ShadowMesh; }
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	virtual void HandleDeath() override;
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	virtual void ApplyHealing(float Healing, AActor* Healer) override;
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	virtual void NotifyDanger(const FVector& DangerLocation, AActor* DangerSource) override;
 
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
@@ -108,6 +135,18 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<USlimeTrailComponent> SlimeTrail;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<USlimeHealthComponent> SlimeHealth;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<USlimeStatusComponent> SlimeStatus;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<USlimeCombatComponent> SlimeCombat;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<USlimeLockOnComponent> SlimeLockOn;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

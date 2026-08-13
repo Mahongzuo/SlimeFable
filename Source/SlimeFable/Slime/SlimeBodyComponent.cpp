@@ -728,6 +728,22 @@ void USlimeBodyComponent::ApplyAirBounce()
 	Solver.ApplyAirBounce();
 }
 
+void USlimeBodyComponent::SetCombatPose(const FSlimeCombatPoseState& Pose)
+{
+	Solver.SetCombatPose(Pose);
+}
+
+void USlimeBodyComponent::ClearCombatPose()
+{
+	FSlimeCombatPoseState Empty;
+	Solver.SetCombatPose(Empty);
+}
+
+void USlimeBodyComponent::ApplyHitJolt()
+{
+	Solver.ApplyHitJolt();
+}
+
 void USlimeBodyComponent::RebuildSurface()
 {
 	if (!SurfaceMesh)
@@ -1021,7 +1037,12 @@ void USlimeBodyComponent::ResetBody()
 
 int32 USlimeBodyComponent::LaunchChunk(const FVector& LaunchVelocity)
 {
-	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, LaunchFraction, FragmentLifetime, MaxActiveShots);
+	return LaunchTendril(LaunchVelocity, LaunchFraction, FragmentLifetime);
+}
+
+int32 USlimeBodyComponent::LaunchTendril(const FVector& LaunchVelocity, float Fraction, float Life)
+{
+	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, Fraction, Life, MaxActiveShots);
 	if (Launched > 0)
 	{
 		SetRecalling(false);

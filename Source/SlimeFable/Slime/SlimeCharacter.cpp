@@ -11,7 +11,11 @@
 #include "ProceduralMeshComponent.h"
 #include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
+#include "SlimeHealthComponent.h"
+#include "SlimeLockOnComponent.h"
+#include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
 
 ASlimeCharacter::ASlimeCharacter()
@@ -102,6 +106,16 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimeElement = CreateDefaultSubobject<USlimeElementComponent>(TEXT("SlimeElement"));
 	SlimeAbilities = CreateDefaultSubobject<USlimeAbilityComponent>(TEXT("SlimeAbilities"));
 	SlimeTrail = CreateDefaultSubobject<USlimeTrailComponent>(TEXT("SlimeTrail"));
+	SlimeHealth = CreateDefaultSubobject<USlimeHealthComponent>(TEXT("SlimeHealth"));
+	SlimeStatus = CreateDefaultSubobject<USlimeStatusComponent>(TEXT("SlimeStatus"));
+	SlimeCombat = CreateDefaultSubobject<USlimeCombatComponent>(TEXT("SlimeCombat"));
+	SlimeLockOn = CreateDefaultSubobject<USlimeLockOnComponent>(TEXT("SlimeLockOn"));
+	if (SlimeHealth)
+	{
+		SlimeHealth->Team = ESlimeTeam::Player;
+		SlimeHealth->bDestroyOnDeath = false;
+		SlimeHealth->bRegenOnDeath = true;
+	}
 }
 
 void ASlimeCharacter::BeginPlay()
@@ -136,7 +150,10 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 {
 	LastVelocity = GetVelocity();
 	Super::Tick(DeltaSeconds);
-	UpdateCameraZoom(DeltaSeconds);
+	if (IsPlayerControlled())
+	{
+		UpdateCameraZoom(DeltaSeconds);
+	}
 }
 
 void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
@@ -235,5 +252,37 @@ void ASlimeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		{
 			SlimeAbilities->BindInput(EnhancedInput);
 		}
+		if (SlimeCombat)
+		{
+			SlimeCombat->BindInput(EnhancedInput);
+		}
+		if (SlimeLockOn)
+		{
+			SlimeLockOn->BindInput(EnhancedInput);
+		}
 	}
+}
+
+void ASlimeCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse)
+{
+	if (SlimeHealth)
+	{
+		SlimeHealth->ApplyDamage(Damage, DamageCauser, DamageLocation, DamageImpulse);
+	}
+}
+
+void ASlimeCharacter::HandleDeath()
+{
+}
+
+void ASlimeCharacter::ApplyHealing(float Healing, AActor* Healer)
+{
+	if (SlimeHealth)
+	{
+		SlimeHealth->ApplyHealing(Healing);
+	}
+}
+
+void ASlimeCharacter::NotifyDanger(const FVector& DangerLocation, AActor* DangerSource)
+{
 }

@@ -48,7 +48,8 @@ public:
 	TObjectPtr<UMaterialInterface> BodyMaterial;
 
 	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
-	TSoftObjectPtr<UMaterialInterface> BodyMaterialPath;
+	TSoftObjectPtr<UMaterialInterface> BodyMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeBody.M_SlimeBody")));
 
 	/** Opaque material on the hidden shadow-proxy mesh. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface")
@@ -257,6 +258,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	int32 LaunchChunk(const FVector& LaunchVelocity);
 
+	/** Combat tendrils: short-lived clone blobs that peel then get recalled. */
+	int32 LaunchTendril(const FVector& LaunchVelocity, float Fraction, float Life);
+
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetRecalling(bool bInRecalling);
 
@@ -293,6 +297,15 @@ public:
 	/** Light double-jump "duang"; far milder than a landing squash. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ApplyAirBounce();
+
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void SetCombatPose(const FSlimeCombatPoseState& Pose);
+
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void ClearCombatPose();
+
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void ApplyHitJolt();
 
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetQuality(ESlimeSimQuality InQuality);

@@ -141,6 +141,24 @@ void USlimeElementComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 			TransitionFrom = TransitionTo;
 		}
 	}
+	else if (HitFlashRemaining > 0.f)
+	{
+		ApplyProfileToMaterial(TransitionTo);
+	}
+
+	if (HitFlashRemaining > 0.f)
+	{
+		HitFlashRemaining = FMath::Max(HitFlashRemaining - DeltaTime, 0.f);
+		ApplyHitFlashOverlay();
+		if (HitFlashRemaining <= 0.f)
+		{
+			ApplyProfileToMaterial(TransitionTo);
+		}
+	}
+	else if (OpacityScale < 1.f && BodyMaterial)
+	{
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, TransitionTo.Opacity * OpacityScale);
+	}
 }
 
 bool USlimeElementComponent::EnsureDynamicMaterial()
@@ -180,7 +198,7 @@ void USlimeElementComponent::ApplyProfileToMaterial(const FSlimeElementProfile& 
 	BodyMaterial->SetVectorParameterValue(SlimeElementParams::EmissiveColor, Profile.EmissiveColor);
 	BodyMaterial->SetVectorParameterValue(SlimeElementParams::RimColor, Profile.RimColor);
 	BodyMaterial->SetScalarParameterValue(SlimeElementParams::EmissiveIntensity, Profile.EmissiveIntensity);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, Profile.Opacity);
+	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, Profile.Opacity * OpacityScale);
 	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Roughness, Profile.Roughness);
 	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Refraction, Profile.Refraction);
 	BodyMaterial->SetScalarParameterValue(SlimeElementParams::FlowSpeed, Profile.FlowSpeed);
@@ -299,4 +317,61 @@ void USlimeElementComponent::HandleSqueezeChanged(float SqueezeAmount)
 	{
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::SqueezeAmount, SqueezeAmount);
 	}
+}
+
+void USlimeElementComponent::PlayHitFlash()
+{
+	const UWorld* World = GetWorld();
+	HitTimeSeconds = World ? World->GetTimeSeconds() : 0.f;
+	HitFlashRemaining = HitFlashDuration;
+	if (EnsureDynamicMaterial())
+	{
+		ApplyHitFlashOverlay();
+	}
+}
+
+void USlimeElementComponent::SetOpacityScale(float Scale)
+{
+	OpacityScale = FMath::Clamp(Scale, 0.f, 1.f);
+	if (EnsureDynamicMaterial() && BodyMaterial)
+	{
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, TransitionTo.Opacity * OpacityScale);
+	}
+}
+
+void USlimeElementComponent::ApplyHitFlashOverlay()
+{
+	if (!BodyMaterial)
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : HitTimeSeconds;
+	const float Age = FMath::Max(Now - HitTimeSeconds, 0.f);
+	const float Envelope = HitFlashDuration > 0.f ? FMath::Clamp(1.f - Age / HitFlashDuration, 0.f, 1.f) : 0.f;
+	const float Pulse = Envelope * FMath::Abs(FMath::Sin(Age * HitFlashFrequency * PI));
+	if (Pulse <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FLinearColor HitColor(0.85f, 0.12f, 0.10f, 1.f);
+	FLinearColor Base;
+	FLinearColor Emissive;
+	FLinearColor Rim;
+	BodyMaterial->GetVectorParameterValue(SlimeElementParams::BaseColor, Base);
+	BodyMaterial->GetVectorParameterValue(SlimeElementParams::EmissiveColor, Emissive);
+	BodyMaterial->GetVectorParameterValue(SlimeElementParams::RimColor, Rim);
+
+	BodyMaterial->SetVectorParameterValue(SlimeElementParams::BaseColor, FMath::Lerp(Base, HitColor, Pulse));
+	BodyMaterial->SetVectorParameterValue(SlimeElementParams::EmissiveColor, FMath::Lerp(Emissive, HitColor, Pulse));
+	BodyMaterial->SetVectorParameterValue(SlimeElementParams::RimColor, FMath::Lerp(Rim, HitColor, Pulse * 0.85f));
+
+	float Intensity = 0.f;
+	BodyMaterial->GetScalarParameterValue(SlimeElementParams::EmissiveIntensity, Intensity);
+	BodyMaterial->SetScalarParameterValue(SlimeElementParams::EmissiveIntensity, Intensity + Pulse * 3.2f);
+
+	BodyMaterial->SetScalarParameterValue(FName(TEXT("HitTime")), HitTimeSeconds);
+	BodyMaterial->SetScalarParameterValue(FName(TEXT("HitFlash")), Envelope);
 }

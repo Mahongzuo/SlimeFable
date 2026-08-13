@@ -96,6 +96,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime|VFX")
 	UNiagaraSystem* GetDashNiagaraForElement(ESlimeElement Element) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Slime|VFX")
+	void PlayHitFlash();
+
+	/** 0–1 multiplier on the current profile opacity (death fade). */
+	UFUNCTION(BlueprintCallable, Category = "Slime|Element")
+	void SetOpacityScale(float Scale);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|HitFlash", meta = (ClampMin = "0.05", ClampMax = "1.5"))
+	float HitFlashDuration = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|HitFlash", meta = (ClampMin = "4.0", ClampMax = "40.0"))
+	float HitFlashFrequency = 18.f;
+
 private:
 	void EnsureDashNiagaraDefaults();
 
@@ -108,6 +121,7 @@ private:
 	void HandleSqueezeChanged(float SqueezeAmount);
 
 	void StartTransition(ESlimeElement Target, bool bInstant);
+	void ApplyHitFlashOverlay();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> BodyMaterial;
@@ -124,4 +138,8 @@ private:
 
 	ESlimeElement PreviewedElement = ESlimeElement::Water;
 	bool bHasPreview = false;
+
+	float HitFlashRemaining = 0.f;
+	float HitTimeSeconds = -1000.f;
+	float OpacityScale = 1.f;
 };

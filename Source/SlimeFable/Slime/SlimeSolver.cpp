@@ -409,6 +409,26 @@ void FSlimeSolver::ApplyLandingSquash(float ImpactSpeed)
 	}
 }
 
+void FSlimeSolver::ApplyHitJolt()
+{
+	LandingSettleRemaining = FMath::Max(LandingSettleRemaining, 0.35f);
+	const FVector3f Center = FVector3f(GetBodyCenter());
+	for (FSlimeParticle& Particle : Particles)
+	{
+		if (Particle.IsBallistic())
+		{
+			continue;
+		}
+		FVector3f Radial = Particle.Position - Center;
+		Radial.Z *= 0.4f;
+		if (!Radial.IsNearlyZero())
+		{
+			Particle.Velocity += Radial.GetSafeNormal() * 80.f;
+		}
+		Particle.Velocity.Z *= 0.55f;
+	}
+}
+
 void FSlimeSolver::ApplyAirBounce()
 {
 	// Double-jump "duang": brief squash then springy recover, much milder than a landing.
@@ -479,7 +499,7 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 	}
 
 	// Inertia ellipsoid in (Forward, Right, Up), centre shifted slightly rearward.
-	FVector3f Forward = InertiaForward;
+	FVector3f Forward = CombatPose.bActive ? FVector3f(CombatPose.Forward) : InertiaForward;
 	Forward.Z = 0.f;
 	if (Forward.SizeSquared() < KINDA_SMALL_NUMBER)
 	{
@@ -672,6 +692,21 @@ void FSlimeSolver::Step(float Dt)
 			ShellAxes.Y *= FMath::Lerp(1.f, 0.65f, SqueezeAmount);
 			ShellAxes.Z *= FMath::Lerp(1.f, 0.55f, SqueezeAmount);
 			ShellAxes.X *= FMath::Lerp(1.f, 1.2f, SqueezeAmount);
+		}
+
+		if (CombatPose.bActive)
+		{
+			FVector3f PoseFwd = FVector3f(CombatPose.Forward);
+			PoseFwd.Z = 0.f;
+			if (PoseFwd.SizeSquared() > KINDA_SMALL_NUMBER)
+			{
+				InertiaForward = PoseFwd.GetSafeNormal();
+			}
+			const float Pulse = 1.f + CombatPose.Pulse;
+			ShellAxes.X *= CombatPose.StretchForward * Pulse;
+			ShellAxes.Y *= CombatPose.StretchSide * Pulse;
+			ShellAxes.Z *= CombatPose.StretchUp * Pulse * FMath::Lerp(1.f, 0.35f, CombatPose.Flatten);
+			ShellBackShift *= FMath::Lerp(1.f, 0.25f, CombatPose.Flatten);
 		}
 	}
 

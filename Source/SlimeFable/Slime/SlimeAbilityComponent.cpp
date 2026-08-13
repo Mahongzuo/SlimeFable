@@ -78,7 +78,6 @@ void USlimeAbilityComponent::RegisterMappingContext()
 	const APlayerController* PlayerController = GetOwningPlayerController();
 	if (!PlayerController)
 	{
-		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeAbilityComponent on '%s': no PlayerController yet; will retry IMC on possess."), *GetNameSafe(GetOwner()));
 		return;
 	}
 
@@ -168,7 +167,8 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	}
 
 	// Drive Body/UI directly so Enhanced Input handlers can hard-return while polling is on.
-	const bool bFlatten = PlayerController->IsInputKeyDown(EKeys::E);
+	// Z = flatten, X = absorb/recall, T = reset (was E / F / R).
+	const bool bFlatten = PlayerController->IsInputKeyDown(EKeys::Z);
 	if (bFlatten != bPollFlattenDown)
 	{
 		bPollFlattenDown = bFlatten;
@@ -178,12 +178,12 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		}
 	}
 
-	if (PlayerController->WasInputKeyJustPressed(EKeys::R) && Body)
+	if (PlayerController->WasInputKeyJustPressed(EKeys::T) && Body)
 	{
 		Body->ResetBody();
 	}
 
-	const bool bAbsorb = PlayerController->IsInputKeyDown(EKeys::F);
+	const bool bAbsorb = PlayerController->IsInputKeyDown(EKeys::X);
 	bPollAbsorbDown = bAbsorb;
 	if (Body)
 	{

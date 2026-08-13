@@ -92,6 +92,14 @@ public:
 	/** Seconds of landing settle remaining (driven down inside Step). */
 	float GetLandingSettleRemaining() const { return LandingSettleRemaining; }
 
+	/** Combat attack pose overlay. Cleared by the caller when the strike ends. */
+	void SetCombatPose(const FSlimeCombatPoseState& InPose) { CombatPose = InPose; }
+
+	const FSlimeCombatPoseState& GetCombatPose() const { return CombatPose; }
+
+	/** Light jolt used for hit reactions — milder than a landing squash. */
+	void ApplyHitJolt();
+
 	// ---- Queries ---------------------------------------------------------------------
 
 	const TArray<SlimeSim::FSlimeParticle>& GetParticles() const { return Particles; }
@@ -259,4 +267,6 @@ private:
 
 	float LandingSettleRemaining = 0.f;
 	float LandingSettleDuration = 2.5f;
+
+	FSlimeCombatPoseState CombatPose;
 };
