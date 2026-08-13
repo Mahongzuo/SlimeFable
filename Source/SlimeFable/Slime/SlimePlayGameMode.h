@@ -6,6 +6,8 @@
 #include "GameFramework/GameModeBase.h"
 #include "SlimePlayGameMode.generated.h"
 
+class ASlimeEnemyCharacter;
+
 /**
  *  Game mode for slime gameplay maps such as the SlimeLab sandbox.
  *
@@ -37,4 +39,8 @@ protected:
 	 */
 	UPROPERTY(EditDefaultsOnly, Category = "Slime")
 	TSoftClassPtr<APlayerController> PlayerControllerClassPath;
+
+	/** Preferred SlimeLab enemy; falls back to ASlimeEnemyCharacter if missing. */
+	UPROPERTY(EditDefaultsOnly, Category = "Slime")
+	TSoftClassPtr<ASlimeEnemyCharacter> EnemyClassPath;
 };

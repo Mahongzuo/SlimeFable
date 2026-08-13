@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/PauseMenuWidget.h"
+#include "UI/KeybindSettingsWidget.h"
+#include "UI/GraphicsSettingsWidget.h"
 #include "UI/MenuUIStyle.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -14,6 +16,15 @@
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 
+UPauseMenuWidget::UPauseMenuWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	KeybindSettingsClassPath = TSoftClassPtr<UKeybindSettingsWidget>(
+		FSoftObjectPath(TEXT("/Game/UI/WBP_KeybindSettings.WBP_KeybindSettings_C")));
+	GraphicsSettingsClassPath = TSoftClassPtr<UGraphicsSettingsWidget>(
+		FSoftObjectPath(TEXT("/Game/UI/WBP_GraphicsSettings.WBP_GraphicsSettings_C")));
+}
+
 TSharedRef<SWidget> UPauseMenuWidget::RebuildWidget()
 {
 	BuildLayoutIfNeeded();
@@ -23,6 +34,7 @@ TSharedRef<SWidget> UPauseMenuWidget::RebuildWidget()
 void UPauseMenuWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	ResolveSettingsClasses();
 	ApplyLook();
 	SetIsFocusable(true);
 
@@ -34,16 +46,59 @@ void UPauseMenuWidget::NativeConstruct()
 	{
 		LevelSelectButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnLevelSelectClicked);
 	}
+	if (KeybindButton)
+	{
+		KeybindButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnKeybindClicked);
+	}
+	if (GraphicsButton)
+	{
+		GraphicsButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnGraphicsClicked);
+	}
 	if (MainMenuButton)
 	{
 		MainMenuButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnMainMenuClicked);
 	}
 }
 
+void UPauseMenuWidget::ResolveSettingsClasses()
+{
+	if (!KeybindSettingsClass && !KeybindSettingsClassPath.IsNull())
+	{
+		KeybindSettingsClass = KeybindSettingsClassPath.LoadSynchronous();
+	}
+	if (!GraphicsSettingsClass && !GraphicsSettingsClassPath.IsNull())
+	{
+		GraphicsSettingsClass = GraphicsSettingsClassPath.LoadSynchronous();
+	}
+}
+
+bool UPauseMenuWidget::TryHandleEscape()
+{
+	if (KeybindSettingsWidget && KeybindSettingsWidget->IsInViewport()
+		&& KeybindSettingsWidget->GetVisibility() != ESlateVisibility::Collapsed)
+	{
+		KeybindSettingsWidget->RemoveFromParent();
+		SetVisibility(ESlateVisibility::Visible);
+		return true;
+	}
+	if (GraphicsSettingsWidget && GraphicsSettingsWidget->IsInViewport()
+		&& GraphicsSettingsWidget->GetVisibility() != ESlateVisibility::Collapsed)
+	{
+		GraphicsSettingsWidget->RemoveFromParent();
+		SetVisibility(ESlateVisibility::Visible);
+		return true;
+	}
+	return false;
+}
+
 FReply UPauseMenuWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
 	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
+		if (TryHandleEscape())
+		{
+			return FReply::Handled();
+		}
 		OnContinueClicked();
 		return FReply::Handled();
 	}
@@ -52,7 +107,7 @@ FReply UPauseMenuWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKey
 
 void UPauseMenuWidget::BuildLayoutIfNeeded()
 {
-	if (TitleText && ContinueButton && LevelSelectButton && MainMenuButton)
+	if (TitleText && ContinueButton && LevelSelectButton && KeybindButton && GraphicsButton && MainMenuButton)
 	{
 		bBuiltInCode = false;
 		return;
@@ -112,6 +167,8 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	TitleText = AddText(TEXT("TitleText"), FText::FromString(TEXT("暂停")));
 	ContinueButton = AddButton(TEXT("ContinueButton"), FText::FromString(TEXT("继续游戏")));
 	LevelSelectButton = AddButton(TEXT("LevelSelectButton"), FText::FromString(TEXT("返回选关")));
+	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
+	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
 	MainMenuButton = AddButton(TEXT("MainMenuButton"), FText::FromString(TEXT("返回主菜单")));
 }
 
@@ -128,11 +185,15 @@ void UPauseMenuWidget::ApplyLook()
 		DimOverlay->SetColorAndOpacity(FLinearColor::White);
 	}
 
-	FMenuUIStyle::ApplyTitleFont(TitleText, 48.f, FMenuUIStyle::WarmTitleColor());
+	// Chinese title must use KuaiLe — Marker has no CJK and shows "字" placeholders.
+	FMenuUIStyle::ApplyBrushCJKFont(TitleText, 48.f, FMenuUIStyle::WarmTitleColor());
 	UMaterialInterface* BrushBtn = FMenuUIStyle::LoadButtonMaterial();
-	FMenuUIStyle::ApplyMaterialButtonStyle(ContinueButton, BrushBtn, FVector2D(320.f, 60.f));
-	FMenuUIStyle::ApplyMaterialButtonStyle(LevelSelectButton, BrushBtn, FVector2D(320.f, 60.f));
-	FMenuUIStyle::ApplyMaterialButtonStyle(MainMenuButton, BrushBtn, FVector2D(320.f, 60.f));
+	const FVector2D Size(320.f, 60.f);
+	FMenuUIStyle::ApplyMaterialButtonStyle(ContinueButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(LevelSelectButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(GraphicsButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(MainMenuButton, BrushBtn, Size);
 
 	auto StyleLabel = [](UButton* Button)
 	{
@@ -147,7 +208,67 @@ void UPauseMenuWidget::ApplyLook()
 	};
 	StyleLabel(ContinueButton);
 	StyleLabel(LevelSelectButton);
+	StyleLabel(KeybindButton);
+	StyleLabel(GraphicsButton);
 	StyleLabel(MainMenuButton);
+}
+
+void UPauseMenuWidget::OpenKeybindSettings()
+{
+	ResolveSettingsClasses();
+	if (!KeybindSettingsWidget)
+	{
+		const TSubclassOf<UKeybindSettingsWidget> ClassToSpawn =
+			KeybindSettingsClass
+				? KeybindSettingsClass
+				: TSubclassOf<UKeybindSettingsWidget>(UKeybindSettingsWidget::StaticClass());
+		KeybindSettingsWidget = CreateWidget<UKeybindSettingsWidget>(GetOwningPlayer(), ClassToSpawn);
+	}
+	if (!KeybindSettingsWidget)
+	{
+		return;
+	}
+
+	KeybindSettingsWidget->SetReturnTarget(this);
+	SetVisibility(ESlateVisibility::Collapsed);
+	if (!KeybindSettingsWidget->IsInViewport())
+	{
+		KeybindSettingsWidget->AddToViewport(11);
+	}
+	else
+	{
+		KeybindSettingsWidget->SetVisibility(ESlateVisibility::Visible);
+	}
+	KeybindSettingsWidget->RefreshList();
+}
+
+void UPauseMenuWidget::OpenGraphicsSettings()
+{
+	ResolveSettingsClasses();
+	if (!GraphicsSettingsWidget)
+	{
+		const TSubclassOf<UGraphicsSettingsWidget> ClassToSpawn =
+			GraphicsSettingsClass
+				? GraphicsSettingsClass
+				: TSubclassOf<UGraphicsSettingsWidget>(UGraphicsSettingsWidget::StaticClass());
+		GraphicsSettingsWidget = CreateWidget<UGraphicsSettingsWidget>(GetOwningPlayer(), ClassToSpawn);
+	}
+	if (!GraphicsSettingsWidget)
+	{
+		return;
+	}
+
+	GraphicsSettingsWidget->SetReturnTarget(this);
+	SetVisibility(ESlateVisibility::Collapsed);
+	if (!GraphicsSettingsWidget->IsInViewport())
+	{
+		GraphicsSettingsWidget->AddToViewport(11);
+	}
+	else
+	{
+		GraphicsSettingsWidget->SetVisibility(ESlateVisibility::Visible);
+	}
+	GraphicsSettingsWidget->RefreshSelection();
 }
 
 void UPauseMenuWidget::OnContinueClicked()
@@ -158,6 +279,16 @@ void UPauseMenuWidget::OnContinueClicked()
 void UPauseMenuWidget::OnLevelSelectClicked()
 {
 	OnLevelSelectRequested.Broadcast();
+}
+
+void UPauseMenuWidget::OnKeybindClicked()
+{
+	OpenKeybindSettings();
+}
+
+void UPauseMenuWidget::OnGraphicsClicked()
+{
+	OpenGraphicsSettings();
 }
 
 void UPauseMenuWidget::OnMainMenuClicked()

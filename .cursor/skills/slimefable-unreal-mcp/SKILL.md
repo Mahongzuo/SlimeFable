@@ -14,10 +14,11 @@ description: >-
 
 ## 连接前提
 
-1. Unreal Editor 已打开本工程，且 MCP 已监听。
+1. Unreal Editor 已打开本工程；控制台执行 `ModelContextProtocol.StartServer 8010`（默认不自动启动，以免 Package/Cook 抢端口误报失败）。
 2. 客户端 URL：**`http://127.0.0.1:8010/mcp`**（仓库 `.mcp.json`）。
 3. 本机 **8000 常被占用**；项目已默认 8010。勿改回 8000 除非确认端口空闲。
 4. Cursor 侧若 discovery 失败：确认编辑器 Output Log 有 bind，并刷新 MCP 连接。
+5. **打包前**请关掉其它占用 8010 的编辑器实例；Cook 日志若出现 `HttpListener unable to bind` 会导致 UAT 误判失败。
 
 ## Tool Search 工作流（默认开启）
 

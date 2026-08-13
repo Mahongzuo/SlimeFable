@@ -21,6 +21,8 @@ ASlimePlayGameMode::ASlimePlayGameMode()
 		FSoftObjectPath(TEXT("/Game/Characters/Slime/BP_SlimeCharacter.BP_SlimeCharacter_C")));
 	PlayerControllerClassPath = TSoftClassPtr<APlayerController>(
 		FSoftObjectPath(TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonPlayerController.BP_ThirdPersonPlayerController_C")));
+	EnemyClassPath = TSoftClassPtr<ASlimeEnemyCharacter>(
+		FSoftObjectPath(TEXT("/Game/Characters/AI/BP_SlimeEnemy.BP_SlimeEnemy_C")));
 
 	// Resolve in the constructor so World Settings / CDO show the real Blueprint, not a stub.
 	if (UClass* ControllerClass = PlayerControllerClassPath.LoadSynchronous())
@@ -91,11 +93,26 @@ void ASlimePlayGameMode::StartPlay()
 	const FVector Forward = Player ? Player->GetActorForwardVector() : FVector::ForwardVector;
 	const FVector Right = Player ? Player->GetActorRightVector() : FVector::RightVector;
 
+	UClass* EnemyClass = ASlimeEnemyCharacter::StaticClass();
+	if (!EnemyClassPath.IsNull())
+	{
+		if (UClass* Loaded = EnemyClassPath.LoadSynchronous())
+		{
+			EnemyClass = Loaded;
+		}
+		else
+		{
+			UE_LOG(LogSlimeFable, Warning, TEXT("SlimePlayGameMode: '%s' missing; falling back to ASlimeEnemyCharacter."),
+				*EnemyClassPath.ToString());
+		}
+	}
+
 	auto SpawnEnemy = [&](const FVector& Offset, ESlimeElement Element, bool bTraining)
 	{
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-		ASlimeEnemyCharacter* Enemy = World->SpawnActor<ASlimeEnemyCharacter>(Origin + Offset, Forward.Rotation(), Params);
+		ASlimeEnemyCharacter* Enemy = World->SpawnActor<ASlimeEnemyCharacter>(
+			EnemyClass, Origin + Offset, Forward.Rotation(), Params);
 		if (Enemy)
 		{
 			Enemy->StartingElement = Element;

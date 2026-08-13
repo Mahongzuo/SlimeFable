@@ -17,6 +17,11 @@
 #include "SlimeLockOnComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 ASlimeCharacter::ASlimeCharacter()
 {
@@ -153,6 +158,7 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 	if (IsPlayerControlled())
 	{
 		UpdateCameraZoom(DeltaSeconds);
+		PollCustomMoveKeys(DeltaSeconds);
 	}
 }
 
@@ -204,6 +210,66 @@ void ASlimeCharacter::NotifyControllerChanged()
 	if (SlimeAbilities)
 	{
 		SlimeAbilities->RegisterMappingContext();
+	}
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UGameInstance* GI = World->GetGameInstance())
+			{
+				if (USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+				{
+					InputSettings->ApplyEnhancedInputRemaps(PC);
+				}
+			}
+		}
+	}
+}
+
+void ASlimeCharacter::PollCustomMoveKeys(float DeltaSeconds)
+{
+	(void)DeltaSeconds;
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC || !PC->IsLocalController())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	UGameInstance* GI = World->GetGameInstance();
+	USlimeInputSettings* InputSettings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr;
+	if (!InputSettings || !InputSettings->UsesCustomMovementKeys())
+	{
+		return;
+	}
+
+	const float Forward =
+		(InputSettings->IsKeyDown(PC, ESlimeInputAction::MoveForward) ? 1.f : 0.f)
+		- (InputSettings->IsKeyDown(PC, ESlimeInputAction::MoveBack) ? 1.f : 0.f);
+	const float Right =
+		(InputSettings->IsKeyDown(PC, ESlimeInputAction::MoveRight) ? 1.f : 0.f)
+		- (InputSettings->IsKeyDown(PC, ESlimeInputAction::MoveLeft) ? 1.f : 0.f);
+
+	const FRotator YawRot(0.f, PC->GetControlRotation().Yaw, 0.f);
+	const FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+	const FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+	AddMovementInput(ForwardDir, Forward);
+	AddMovementInput(RightDir, Right);
+
+	if (InputSettings->WasKeyPressed(PC, ESlimeInputAction::Jump))
+	{
+		Jump();
+	}
+	if (!InputSettings->IsKeyDown(PC, ESlimeInputAction::Jump))
+	{
+		StopJumping();
 	}
 }
 

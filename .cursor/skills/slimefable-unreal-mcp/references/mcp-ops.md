@@ -6,16 +6,35 @@
 |------|-----|
 | 推荐 URL | `http://127.0.0.1:8010/mcp` |
 | 项目 `.mcp.json` | `unreal-mcp` → 上述 URL |
-| `Config/DefaultEditor.ini` | `ServerPortNumber=8010`, `bAutoStartServer=True`, `bEnableToolSearch=True` |
-| 用户 Saved 偏好 | `Saved/Config/WindowsEditor/EditorPerProjectUserSettings.ini` 中同名节 |
+| `Config/DefaultEditor.ini` | `ServerPortNumber=8010`, `bAutoStartServer=False`（避免 Cook 占端口失败）, `bEnableToolSearch=True` |
+| 用户 Saved 偏好 | `Saved/Config/WindowsEditor/EditorPerProjectUserSettings.ini` 中同名节；**Saved 会覆盖 DefaultEditor** |
 
-失败特征（日志）：
+### 打包假失败（必看）
+
+若 Cook 日志出现：
+
+```text
+LogHttpListener: Error: HttpListener unable to bind to 127.0.0.1:8010
+...
+Commandlet CookCommandlet_0 finished execution (result 0)
+LogCook: Display: Done!
+```
+
+但 UAT 仍报 `ExitCode=1` / `Unknown Cook Failure`：这是 MCP 自动启动抢端口，不是资产 Cook 失败。
+
+处理：
+
+1. Project Settings → Plugins → Model Context Protocol → **取消 Auto Start Server**（并确认 Saved 里 `bAutoStartServer=False`）。
+2. 需要 MCP 时在控制台手动：`ModelContextProtocol.StartServer 8010`。
+3. 勿在 Project Settings 里重新勾上 Auto Start，否则下次 Package 又会假失败。
+
+端口占用失败特征：
 
 ```text
 LogHttpListener: Error: HttpListener unable to bind to 127.0.0.1:8000
 ```
 
-处理：改用 8010，或释放 8000 后 `ModelContextProtocol.StartServer`。
+处理：改用 8010，或释放端口后 `ModelContextProtocol.StartServer`。
 
 ## 插件
 

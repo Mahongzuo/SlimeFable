@@ -70,7 +70,7 @@ void ULevelSelectWidget::NativeConstruct()
 
 	if (CurrentMonth < 1 || CurrentMonth > 12)
 	{
-		CurrentMonth = FDateTime::Now().GetMonth();
+		JumpToTodayMonth();
 	}
 
 	ApplyMaterialLabLook();
@@ -94,6 +94,11 @@ void ULevelSelectWidget::NativeConstruct()
 void ULevelSelectWidget::SetParentMenu(UMainMenuWidget* InParent)
 {
 	ParentMenu = InParent;
+}
+
+void ULevelSelectWidget::JumpToTodayMonth()
+{
+	CurrentMonth = FDateTime::Now().GetMonth();
 }
 
 void ULevelSelectWidget::ResolveDaySlotClass()

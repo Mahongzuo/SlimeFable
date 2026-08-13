@@ -2,6 +2,8 @@
 
 #include "UI/MainMenuWidget.h"
 #include "UI/LevelSelectWidget.h"
+#include "UI/KeybindSettingsWidget.h"
+#include "UI/GraphicsSettingsWidget.h"
 #include "UI/MenuUIStyle.h"
 #include "DayLevel/DayLevelSubsystem.h"
 #include "Components/Button.h"
@@ -15,13 +17,16 @@
 #include "Blueprint/WidgetTree.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/GameInstance.h"
-#include "UObject/ConstructorHelpers.h"
 
 UMainMenuWidget::UMainMenuWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	LevelSelectClassPath = TSoftClassPtr<ULevelSelectWidget>(
 		FSoftObjectPath(TEXT("/Game/UI/WBP_LevelSelect.WBP_LevelSelect_C")));
+	KeybindSettingsClassPath = TSoftClassPtr<UKeybindSettingsWidget>(
+		FSoftObjectPath(TEXT("/Game/UI/WBP_KeybindSettings.WBP_KeybindSettings_C")));
+	GraphicsSettingsClassPath = TSoftClassPtr<UGraphicsSettingsWidget>(
+		FSoftObjectPath(TEXT("/Game/UI/WBP_GraphicsSettings.WBP_GraphicsSettings_C")));
 }
 
 TSharedRef<SWidget> UMainMenuWidget::RebuildWidget()
@@ -34,6 +39,8 @@ void UMainMenuWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	ResolveLevelSelectClass();
+	ResolveKeybindClass();
+	ResolveGraphicsClass();
 	ApplyMaterialLabLook();
 
 	if (PlayTodayButton)
@@ -43,6 +50,14 @@ void UMainMenuWidget::NativeConstruct()
 	if (SelectLevelButton)
 	{
 		SelectLevelButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnSelectLevelClicked);
+	}
+	if (KeybindButton)
+	{
+		KeybindButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnKeybindClicked);
+	}
+	if (GraphicsButton)
+	{
+		GraphicsButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnGraphicsClicked);
 	}
 	if (QuitButton)
 	{
@@ -60,10 +75,26 @@ void UMainMenuWidget::ResolveLevelSelectClass()
 	}
 }
 
+void UMainMenuWidget::ResolveKeybindClass()
+{
+	if (!KeybindSettingsClass && !KeybindSettingsClassPath.IsNull())
+	{
+		KeybindSettingsClass = KeybindSettingsClassPath.LoadSynchronous();
+	}
+}
+
+void UMainMenuWidget::ResolveGraphicsClass()
+{
+	if (!GraphicsSettingsClass && !GraphicsSettingsClassPath.IsNull())
+	{
+		GraphicsSettingsClass = GraphicsSettingsClassPath.LoadSynchronous();
+	}
+}
+
 void UMainMenuWidget::BuildLayoutIfNeeded()
 {
-	// Designer-bound widgets win; otherwise build MaterialLab layout (also covers empty WBPs).
-	if (TitleText && PlayTodayButton && SelectLevelButton && QuitButton)
+	// Require new settings buttons too; otherwise rebuild full code layout (covers older WBPs).
+	if (TitleText && PlayTodayButton && SelectLevelButton && KeybindButton && GraphicsButton && QuitButton)
 	{
 		bBuiltInCode = false;
 		return;
@@ -132,6 +163,8 @@ void UMainMenuWidget::BuildLayoutIfNeeded()
 	StatusText = AddText(TEXT("StatusText"), FText::GetEmpty());
 	PlayTodayButton = AddButton(TEXT("PlayTodayButton"), FText::FromString(TEXT("进入今日关卡")));
 	SelectLevelButton = AddButton(TEXT("SelectLevelButton"), FText::FromString(TEXT("选择关卡")));
+	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
+	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
 	QuitButton = AddButton(TEXT("QuitButton"), FText::FromString(TEXT("退出游戏")));
 }
 
@@ -160,11 +193,14 @@ void UMainMenuWidget::ApplyMaterialLabLook()
 	}
 
 	UMaterialInterface* BrushBtn = FMenuUIStyle::LoadButtonMaterial();
-	FMenuUIStyle::ApplyMaterialButtonStyle(PlayTodayButton, BrushBtn, FVector2D(360.f, 64.f));
-	FMenuUIStyle::ApplyMaterialButtonStyle(SelectLevelButton, BrushBtn, FVector2D(360.f, 64.f));
-	FMenuUIStyle::ApplyMaterialButtonStyle(QuitButton, BrushBtn, FVector2D(360.f, 64.f));
+	const FVector2D Size(360.f, 64.f);
+	FMenuUIStyle::ApplyMaterialButtonStyle(PlayTodayButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(SelectLevelButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(GraphicsButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(QuitButton, BrushBtn, Size);
 
-	auto StyleChildLabel = [](UButton* Button, float Size)
+	auto StyleChildLabel = [](UButton* Button, float FontSize)
 	{
 		if (!Button)
 		{
@@ -172,11 +208,13 @@ void UMainMenuWidget::ApplyMaterialLabLook()
 		}
 		if (UTextBlock* Label = Cast<UTextBlock>(Button->GetContent()))
 		{
-			FMenuUIStyle::ApplyMixedMenuFont(Label, Size, FMenuUIStyle::WarmTextColor());
+			FMenuUIStyle::ApplyMixedMenuFont(Label, FontSize, FMenuUIStyle::WarmTextColor());
 		}
 	};
 	StyleChildLabel(PlayTodayButton, 24.f);
 	StyleChildLabel(SelectLevelButton, 22.f);
+	StyleChildLabel(KeybindButton, 22.f);
+	StyleChildLabel(GraphicsButton, 22.f);
 	StyleChildLabel(QuitButton, 22.f);
 }
 
@@ -299,13 +337,88 @@ void UMainMenuWidget::OpenLevelSelect()
 		{
 			LevelSelectWidget->SetVisibility(ESlateVisibility::Visible);
 		}
+		LevelSelectWidget->JumpToTodayMonth();
 		LevelSelectWidget->RefreshForCurrentMonth();
+	}
+}
+
+void UMainMenuWidget::OpenKeybindSettings()
+{
+	ResolveKeybindClass();
+	if (!KeybindSettingsWidget)
+	{
+		const TSubclassOf<UKeybindSettingsWidget> ClassToSpawn =
+			KeybindSettingsClass
+				? KeybindSettingsClass
+				: TSubclassOf<UKeybindSettingsWidget>(UKeybindSettingsWidget::StaticClass());
+		KeybindSettingsWidget = CreateWidget<UKeybindSettingsWidget>(GetOwningPlayer(), ClassToSpawn);
+		if (KeybindSettingsWidget)
+		{
+			KeybindSettingsWidget->SetReturnTarget(this);
+		}
+	}
+
+	if (KeybindSettingsWidget)
+	{
+		KeybindSettingsWidget->SetReturnTarget(this);
+		SetVisibility(ESlateVisibility::Collapsed);
+		if (!KeybindSettingsWidget->IsInViewport())
+		{
+			KeybindSettingsWidget->AddToViewport(1);
+		}
+		else
+		{
+			KeybindSettingsWidget->SetVisibility(ESlateVisibility::Visible);
+		}
+		KeybindSettingsWidget->RefreshList();
+	}
+}
+
+void UMainMenuWidget::OpenGraphicsSettings()
+{
+	ResolveGraphicsClass();
+	if (!GraphicsSettingsWidget)
+	{
+		const TSubclassOf<UGraphicsSettingsWidget> ClassToSpawn =
+			GraphicsSettingsClass
+				? GraphicsSettingsClass
+				: TSubclassOf<UGraphicsSettingsWidget>(UGraphicsSettingsWidget::StaticClass());
+		GraphicsSettingsWidget = CreateWidget<UGraphicsSettingsWidget>(GetOwningPlayer(), ClassToSpawn);
+		if (GraphicsSettingsWidget)
+		{
+			GraphicsSettingsWidget->SetReturnTarget(this);
+		}
+	}
+
+	if (GraphicsSettingsWidget)
+	{
+		GraphicsSettingsWidget->SetReturnTarget(this);
+		SetVisibility(ESlateVisibility::Collapsed);
+		if (!GraphicsSettingsWidget->IsInViewport())
+		{
+			GraphicsSettingsWidget->AddToViewport(1);
+		}
+		else
+		{
+			GraphicsSettingsWidget->SetVisibility(ESlateVisibility::Visible);
+		}
+		GraphicsSettingsWidget->RefreshSelection();
 	}
 }
 
 void UMainMenuWidget::OnSelectLevelClicked()
 {
 	OpenLevelSelect();
+}
+
+void UMainMenuWidget::OnKeybindClicked()
+{
+	OpenKeybindSettings();
+}
+
+void UMainMenuWidget::OnGraphicsClicked()
+{
+	OpenGraphicsSettings();
 }
 
 void UMainMenuWidget::OnQuitClicked()

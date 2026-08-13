@@ -113,6 +113,9 @@ protected:
 
 	void UpdateCameraZoom(float DeltaSeconds);
 
+	/** When move/jump keys are customized, drive CMC from SlimeInputSettings. */
+	void PollCustomMoveKeys(float DeltaSeconds);
+
 	/** Surface mesh. Vertices are world space, so this component sits at the world origin. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<UProceduralMeshComponent> SurfaceMesh;

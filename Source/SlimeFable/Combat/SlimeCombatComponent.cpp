@@ -24,6 +24,10 @@
 #include "SlimeLockOnComponent.h"
 #include "SlimeSkillProjectile.h"
 #include "Blueprint/UserWidget.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
+#include "Engine/GameInstance.h"
+#include "InputCoreTypes.h"
 
 USlimeCombatComponent::USlimeCombatComponent()
 {
@@ -343,19 +347,37 @@ void USlimeCombatComponent::PollCombatKeys()
 		return;
 	}
 
-	if (PC->WasInputKeyJustPressed(EKeys::LeftMouseButton))
+	const USlimeInputSettings* InputSettings = nullptr;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UGameInstance* GI = World->GetGameInstance())
+		{
+			InputSettings = GI->GetSubsystem<USlimeInputSettings>();
+		}
+	}
+
+	auto WasPressed = [PC, InputSettings](ESlimeInputAction Action, const FKey& Fallback) -> bool
+	{
+		if (InputSettings)
+		{
+			return InputSettings->WasKeyPressed(PC, Action);
+		}
+		return PC->WasInputKeyJustPressed(Fallback);
+	};
+
+	if (WasPressed(ESlimeInputAction::Attack, EKeys::LeftMouseButton))
 	{
 		TryComboAttack();
 	}
-	if (PC->WasInputKeyJustPressed(EKeys::One))
+	if (WasPressed(ESlimeInputAction::Skill1, EKeys::One))
 	{
 		TrySkill(ESlimeSkillSlot::Skill1);
 	}
-	if (PC->WasInputKeyJustPressed(EKeys::Two))
+	if (WasPressed(ESlimeInputAction::Skill2, EKeys::Two))
 	{
 		TrySkill(ESlimeSkillSlot::Skill2);
 	}
-	if (PC->WasInputKeyJustPressed(EKeys::Three))
+	if (WasPressed(ESlimeInputAction::Skill3, EKeys::Three))
 	{
 		TrySkill(ESlimeSkillSlot::Skill3);
 	}

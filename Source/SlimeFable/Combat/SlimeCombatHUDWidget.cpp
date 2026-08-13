@@ -17,6 +17,9 @@
 #include "SlimeCombatComponent.h"
 #include "Styling/SlateTypes.h"
 #include "UI/MenuUIStyle.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
+#include "Engine/GameInstance.h"
 
 namespace
 {
@@ -94,7 +97,6 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 
 	UMaterialInterface* ButtonMat = FMenuUIStyle::LoadButtonMaterial();
 	UMaterialInterface* ProgressMat = LoadProgressBarMaterial();
-	const TCHAR* Keys[] = { TEXT("1"), TEXT("2"), TEXT("3") };
 
 	for (int32 Index = 0; Index < 3; ++Index)
 	{
@@ -156,7 +158,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		}
 
 		UTextBlock* Key = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *FString::Printf(TEXT("Key%d"), Index));
-		Key->SetText(FText::FromString(Keys[Index]));
+		Key->SetText(FText::FromString(FString::FromInt(Index + 1)));
 		Labels->AddChildToVerticalBox(Key);
 
 		UTextBlock* Name = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *FString::Printf(TEXT("Name%d"), Index));
@@ -197,6 +199,20 @@ void USlimeCombatHUDWidget::Refresh()
 		}
 		if (SlotKeys[Index])
 		{
+			FText KeyText = FText::FromString(FString::FromInt(Index + 1));
+			if (const UGameInstance* GI = GetGameInstance())
+			{
+				if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+				{
+					const ESlimeInputAction Actions[3] = {
+						ESlimeInputAction::Skill1,
+						ESlimeInputAction::Skill2,
+						ESlimeInputAction::Skill3
+					};
+					KeyText = InputSettings->GetKeyDisplayName(Actions[Index]);
+				}
+			}
+			SlotKeys[Index]->SetText(KeyText);
 			FMenuUIStyle::ApplyMarkerFont(SlotKeys[Index], 22.f, FMenuUIStyle::WarmTitleColor());
 		}
 		if (SlotCds[Index])

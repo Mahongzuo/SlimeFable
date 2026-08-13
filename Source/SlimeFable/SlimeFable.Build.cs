@@ -22,7 +22,8 @@ public class SlimeFable : ModuleRules
 			"Slate",
 			"SlateCore",
 			"ProceduralMeshComponent",
-			"Niagara"
+			"Niagara",
+			"MoviePlayer"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
@@ -32,6 +33,7 @@ public class SlimeFable : ModuleRules
 			"SlimeFable/DayLevel",
 			"SlimeFable/Slime",
 			"SlimeFable/Combat",
+			"SlimeFable/Settings",
 			"SlimeFable/UI",
 			"SlimeFable/Variant_Platforming",
 			"SlimeFable/Variant_Platforming/Animation",

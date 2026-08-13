@@ -18,7 +18,10 @@
 #include "SlimeBodyComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeFable.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
 #include "UI/SlimeElementWheelWidget.h"
+#include "Engine/GameInstance.h"
 
 USlimeAbilityComponent::USlimeAbilityComponent()
 {
@@ -166,9 +169,34 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		return;
 	}
 
+	const USlimeInputSettings* InputSettings = nullptr;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UGameInstance* GI = World->GetGameInstance())
+		{
+			InputSettings = GI->GetSubsystem<USlimeInputSettings>();
+		}
+	}
+
+	auto IsDown = [PlayerController, InputSettings](ESlimeInputAction Action, const FKey& Fallback) -> bool
+	{
+		if (InputSettings)
+		{
+			return InputSettings->IsKeyDown(PlayerController, Action);
+		}
+		return PlayerController->IsInputKeyDown(Fallback);
+	};
+	auto WasPressed = [PlayerController, InputSettings](ESlimeInputAction Action, const FKey& Fallback) -> bool
+	{
+		if (InputSettings)
+		{
+			return InputSettings->WasKeyPressed(PlayerController, Action);
+		}
+		return PlayerController->WasInputKeyJustPressed(Fallback);
+	};
+
 	// Drive Body/UI directly so Enhanced Input handlers can hard-return while polling is on.
-	// Z = flatten, X = absorb/recall, T = reset (was E / F / R).
-	const bool bFlatten = PlayerController->IsInputKeyDown(EKeys::Z);
+	const bool bFlatten = IsDown(ESlimeInputAction::Flatten, EKeys::Z);
 	if (bFlatten != bPollFlattenDown)
 	{
 		bPollFlattenDown = bFlatten;
@@ -178,19 +206,19 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		}
 	}
 
-	if (PlayerController->WasInputKeyJustPressed(EKeys::T) && Body)
+	if (WasPressed(ESlimeInputAction::ResetBody, EKeys::T) && Body)
 	{
 		Body->ResetBody();
 	}
 
-	const bool bAbsorb = PlayerController->IsInputKeyDown(EKeys::X);
+	const bool bAbsorb = IsDown(ESlimeInputAction::Absorb, EKeys::X);
 	bPollAbsorbDown = bAbsorb;
 	if (Body)
 	{
 		Body->SetRecalling(bAbsorb);
 	}
 
-	const bool bLaunch = PlayerController->IsInputKeyDown(EKeys::Q);
+	const bool bLaunch = IsDown(ESlimeInputAction::Launch, EKeys::Q);
 	if (bLaunch && !bPollLaunchDown)
 	{
 		bPollLaunchDown = true;
@@ -213,7 +241,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		}
 	}
 
-	const bool bWheel = PlayerController->IsInputKeyDown(EKeys::Tab);
+	const bool bWheel = IsDown(ESlimeInputAction::ElementWheel, EKeys::Tab);
 	if (bWheel && !bPollWheelDown)
 	{
 		bPollWheelDown = true;

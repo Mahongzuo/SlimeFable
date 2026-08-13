@@ -12,6 +12,19 @@
 /Packaged/
 /Releases/
 
+# Package Project output (editor staging / local test builds — never commit)
+/gameTest/
+/Windows/
+/WindowsNoEditor/
+/Linux/
+/Mac/
+/Android/
+/IOS/
+/TVOS/
+/Archives/
+/Dist/
+/*.zip
+
 # Visual Studio / Rider / IDE
 .vs/
 .idea/

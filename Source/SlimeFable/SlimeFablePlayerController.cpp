@@ -87,6 +87,10 @@ void ASlimeFablePlayerController::TogglePauseMenu()
 {
 	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
 	{
+		if (PauseMenuWidget->TryHandleEscape())
+		{
+			return;
+		}
 		ClosePauseMenu();
 	}
 	else
@@ -145,6 +149,7 @@ void ASlimeFablePlayerController::ClosePauseMenu()
 {
 	if (PauseMenuWidget)
 	{
+		PauseMenuWidget->TryHandleEscape();
 		PauseMenuWidget->RemoveFromParent();
 	}
 

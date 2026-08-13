@@ -6,15 +6,6 @@
 
 using namespace SlimeSim;
 
-namespace
-{
-	/** Empty samples kept around the occupied region so the iso surface always closes. */
-	constexpr int32 GGridPadding = 2;
-
-	/** Cell size is allowed to grow this much before the grid clips instead. */
-	constexpr float GMaxCellSizeScale = 2.f;
-}
-
 const FIntVector FSlimeSurfaceBuilder::CornerOffsets[8] =
 {
 	FIntVector(0, 0, 0),
@@ -483,14 +474,22 @@ void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles,
 
 void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 {
-	const int32 Usable = FMath::Max(Params.MaxGridDim - 2 * GGridPadding - 1, 2);
+	// Particle AABB only covers centres. Expand by the anisotropic splat so the density
+	// footprint (and therefore the iso surface) stays inside the grid.
+	const FVector SplatExtent(SplatRadius, SplatRadius, SplatRadius * SplatZScale);
+	const FBox Region = Bounds.ExpandBy(SplatExtent);
+
+	// Empty shell outside the splat footprint for blur / iso closure — do not also add a
+	// second fixed pad on top of the splat expand (that blew Dims toward MaxGridDim).
+	const int32 EdgePad = FMath::Max(Params.BlurPasses + 1, 1);
+	const int32 Usable = FMath::Max(Params.MaxGridDim - 2 * EdgePad - 1, 2);
+
 	const float BaseCell = CellSize * (bBodyCluster ? FMath::Max(CellScale, 1.f) : 1.f);
 	if (bBodyCluster && HeldRequiredCell < BaseCell)
 	{
 		HeldRequiredCell = BaseCell;
 	}
 
-	FBox Region = Bounds;
 	const FVector RegionSizeRaw = Region.GetSize();
 	const float NeededCell = float(RegionSizeRaw.GetMax()) / float(Usable);
 
@@ -519,70 +518,129 @@ void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)
 		ActiveCell = FMath::Max(BaseCell, NeededCell);
 	}
 
-	ActiveCellSize = ActiveCell;
-
-	// Prefer growing the cell over hard-cropping Region (cropping cuts horizontal planes).
-	const double MaxSpan = double(Usable) * double(ActiveCell) * double(GMaxCellSizeScale);
-	if (RegionSizeRaw.GetMax() > MaxSpan)
+	auto QuantizeOrigin = [](double MinCoord, float Cell) -> double
 	{
-		const float FitCell = float(RegionSizeRaw.GetMax()) / float(Usable);
+		return FMath::FloorToDouble(MinCoord / Cell) * Cell;
+	};
+
+	// Lead on each axis: never lag into the volume (fixes -X holes). Trail with EMA only
+	// when Desired is ahead — that does not inflate Dims the way min(smoothed, desired) did.
+	auto LeadSnapOrigin = [&QuantizeOrigin](const FVector& Smoothed, const FVector& Desired, float Cell, float Ema) -> FVector
+	{
+		auto Axis = [&](double S, double D) -> double
+		{
+			if (D < S)
+			{
+				return D;
+			}
+			return QuantizeOrigin(FMath::Lerp(S, D, Ema), Cell);
+		};
+		return FVector(Axis(Smoothed.X, Desired.X), Axis(Smoothed.Y, Desired.Y), Axis(Smoothed.Z, Desired.Z));
+	};
+
+	FVector PaddedMin = Region.Min;
+	FVector PaddedMax = Region.Max;
+	FVector DesiredOrigin = FVector::ZeroVector;
+
+	// If the settled span still exceeds MaxGridDim, grow the cell rather than Clamp-crop a face.
+	for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+	{
+		const FVector Pad(double(ActiveCell) * EdgePad);
+		PaddedMin = Region.Min - Pad;
+		PaddedMax = Region.Max + Pad;
+
+		DesiredOrigin = FVector(
+			QuantizeOrigin(PaddedMin.X, ActiveCell),
+			QuantizeOrigin(PaddedMin.Y, ActiveCell),
+			QuantizeOrigin(PaddedMin.Z, ActiveCell));
+
+		if (bBodyCluster)
+		{
+			constexpr float OriginEma = 0.35f;
+			constexpr float OriginSnap = 40.f;
+			if (!bHaveSmoothedGridOrigin)
+			{
+				SmoothedGridOrigin = DesiredOrigin;
+				bHaveSmoothedGridOrigin = true;
+			}
+			else if (Attempt == 0 && FVector::DistSquared(SmoothedGridOrigin, DesiredOrigin) > FMath::Square(OriginSnap))
+			{
+				SmoothedGridOrigin = DesiredOrigin;
+			}
+			else if (Attempt == 0)
+			{
+				SmoothedGridOrigin = LeadSnapOrigin(SmoothedGridOrigin, DesiredOrigin, ActiveCell, OriginEma);
+			}
+			else
+			{
+				// Cell grew: re-snap to the new lattice, still lead-snap so -axis stays covered.
+				SmoothedGridOrigin = FVector(
+					QuantizeOrigin(SmoothedGridOrigin.X, ActiveCell),
+					QuantizeOrigin(SmoothedGridOrigin.Y, ActiveCell),
+					QuantizeOrigin(SmoothedGridOrigin.Z, ActiveCell));
+				SmoothedGridOrigin = LeadSnapOrigin(SmoothedGridOrigin, DesiredOrigin, ActiveCell, 1.f);
+			}
+			GridOrigin = SmoothedGridOrigin;
+		}
+		else
+		{
+			GridOrigin = DesiredOrigin;
+		}
+
+		const int32 NeedX = FMath::Max(FMath::CeilToInt((PaddedMax.X - GridOrigin.X) / ActiveCell) + 1, 4);
+		const int32 NeedY = FMath::Max(FMath::CeilToInt((PaddedMax.Y - GridOrigin.Y) / ActiveCell) + 1, 4);
+		const int32 NeedZ = FMath::Max(FMath::CeilToInt((PaddedMax.Z - GridOrigin.Z) / ActiveCell) + 1, 4);
+		const int32 NeedMax = FMath::Max3(NeedX, NeedY, NeedZ);
+
+		if (NeedMax <= Params.MaxGridDim)
+		{
+			Dims = FIntVector(NeedX, NeedY, NeedZ);
+			break;
+		}
+
+		const double SpanX = PaddedMax.X - GridOrigin.X;
+		const double SpanY = PaddedMax.Y - GridOrigin.Y;
+		const double SpanZ = PaddedMax.Z - GridOrigin.Z;
+		const double MaxSpan = FMath::Max3(SpanX, SpanY, SpanZ);
+		// Slight pad so float Ceil does not push Need* over MaxGridDim and re-introduce a crop.
+		const float FitCell = float(MaxSpan / double(FMath::Max(Params.MaxGridDim - 1, 1))) * 1.001f;
 		ActiveCell = FMath::Max(ActiveCell, FitCell);
 		if (bBodyCluster)
 		{
 			HeldRequiredCell = ActiveCell;
 			RequiredGrowStreak = 0;
 		}
-		ActiveCellSize = ActiveCell;
 	}
 
-	const FVector PaddedMin = Region.Min - FVector(double(ActiveCell) * GGridPadding);
-	const FVector PaddedMax = Region.Max + FVector(double(ActiveCell) * GGridPadding);
-
-	// Continuous cell snap (no block quantization) — block snapping caused walking flicker.
-	auto QuantizeOrigin = [ActiveCell](double MinCoord) -> double
+	// Final dims from the settled cell/origin (covers the last FitCell grow without a stale Need*).
 	{
-		return FMath::FloorToDouble(MinCoord / ActiveCell) * ActiveCell;
-	};
-
-	FVector DesiredOrigin(
-		QuantizeOrigin(PaddedMin.X),
-		QuantizeOrigin(PaddedMin.Y),
-		QuantizeOrigin(PaddedMin.Z));
-
-	if (bBodyCluster)
-	{
-		constexpr float OriginEma = 0.35f;
-		constexpr float OriginSnap = 40.f;
-		if (!bHaveSmoothedGridOrigin)
+		const FVector Pad(double(ActiveCell) * EdgePad);
+		PaddedMin = Region.Min - Pad;
+		PaddedMax = Region.Max + Pad;
+		DesiredOrigin = FVector(
+			QuantizeOrigin(PaddedMin.X, ActiveCell),
+			QuantizeOrigin(PaddedMin.Y, ActiveCell),
+			QuantizeOrigin(PaddedMin.Z, ActiveCell));
+		if (bBodyCluster)
 		{
-			SmoothedGridOrigin = DesiredOrigin;
-			bHaveSmoothedGridOrigin = true;
-		}
-		else if (FVector::DistSquared(SmoothedGridOrigin, DesiredOrigin) > FMath::Square(OriginSnap))
-		{
-			SmoothedGridOrigin = DesiredOrigin;
+			SmoothedGridOrigin = FVector(
+				QuantizeOrigin(SmoothedGridOrigin.X, ActiveCell),
+				QuantizeOrigin(SmoothedGridOrigin.Y, ActiveCell),
+				QuantizeOrigin(SmoothedGridOrigin.Z, ActiveCell));
+			SmoothedGridOrigin = LeadSnapOrigin(SmoothedGridOrigin, DesiredOrigin, ActiveCell, 1.f);
+			GridOrigin = SmoothedGridOrigin;
 		}
 		else
 		{
-			SmoothedGridOrigin = FMath::Lerp(SmoothedGridOrigin, DesiredOrigin, OriginEma);
-			// Re-snap after EMA so samples stay on the cell lattice.
-			SmoothedGridOrigin = FVector(
-				QuantizeOrigin(SmoothedGridOrigin.X),
-				QuantizeOrigin(SmoothedGridOrigin.Y),
-				QuantizeOrigin(SmoothedGridOrigin.Z));
+			GridOrigin = DesiredOrigin;
 		}
-		GridOrigin = SmoothedGridOrigin;
-	}
-	else
-	{
-		GridOrigin = DesiredOrigin;
+		Dims = FIntVector(
+			FMath::Clamp(FMath::Max(FMath::CeilToInt((PaddedMax.X - GridOrigin.X) / ActiveCell) + 1, 4), 4, Params.MaxGridDim),
+			FMath::Clamp(FMath::Max(FMath::CeilToInt((PaddedMax.Y - GridOrigin.Y) / ActiveCell) + 1, 4), 4, Params.MaxGridDim),
+			FMath::Clamp(FMath::Max(FMath::CeilToInt((PaddedMax.Z - GridOrigin.Z) / ActiveCell) + 1, 4), 4, Params.MaxGridDim));
 	}
 
-	// Dims must span GridOrigin → padded max (not Region.Size alone), or snap clips the far side.
-	Dims = FIntVector(
-		FMath::Clamp(FMath::CeilToInt((PaddedMax.X - GridOrigin.X) / ActiveCell) + 1, 4, Params.MaxGridDim),
-		FMath::Clamp(FMath::CeilToInt((PaddedMax.Y - GridOrigin.Y) / ActiveCell) + 1, 4, Params.MaxGridDim),
-		FMath::Clamp(FMath::CeilToInt((PaddedMax.Z - GridOrigin.Z) / ActiveCell) + 1, 4, Params.MaxGridDim));
+	ActiveCellSize = ActiveCell;
 
 	const int32 NumSamples = Dims.X * Dims.Y * Dims.Z;
 	FMemory::Memzero(Density.GetData(), NumSamples * sizeof(float));

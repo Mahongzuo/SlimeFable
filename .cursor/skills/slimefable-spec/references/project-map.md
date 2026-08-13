@@ -40,7 +40,7 @@
 
 ## 配置要点
 
-- `Config/DefaultEngine.ini`：`GameDefaultMap` / `EditorStartupMap` → `/Game/Maps/Main.Main`
-- `Config/DefaultGame.ini`：扫描 `/Game/Maps` 与 `DayLevelRegistry`（`/Game/Data/DayLevels`）
+- `Config/DefaultEngine.ini`：`GameDefaultMap` / `EditorStartupMap` → `/Game/Maps/Main.Main`；`r.XGEController.Enabled=0`（solo 机失效 Incredibuild/XGE 会导致打包着色器 CPU 极低）
+- `Config/DefaultGame.ini`：扫描 `/Game/Maps` 与 `DayLevelRegistry`（`/Game/Data/DayLevels`）；C++ soft-path Niagara（`Mixed_Magic_VFX_Pack` / `BlinkAndDashVFX` / `NiagaraExamples/FX_*` 等运行时子目录）须 `DirectoriesToAlwaysCook`；勿 AlwaysCook 整包 `NiagaraExamples`（`Utilities` 依赖缺失的 NiagaraFluids，会刷 Error）
 - `Config/DefaultGameplayTags.ini`：`Exploration.*` 预留标签
-- `Config/DefaultEditor.ini`：MCP `ServerPortNumber=8010`、`bAutoStartServer=True`
+- `Config/DefaultEditor.ini`：MCP `ServerPortNumber=8010`、`bAutoStartServer=False`（打包 Cook 勿自动绑端口；手动 `ModelContextProtocol.StartServer 8010`）

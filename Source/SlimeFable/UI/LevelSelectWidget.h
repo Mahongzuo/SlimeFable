@@ -27,6 +27,7 @@ public:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 	void SetParentMenu(UMainMenuWidget* InParent);
+	void JumpToTodayMonth();
 	void RefreshForCurrentMonth();
 
 	UFUNCTION()
@@ -90,6 +91,7 @@ protected:
 	UPROPERTY()
 	TArray<TObjectPtr<UDaySlotWidget>> DaySlots;
 
-	int32 CurrentMonth = 1;
+	/** 0 = uninitialized; JumpToTodayMonth / NativeConstruct set real month. */
+	int32 CurrentMonth = 0;
 	bool bBuiltInCode = false;
 };

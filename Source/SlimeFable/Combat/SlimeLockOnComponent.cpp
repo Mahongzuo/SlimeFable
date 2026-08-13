@@ -12,6 +12,10 @@
 #include "SlimeFableCharacter.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockTarget.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 
 USlimeLockOnComponent::USlimeLockOnComponent()
 {
@@ -54,7 +58,23 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		if (APlayerController* PC = GetPlayerController())
 		{
-			const bool bDown = PC->WasInputKeyJustPressed(EKeys::MiddleMouseButton);
+			bool bDown = false;
+			const USlimeInputSettings* InputSettings = nullptr;
+			if (const UWorld* World = GetWorld())
+			{
+				if (const UGameInstance* GI = World->GetGameInstance())
+				{
+					InputSettings = GI->GetSubsystem<USlimeInputSettings>();
+				}
+			}
+			if (InputSettings)
+			{
+				bDown = InputSettings->WasKeyPressed(PC, ESlimeInputAction::LockOn);
+			}
+			else
+			{
+				bDown = PC->WasInputKeyJustPressed(EKeys::MiddleMouseButton);
+			}
 			if (bDown)
 			{
 				ToggleLockOn();

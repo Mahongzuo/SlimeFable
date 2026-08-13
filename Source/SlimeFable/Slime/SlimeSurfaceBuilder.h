@@ -9,8 +9,10 @@
  *  Turns the particle set into a triangle soup with marching cubes.
  *
  *  Body and ballistic fragments each get their own grid so a distant Q chunk cannot
- *  coarsen or clip the main blob. Active cell size follows body bounds with hysteresis
- *  so walking does not flicker while spreads/jumps still fit the volume.
+ *  coarsen or clip the main blob. Particle AABBs are expanded by splat reach plus a thin
+ *  blur shell. Body grid-origin lead-snaps on the negative axes (avoids walk holes) and
+ *  EMA-trails only when Desired is ahead so Dims stay small. Cell size follows bounds with
+ *  hysteresis; if the span would exceed MaxGridDim the cell grows instead of cropping.
  *
  *  Output buffers are always exactly MaxVertices long. Unused slots collapse onto a single
  *  point so their triangles have zero area, which lets the render section be updated in place
