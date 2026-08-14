@@ -7,6 +7,7 @@
 #include "DayLevel/DayLevelSubsystem.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "InputCoreTypes.h"
 #include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
 #include "SlimeFable.h"
@@ -44,6 +45,12 @@ void ASlimeFablePlayerController::BeginPlay()
 			UE_LOG(LogSlimeFable, Error, TEXT("Could not spawn mobile controls widget."));
 		}
 	}
+}
+
+void ASlimeFablePlayerController::PlayerTick(float DeltaTime)
+{
+	Super::PlayerTick(DeltaTime);
+	UpdateAltCursor();
 }
 
 void ASlimeFablePlayerController::SetupInputComponent()
@@ -189,4 +196,39 @@ void ASlimeFablePlayerController::HandlePauseMainMenu()
 		}
 	}
 	ClosePauseMenu();
+}
+
+void ASlimeFablePlayerController::UpdateAltCursor()
+{
+	if (!IsLocalPlayerController() || IsPauseMenuOpen())
+	{
+		return;
+	}
+
+	const bool bAltDown = IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt);
+	if (bAltDown)
+	{
+		if (!bShowMouseCursor)
+		{
+			FInputModeGameAndUI InputMode;
+			InputMode.SetHideCursorDuringCapture(false);
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			SetInputMode(InputMode);
+			bShowMouseCursor = true;
+		}
+	}
+	else if (bShowMouseCursor)
+	{
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+		bShowMouseCursor = false;
+	}
+}
+
+bool ASlimeFablePlayerController::IsPauseMenuOpen() const
+{
+	return PauseMenuWidget
+		&& PauseMenuWidget->IsInViewport()
+		&& PauseMenuWidget->GetVisibility() != ESlateVisibility::Collapsed
+		&& PauseMenuWidget->GetVisibility() != ESlateVisibility::Hidden;
 }

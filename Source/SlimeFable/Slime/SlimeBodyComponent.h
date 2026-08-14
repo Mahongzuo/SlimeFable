@@ -129,6 +129,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Squeeze", meta = (ClampMin = "0.1", ClampMax = "1.0"))
 	float SqueezeSpeedScale = 0.6f;
 
+	/** When heavily squeezed with move input, crawl out of a pinch at this speed, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Squeeze", meta = (ClampMin = "20.0", ClampMax = "300.0"))
+	float OozeSpeed = 100.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Squeeze", meta = (ClampMin = "1", ClampMax = "6"))
 	int32 RadiusProbeIterations = 3;
 
@@ -250,6 +254,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsSpreading() const { return bSpread; }
 
+	/** Temporary MaxStepHeight used while walking onto short props. 0 restores the default. */
+	void SetStepHeightBoost(float BoostedMaxStep);
+
 	/** Rebuilds the dome and clears every transient state. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ResetBody();
@@ -317,11 +324,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ApplyParams();
 
+	/** Wall-cling hemisphere: Point/Normal of the stuck surface. Clears when bInCling is false. */
+	void SetClingVisual(bool bInCling, const FVector& Point, const FVector& Normal);
+
+	/** Skip ceiling height-squeeze for a short time after mantling onto a lip. */
+	void SuppressHeightSqueeze(float Duration);
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	bool IsClingingVisual() const { return bClingVisual; }
+
 private:
 	void FixedStep(float StepDelta);
 	void RefreshColliders();
 	void UpdateFloor();
 	void ProbeSqueeze(float DeltaTime);
+	void TryOozeEscape(float DeltaTime);
 	void ApplyCapsuleSize(float NewRadius, float NewHalfHeight);
 	void UpdateAnchor();
 	void RebuildSurface();
@@ -373,12 +390,18 @@ private:
 
 	float DefaultStepHeight = 45.f;
 	float DefaultWalkSpeed = 500.f;
+	float StepHeightBoost = 0.f;
+	float HeightSqueezeSuppressRemaining = 0.f;
 
 	bool bSpread = false;
 	bool bRecalling = false;
+	bool bClingVisual = false;
 	bool bMeshSectionCreated = false;
 	bool bShadowMeshSectionCreated = false;
 	bool bWarnedTruncation = false;
+
+	FVector ClingPoint = FVector::ZeroVector;
+	FVector ClingNormal = FVector::ForwardVector;
 
 	ESlimeSimQuality Quality = ESlimeSimQuality::High;
 };

@@ -3,6 +3,7 @@
 #include "SlimeCombatHUDWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
@@ -15,6 +16,9 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeCombatComponent.h"
+#include "SlimeCharacter.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Styling/SlateTypes.h"
 #include "UI/MenuUIStyle.h"
 #include "Settings/SlimeInputSettings.h"
@@ -34,7 +38,7 @@ namespace
 USlimeCombatHUDWidget::USlimeCombatHUDWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	SetVisibility(ESlateVisibility::HitTestInvisible);
+	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 }
 
 TSharedRef<SWidget> USlimeCombatHUDWidget::RebuildWidget()
@@ -46,7 +50,7 @@ TSharedRef<SWidget> USlimeCombatHUDWidget::RebuildWidget()
 void USlimeCombatHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	SetVisibility(ESlateVisibility::HitTestInvisible);
+	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	Refresh();
 }
 
@@ -64,13 +68,14 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar)
+	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton)
 	{
 		return;
 	}
 
 	bBuiltInCode = true;
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("CombatHudRoot"));
+	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	WidgetTree->RootWidget = Root;
 
 	UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("HudStack"));
@@ -177,6 +182,27 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	UltimateBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("UltimateBar"));
 	UltimateBar->SetVisibility(ESlateVisibility::Collapsed);
 	Stack->AddChildToVerticalBox(UltimateBar);
+
+	UnstuckButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("UnstuckButton"));
+	UnstuckButton->SetVisibility(ESlateVisibility::Visible);
+	UTextBlock* UnstuckLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("UnstuckLabel"));
+	UnstuckLabel->SetText(FText::FromString(TEXT("脱离卡死")));
+	UnstuckLabel->SetJustification(ETextJustify::Center);
+	UnstuckButton->AddChild(UnstuckLabel);
+
+	if (UCanvasPanelSlot* UnstuckSlot = Root->AddChildToCanvas(UnstuckButton))
+	{
+		UnstuckSlot->SetAnchors(FAnchors(1.f, 0.f));
+		UnstuckSlot->SetAlignment(FVector2D(1.f, 0.f));
+		UnstuckSlot->SetPosition(FVector2D(-24.f, 24.f));
+		UnstuckSlot->SetSize(FVector2D(200.f, 48.f));
+		UnstuckSlot->SetZOrder(20);
+	}
+
+	UMaterialInterface* InkMat = FMenuUIStyle::LoadButtonMaterial();
+	FMenuUIStyle::ApplyMaterialButtonStyle(UnstuckButton, InkMat, FVector2D(200.f, 48.f));
+	FMenuUIStyle::ApplyBrushCJKFont(UnstuckLabel, 18.f, FMenuUIStyle::WarmTextColor());
+	UnstuckButton->OnClicked.AddDynamic(this, &USlimeCombatHUDWidget::HandleUnstuckClicked);
 }
 
 void USlimeCombatHUDWidget::Refresh()
@@ -228,5 +254,27 @@ void USlimeCombatHUDWidget::Refresh()
 		FMenuUIStyle::ApplyMarkerFont(ComboText, 18.f, FMenuUIStyle::WarmTitleColor());
 		const int32 Combo = Combat->GetComboIndex();
 		ComboText->SetText(Combo > 0 ? FText::FromString(FString::Printf(TEXT("%d / 4"), Combo)) : FText::GetEmpty());
+	}
+
+	if (UnstuckButton && UnstuckButton->GetChildrenCount() > 0)
+	{
+		if (UTextBlock* Label = Cast<UTextBlock>(UnstuckButton->GetChildAt(0)))
+		{
+			FMenuUIStyle::ApplyBrushCJKFont(Label, 18.f, FMenuUIStyle::WarmTextColor());
+		}
+	}
+}
+
+void USlimeCombatHUDWidget::HandleUnstuckClicked()
+{
+	APlayerController* PC = GetOwningPlayer();
+	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+	if (!Pawn)
+	{
+		Pawn = GetOwningPlayerPawn();
+	}
+	if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(Pawn))
+	{
+		Slime->Unstuck();
 	}
 }

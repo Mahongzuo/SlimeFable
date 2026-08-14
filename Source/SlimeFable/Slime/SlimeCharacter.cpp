@@ -11,6 +11,7 @@
 #include "ProceduralMeshComponent.h"
 #include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeClingComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeHealthComponent.h"
@@ -115,6 +116,7 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimeStatus = CreateDefaultSubobject<USlimeStatusComponent>(TEXT("SlimeStatus"));
 	SlimeCombat = CreateDefaultSubobject<USlimeCombatComponent>(TEXT("SlimeCombat"));
 	SlimeLockOn = CreateDefaultSubobject<USlimeLockOnComponent>(TEXT("SlimeLockOn"));
+	SlimeCling = CreateDefaultSubobject<USlimeClingComponent>(TEXT("SlimeCling"));
 	if (SlimeHealth)
 	{
 		SlimeHealth->Team = ESlimeTeam::Player;
@@ -149,16 +151,24 @@ void ASlimeCharacter::BeginPlay()
 	// transform to already be identity.
 	Super::BeginPlay();
 	PrimaryActorTick.bCanEverTick = true;
+	SpawnTransform = GetActorTransform();
 }
 
 void ASlimeCharacter::Tick(float DeltaSeconds)
 {
 	LastVelocity = GetVelocity();
+	if (IsPlayerControlled())
+	{
+		PollCustomMoveKeys(DeltaSeconds);
+	}
+	if (SlimeCling)
+	{
+		SlimeCling->UpdateCling(DeltaSeconds);
+	}
 	Super::Tick(DeltaSeconds);
 	if (IsPlayerControlled())
 	{
 		UpdateCameraZoom(DeltaSeconds);
-		PollCustomMoveKeys(DeltaSeconds);
 	}
 }
 
@@ -257,11 +267,7 @@ void ASlimeCharacter::PollCustomMoveKeys(float DeltaSeconds)
 		(InputSettings->IsKeyDown(PC, ESlimeInputAction::MoveRight) ? 1.f : 0.f)
 		- (InputSettings->IsKeyDown(PC, ESlimeInputAction::MoveLeft) ? 1.f : 0.f);
 
-	const FRotator YawRot(0.f, PC->GetControlRotation().Yaw, 0.f);
-	const FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
-	const FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
-	AddMovementInput(ForwardDir, Forward);
-	AddMovementInput(RightDir, Right);
+	DoMove(Right, Forward);
 
 	if (InputSettings->WasKeyPressed(PC, ESlimeInputAction::Jump))
 	{
@@ -270,6 +276,50 @@ void ASlimeCharacter::PollCustomMoveKeys(float DeltaSeconds)
 	if (!InputSettings->IsKeyDown(PC, ESlimeInputAction::Jump))
 	{
 		StopJumping();
+	}
+}
+
+void ASlimeCharacter::DoMove(float Right, float Forward)
+{
+	if (SlimeCling)
+	{
+		SlimeCling->SetClingMoveInput(Right, Forward);
+		if (SlimeCling->IsClinging())
+		{
+			return;
+		}
+	}
+	Super::DoMove(Right, Forward);
+}
+
+void ASlimeCharacter::Jump()
+{
+	if (SlimeCling && SlimeCling->TryWallJump())
+	{
+		return;
+	}
+	Super::Jump();
+}
+
+void ASlimeCharacter::Unstuck()
+{
+	if (SlimeCling)
+	{
+		SlimeCling->TryDetach();
+	}
+
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		Movement->Velocity = FVector::ZeroVector;
+		Movement->SetMovementMode(MOVE_Walking);
+	}
+
+	TeleportTo(SpawnTransform.GetLocation(), SpawnTransform.Rotator(), false, true);
+
+	if (SlimeBody)
+	{
+		SlimeBody->ResetBody();
 	}
 }
 

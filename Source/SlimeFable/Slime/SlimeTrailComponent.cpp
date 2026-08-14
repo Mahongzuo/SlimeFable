@@ -3,6 +3,7 @@
 #include "SlimeTrailComponent.h"
 
 #include "Components/DecalComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "GameFramework/Character.h"
@@ -15,6 +16,7 @@
 #include "ProceduralMeshComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeCharacter.h"
+#include "SlimeClingComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeFable.h"
 
@@ -207,6 +209,7 @@ void USlimeTrailComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	ClearAttachedEffects();
+	ClearClingFireFx();
 	ClearShotLinkArcs();
 
 	for (FActiveStamp& Stamp : ActiveStamps)
@@ -229,6 +232,10 @@ void USlimeTrailComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void USlimeTrailComponent::HandleElementChanged(ESlimeElement NewElement, ESlimeElement PreviousElement)
 {
 	RefreshAttachedEffects(NewElement);
+	if (NewElement != ESlimeElement::Fire)
+	{
+		ClearClingFireFx();
+	}
 	if (NewElement != ESlimeElement::Lightning)
 	{
 		ClearShotLinkArcs();
@@ -366,6 +373,7 @@ void USlimeTrailComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 
 	TickActiveStamps(DeltaTime);
 	TickShotLinkArcs();
+	UpdateClingFireFx();
 
 	if (!bEnabled || !OwnerCharacter || !ElementComponent)
 	{
@@ -387,9 +395,10 @@ void USlimeTrailComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	}
 
 	const FVector Delta = Location - LastStampLocation;
-	const float HorizontalDist = FVector(Delta.X, Delta.Y, 0.f).Size();
+	const bool bClinging = IsOwnerClinging();
+	const float Travel = bClinging ? Delta.Size() : FVector(Delta.X, Delta.Y, 0.f).Size();
 	LastStampLocation = Location;
-	DistanceAccumulator += HorizontalDist;
+	DistanceAccumulator += Travel;
 
 	if (!CanStamp(Profile))
 	{
@@ -401,6 +410,93 @@ void USlimeTrailComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	{
 		DistanceAccumulator -= SpawnDistance;
 		TryStamp(Profile);
+	}
+}
+
+const USlimeClingComponent* USlimeTrailComponent::GetOwnerCling() const
+{
+	if (const ASlimeCharacter* Slime = Cast<ASlimeCharacter>(OwnerCharacter))
+	{
+		return Slime->GetSlimeCling();
+	}
+	return nullptr;
+}
+
+bool USlimeTrailComponent::IsOwnerClinging() const
+{
+	if (const USlimeClingComponent* Cling = GetOwnerCling())
+	{
+		return Cling->IsClinging();
+	}
+	return false;
+}
+
+void USlimeTrailComponent::ClearClingFireFx()
+{
+	if (ClingFireNiagaraComp)
+	{
+		ClingFireNiagaraComp->DeactivateImmediate();
+		ClingFireNiagaraComp->DestroyComponent();
+		ClingFireNiagaraComp = nullptr;
+	}
+}
+
+void USlimeTrailComponent::UpdateClingFireFx()
+{
+	const bool bWantFire = bEnabled
+		&& IsOwnerClinging()
+		&& ElementComponent
+		&& ElementComponent->CurrentElement == ESlimeElement::Fire
+		&& GetOwner();
+
+	if (!bWantFire)
+	{
+		ClearClingFireFx();
+		return;
+	}
+
+	const FSlimeTrailProfile& Profile = GetProfile(ESlimeElement::Fire);
+	UNiagaraSystem* System = ResolveNiagara(Profile.GroundNiagara);
+	if (!System)
+	{
+		ClearClingFireFx();
+		return;
+	}
+
+	const USlimeClingComponent* Cling = GetOwnerCling();
+	const FVector Normal = Cling ? Cling->GetWallNormal() : FVector::UpVector;
+	const FRotator Rotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+	const FVector WorldLoc = GetOwner()->GetActorLocation() + Normal * 12.f;
+	const FVector Scale(FMath::Max(Profile.StampSize, 0.48f));
+
+	if (!ClingFireNiagaraComp)
+	{
+		USceneComponent* AttachParent = GetOwner()->GetRootComponent();
+		const FTransform ParentXf = AttachParent ? AttachParent->GetComponentTransform() : GetOwner()->GetActorTransform();
+		ClingFireNiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			System,
+			AttachParent,
+			NAME_None,
+			ParentXf.InverseTransformPosition(WorldLoc),
+			ParentXf.InverseTransformRotation(Rotation.Quaternion()).Rotator(),
+			Scale,
+			EAttachLocation::KeepRelativeOffset,
+			false,
+			ENCPoolMethod::None,
+			true,
+			true);
+	}
+
+	if (!ClingFireNiagaraComp)
+	{
+		return;
+	}
+
+	ClingFireNiagaraComp->SetWorldLocationAndRotation(WorldLoc, Rotation);
+	ClingFireNiagaraComp->SetWorldScale3D(Scale);
+	if (!ClingFireNiagaraComp->IsActive())
+	{
+		ClingFireNiagaraComp->Activate(true);
 	}
 }
 
@@ -417,9 +513,14 @@ bool USlimeTrailComponent::CanStamp(const FSlimeTrailProfile& Profile) const
 		return false;
 	}
 
-	if (bOnlyOnGround && !Movement->IsMovingOnGround())
+	if (bOnlyOnGround && !IsOwnerClinging() && !Movement->IsMovingOnGround())
 	{
 		return false;
+	}
+
+	if (IsOwnerClinging())
+	{
+		return true;
 	}
 
 	const FVector Velocity = Movement->Velocity;
@@ -432,6 +533,28 @@ bool USlimeTrailComponent::ResolveStampLocation(FVector& OutLocation, FVector& O
 	if (!OwnerCharacter || !GetWorld())
 	{
 		return false;
+	}
+
+	if (const USlimeClingComponent* Cling = GetOwnerCling())
+	{
+		if (Cling->IsClinging())
+		{
+			const FVector WallNormal = Cling->GetWallNormal();
+			const FVector Start = OwnerCharacter->GetActorLocation();
+			const FVector End = Start - WallNormal * GroundTraceDistance;
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeTrailWall), false, OwnerCharacter);
+			if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, GroundTraceChannel, Params))
+			{
+				OutLocation = Hit.ImpactPoint;
+				OutNormal = Hit.ImpactNormal;
+				return true;
+			}
+
+			OutLocation = Cling->GetWallPoint();
+			OutNormal = WallNormal;
+			return !OutNormal.IsNearlyZero();
+		}
 	}
 
 	if (const UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
@@ -547,10 +670,11 @@ void USlimeTrailComponent::StampGroundNiagara(
 	}
 
 	const FRotator Rotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+	const float NormalOffset = IsOwnerClinging() ? 12.f : 2.f;
 	UNiagaraComponent* Niagara = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 		GetWorld(),
 		System,
-		Location + Normal * 2.f,
+		Location + Normal * NormalOffset,
 		Rotation,
 		FVector(Size),
 		false,
@@ -562,6 +686,10 @@ void USlimeTrailComponent::StampGroundNiagara(
 	{
 		return;
 	}
+
+	// Some trail systems ignore spawn rotation; force local +Z along the surface normal
+	// so fire / gravel spray out of a wall instead of world up.
+	Niagara->SetWorldRotation(Rotation);
 
 	FActiveStamp Stamp;
 	Stamp.Niagara = Niagara;

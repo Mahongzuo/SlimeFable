@@ -4,6 +4,7 @@
 
 #include "CollisionShape.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -175,6 +176,7 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 {
 	UpdateFloor();
 	ProbeSqueeze(StepDelta);
+	TryOozeEscape(StepDelta);
 
 	ColliderTimer += StepDelta;
 	const FVector Center = Solver.GetBodyCenter();
@@ -245,6 +247,14 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 	Solver.SetCeilingZ(CeilingZ);
 	Solver.SetSqueeze(SqueezeAmount, SqueezeFreeDirection);
 	Solver.SetLaunchFraction(LaunchFraction);
+	if (bClingVisual && !bSpread)
+	{
+		Solver.SetClingPlane(true, ClingPoint, ClingNormal);
+	}
+	else
+	{
+		Solver.SetClingPlane(false, FVector::ZeroVector, FVector::UpVector);
+	}
 	Solver.Step(StepDelta);
 
 	// Soft absorb AFTER step so contact/density can wobble before clones commit-destroy.
@@ -296,7 +306,14 @@ void USlimeBodyComponent::UpdateFloor()
 	};
 
 	bool bBodyFloor = false;
-	if (OwnerCharacter)
+	if (bClingVisual)
+	{
+		// Keep the leftover horizontal plane at the capsule so a far ground trace
+		// cannot stretch the blob into a hanging sheet.
+		FloorZ = float(Foot.Z - 8.0);
+		bBodyFloor = true;
+	}
+	else if (OwnerCharacter)
 	{
 		const UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
 		if (Movement && Movement->CurrentFloor.bBlockingHit)
@@ -524,6 +541,13 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 {
 	using namespace SlimeBodyPrivate;
 
+	if (bClingVisual)
+	{
+		CeilingZ = NoCeilingZ;
+		SqueezeAmount = 0.f;
+		return;
+	}
+
 	UWorld* World = GetWorld();
 	if (!World || !OwnerCapsule)
 	{
@@ -548,11 +572,19 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 		const FVector Start = Foot + FVector(0.0, 0.0, double(SphereRadius + ProbeGroundLift));
 		const FVector End = Foot + FVector(0.0, 0.0, double(ProbeCeiling));
 		FHitResult Hit;
-		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(SphereRadius), Query))
+		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(SphereRadius), Query)
+			&& float(Hit.ImpactNormal.GetSafeNormal().Z) <= -0.45f)
 		{
 			AvailableHeight = float(Hit.ImpactPoint.Z - Foot.Z);
 		}
 		CeilingZ = AvailableHeight < ProbeCeiling ? float(Foot.Z) + AvailableHeight : NoCeilingZ;
+	}
+
+	if (HeightSqueezeSuppressRemaining > 0.f)
+	{
+		HeightSqueezeSuppressRemaining = FMath::Max(HeightSqueezeSuppressRemaining - DeltaTime, 0.f);
+		AvailableHeight = ProbeCeiling;
+		CeilingZ = NoCeilingZ;
 	}
 
 	// ---- Narrow gap ------------------------------------------------------------------
@@ -560,10 +592,9 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 	float FreeRadius = DefaultCapsuleRadius;
 	{
 		const float ProbeHalfHeight = MinCapsuleHalfHeight;
-		FVector ProbeCenter = Foot + FVector(0.0, 0.0, double(ProbeHalfHeight + ProbeGroundLift));
+		const FVector BaseCenter = Foot + FVector(0.0, 0.0, double(ProbeHalfHeight + ProbeGroundLift));
+		FVector ProbeCenter = BaseCenter;
 
-		// Look ahead: by the time a wall is touching, the movement component has already
-		// refused the move and the body would never get the chance to deform.
 		FVector Heading = GetOwner()->GetVelocity();
 		Heading.Z = 0.0;
 		if (!Heading.IsNearlyZero())
@@ -571,21 +602,23 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 			ProbeCenter += Heading.GetSafeNormal() * double(LookAheadDistance);
 		}
 
-		auto IsBlocked = [World, &ProbeCenter, ProbeHalfHeight, &Query](float Radius)
+		auto IsBlockedAt = [World, ProbeHalfHeight, &Query](const FVector& Center, float Radius)
 		{
 			return World->OverlapBlockingTestByChannel(
-				ProbeCenter, FQuat::Identity, ECC_Pawn,
+				Center, FQuat::Identity, ECC_Pawn,
 				FCollisionShape::MakeCapsule(Radius, ProbeHalfHeight), Query);
 		};
 
-		if (IsBlocked(DefaultCapsuleRadius))
+		// A solid wall ahead is not a corridor. Only shrink radius when the body is already
+		// inside a tight gap (current pose blocked as well as the look-ahead).
+		if (IsBlockedAt(ProbeCenter, DefaultCapsuleRadius) && IsBlockedAt(BaseCenter, DefaultCapsuleRadius))
 		{
 			float Low = MinCapsuleRadius;
 			float High = DefaultCapsuleRadius;
 			for (int32 Iteration = 0; Iteration < RadiusProbeIterations; ++Iteration)
 			{
 				const float Mid = (Low + High) * 0.5f;
-				if (IsBlocked(Mid))
+				if (IsBlockedAt(ProbeCenter, Mid))
 				{
 					High = Mid;
 				}
@@ -649,14 +682,33 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 
 	if (NewHalfHeight > CurrentHalfHeight || NewRadius > CurrentRadius)
 	{
-		// Growing into geometry would shove the character inside a wall, so only grow when
-		// the larger shape actually fits.
 		const FVector GrownCenter = Foot + FVector(0.0, 0.0, double(NewHalfHeight));
-		if (World->OverlapBlockingTestByChannel(GrownCenter, FQuat::Identity, ECC_Pawn,
+		TArray<FOverlapResult> Overlaps;
+		if (World->OverlapMultiByChannel(Overlaps, GrownCenter, FQuat::Identity, ECC_Pawn,
 			FCollisionShape::MakeCapsule(NewRadius, NewHalfHeight), Query))
 		{
-			NewHalfHeight = CurrentHalfHeight;
-			NewRadius = CurrentRadius;
+			bool bBlockedByCeiling = false;
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				UPrimitiveComponent* Comp = Overlap.GetComponent();
+				if (!Comp)
+				{
+					continue;
+				}
+				FVector Closest = GrownCenter;
+				Comp->GetClosestPointOnCollision(GrownCenter, Closest);
+				const FVector Away = (GrownCenter - Closest).GetSafeNormal();
+				if (Away.Z <= -0.45f)
+				{
+					bBlockedByCeiling = true;
+					break;
+				}
+			}
+			if (bBlockedByCeiling)
+			{
+				NewHalfHeight = CurrentHalfHeight;
+				NewRadius = CurrentRadius;
+			}
 		}
 	}
 
@@ -664,6 +716,48 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 	{
 		ApplyCapsuleSize(NewRadius, NewHalfHeight);
 	}
+}
+
+void USlimeBodyComponent::TryOozeEscape(float DeltaTime)
+{
+	if (bClingVisual || bSpread || SqueezeAmount < 0.55f || !OwnerCharacter || !OwnerCapsule)
+	{
+		return;
+	}
+
+	UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
+	if (!Movement || Movement->IsFlying())
+	{
+		return;
+	}
+
+	FVector Dir = Movement->GetLastInputVector();
+	Dir.Z = 0.0;
+	if (Dir.IsNearlyZero())
+	{
+		Dir = Movement->GetPendingInputVector();
+		Dir.Z = 0.0;
+	}
+	if (Dir.IsNearlyZero())
+	{
+		return;
+	}
+	Dir = Dir.GetSafeNormal();
+
+	// Prefer the squeeze free axis when it roughly agrees with input (crawl out of the pinch).
+	FVector Free = SqueezeFreeDirection;
+	Free.Z = 0.0;
+	if (!Free.IsNearlyZero() && (Free.GetSafeNormal() | Dir) > 0.2f)
+	{
+		Dir = Free.GetSafeNormal();
+	}
+
+	Movement->MaxWalkSpeed = FMath::Max(Movement->MaxWalkSpeed, DefaultWalkSpeed * 0.35f);
+
+	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
+	const float Step = FMath::Min(OozeSpeed * DeltaTime, Radius);
+	FHitResult Hit;
+	Movement->SafeMoveUpdatedComponent(Dir * double(Step), OwnerCharacter->GetActorQuat(), true, Hit);
 }
 
 void USlimeBodyComponent::ApplyCapsuleSize(float NewRadius, float NewHalfHeight)
@@ -682,8 +776,12 @@ void USlimeBodyComponent::ApplyCapsuleSize(float NewRadius, float NewHalfHeight)
 	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
 	{
 		const float HeightRatio = NewHalfHeight / FMath::Max(DefaultCapsuleHalfHeight, KINDA_SMALL_NUMBER);
-		Movement->MaxStepHeight = DefaultStepHeight * HeightRatio;
-		Movement->MaxWalkSpeed = DefaultWalkSpeed * FMath::Lerp(1.f, SqueezeSpeedScale, SqueezeAmount);
+		const float BaseStep = StepHeightBoost > KINDA_SMALL_NUMBER ? StepHeightBoost : DefaultStepHeight;
+		Movement->MaxStepHeight = BaseStep * HeightRatio;
+		const float Scaled = DefaultWalkSpeed * FMath::Lerp(1.f, SqueezeSpeedScale, SqueezeAmount);
+		Movement->MaxWalkSpeed = SqueezeAmount >= 0.55f
+			? FMath::Max(Scaled, DefaultWalkSpeed * 0.35f)
+			: Scaled;
 	}
 }
 
@@ -694,13 +792,21 @@ void USlimeBodyComponent::UpdateAnchor()
 		return;
 	}
 
-	const FVector Foot = GetFootLocation();
-	const FVector Anchor = Foot + FVector(0.0, 0.0, double(SolverParams.RestRadius * AnchorHeightFraction));
+	FVector Anchor;
+	if (bClingVisual)
+	{
+		Anchor = ClingPoint + ClingNormal * double(SolverParams.RestRadius * AnchorHeightFraction);
+	}
+	else
+	{
+		const FVector Foot = GetFootLocation();
+		Anchor = Foot + FVector(0.0, 0.0, double(SolverParams.RestRadius * AnchorHeightFraction));
+	}
 	Solver.SetAnchor(Anchor, GetOwner()->GetVelocity());
 
 	// Rubber band: if the body ends up dragged a long way from the capsule, pull the capsule
 	// back rather than letting the two drift apart forever.
-	if (OwnerCharacter)
+	if (OwnerCharacter && !bClingVisual)
 	{
 		const FVector Center = Solver.GetBodyCenter();
 		FVector Offset = Center - Anchor;
@@ -1015,13 +1121,50 @@ void USlimeBodyComponent::SetSpread(bool bInSpread)
 	}
 }
 
+void USlimeBodyComponent::SetStepHeightBoost(float BoostedMaxStep)
+{
+	StepHeightBoost = FMath::Max(BoostedMaxStep, 0.f);
+	if (!OwnerCharacter || !OwnerCapsule)
+	{
+		return;
+	}
+
+	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
+	{
+		const float HeightRatio = OwnerCapsule->GetUnscaledCapsuleHalfHeight()
+			/ FMath::Max(DefaultCapsuleHalfHeight, KINDA_SMALL_NUMBER);
+		const float BaseStep = StepHeightBoost > KINDA_SMALL_NUMBER ? StepHeightBoost : DefaultStepHeight;
+		Movement->MaxStepHeight = BaseStep * HeightRatio;
+	}
+}
+
+void USlimeBodyComponent::SetClingVisual(bool bInCling, const FVector& Point, const FVector& Normal)
+{
+	bClingVisual = bInCling;
+	ClingPoint = Point;
+	ClingNormal = Normal.GetSafeNormal();
+	if (ClingNormal.IsNearlyZero())
+	{
+		ClingNormal = FVector::ForwardVector;
+		bClingVisual = false;
+	}
+}
+
+void USlimeBodyComponent::SuppressHeightSqueeze(float Duration)
+{
+	HeightSqueezeSuppressRemaining = FMath::Max(HeightSqueezeSuppressRemaining, Duration);
+}
+
 void USlimeBodyComponent::ResetBody()
 {
 	bSpread = false;
 	bRecalling = false;
+	bClingVisual = false;
+	StepHeightBoost = 0.f;
 	SpreadRecoverRemaining = 0.f;
 	RecallElapsed = 0.f;
 	ForcedSqueeze = 0.f;
+	HeightSqueezeSuppressRemaining = 0.f;
 
 	const FVector Foot = GetFootLocation();
 	Solver.Reset(Foot + FVector(0.0, 0.0, double(SolverParams.RestRadius * AnchorHeightFraction)));

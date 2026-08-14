@@ -16,6 +16,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeClingComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeFable.h"
 #include "Settings/SlimeInputSettings.h"
@@ -206,9 +207,17 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		}
 	}
 
-	if (WasPressed(ESlimeInputAction::ResetBody, EKeys::T) && Body)
+	if (WasPressed(ESlimeInputAction::ResetBody, EKeys::T))
 	{
-		Body->ResetBody();
+		bool bDetached = false;
+		if (USlimeClingComponent* Cling = GetOwner() ? GetOwner()->FindComponentByClass<USlimeClingComponent>() : nullptr)
+		{
+			bDetached = Cling->TryDetach();
+		}
+		if (!bDetached && Body)
+		{
+			Body->ResetBody();
+		}
 	}
 
 	const bool bAbsorb = IsDown(ESlimeInputAction::Absorb, EKeys::X);
@@ -313,6 +322,13 @@ void USlimeAbilityComponent::HandleResetTriggered()
 	if (bPollAbilityKeys)
 	{
 		return;
+	}
+	if (USlimeClingComponent* Cling = GetOwner() ? GetOwner()->FindComponentByClass<USlimeClingComponent>() : nullptr)
+	{
+		if (Cling->TryDetach())
+		{
+			return;
+		}
 	}
 	if (Body)
 	{

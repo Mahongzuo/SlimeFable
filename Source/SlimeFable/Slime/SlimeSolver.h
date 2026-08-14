@@ -68,6 +68,12 @@ public:
 	/** Pancake mode: widen the membrane and push outwards along the ground plane. */
 	void SetSpread(bool bInSpread, float InSpreadRadius, float InSpreadPush, float InSpreadHalfHeight);
 
+	/**
+	 *  Wall cling: treat the wall as a floor analogue so the blob sits as a mild hemisphere
+	 *  on the surface. Not pancake spread.
+	 */
+	void SetClingPlane(bool bInCling, const FVector& InPoint, const FVector& InNormal);
+
 	/** Light air "duang" on double jump — far milder than landing squash. */
 	void ApplyAirBounce();
 
@@ -242,6 +248,9 @@ private:
 	float LaunchFractionCached = 0.3f;
 	bool bSpread = false;
 	bool bSkipWorldCollision = false;
+	bool bCling = false;
+	FVector3f ClingPoint = FVector3f::ZeroVector;
+	FVector3f ClingNormal = FVector3f::ForwardVector;
 
 	TArray<SlimeSim::FSlimeCollider> Colliders;
 	TArray<FShotState> ShotStates;

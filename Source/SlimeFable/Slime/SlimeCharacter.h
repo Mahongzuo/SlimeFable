@@ -11,6 +11,7 @@
 class UProceduralMeshComponent;
 class USlimeAbilityComponent;
 class USlimeBodyComponent;
+class USlimeClingComponent;
 class USlimeCombatComponent;
 class USlimeElementComponent;
 class USlimeHealthComponent;
@@ -38,6 +39,8 @@ public:
 	virtual void NotifyControllerChanged() override;
 	virtual void Landed(const FHitResult& Hit) override;
 	virtual void OnJumped_Implementation() override;
+	virtual void Jump() override;
+	virtual void DoMove(float Right, float Forward) override;
 
 	/** Ground / first jump vertical impulse written into CharacterMovement. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Jump", meta = (ClampMin = "100.0"))
@@ -92,6 +95,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeLockOnComponent* GetSlimeLockOn() const { return SlimeLockOn; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeClingComponent* GetSlimeCling() const { return SlimeCling; }
+
+	/** Teleport back to this pawn's spawn and reset cling / body. */
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void Unstuck();
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetSurfaceMesh() const { return SurfaceMesh; }
@@ -151,9 +161,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<USlimeLockOnComponent> SlimeLockOn;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
+	TObjectPtr<USlimeClingComponent> SlimeCling;
+
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;
 
 	/** Desired spring-arm length the boom smoothly follows. */
 	float DesiredCameraArmLength = 260.f;
+
+	/** World transform at BeginPlay; Unstuck returns here. */
+	FTransform SpawnTransform = FTransform::Identity;
 };

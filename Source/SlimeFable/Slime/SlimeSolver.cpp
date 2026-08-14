@@ -158,6 +158,7 @@ void FSlimeSolver::BuildDome(const FVector& RestCenter)
 	NextShotId = 1;
 	ContactLoad = 0.f;
 	bSpread = false;
+	bCling = false;
 	SqueezeAmount = 0.f;
 	GravityScale = 1.f;
 	ShotStates.Reset();
@@ -365,6 +366,7 @@ void FSlimeSolver::Reset(const FVector& RestCenter)
 	BuildDome(RestCenter);
 	Colliders.Reset();
 	bSkipWorldCollision = false;
+	bCling = false;
 	SpreadRadius = 0.f;
 	SpreadPush = 0.f;
 	AnchorCenter = FVector3f(RestCenter);
@@ -498,6 +500,41 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 		return;
 	}
 
+	if (bCling)
+	{
+		FVector3f Normal = ClingNormal;
+		if (Normal.SizeSquared() < KINDA_SMALL_NUMBER)
+		{
+			Normal = FVector3f::ForwardVector;
+		}
+		else
+		{
+			Normal.Normalize();
+		}
+		FVector3f Right = FVector3f::CrossProduct(FVector3f::UpVector, Normal);
+		if (Right.SizeSquared() < KINDA_SMALL_NUMBER)
+		{
+			Right = FVector3f::CrossProduct(FVector3f::ForwardVector, Normal);
+		}
+		Right.Normalize();
+		const FVector3f Up = FVector3f::CrossProduct(Normal, Right).GetSafeNormal();
+
+		FVector3f Local = InOutPoint - Center;
+		const float Ln = Local | Normal;
+		const float Lr = Local | Right;
+		const float Lu = Local | Up;
+		const float Ax = FMath::Max(ShellAxes.X, 1.f);
+		const float Ay = FMath::Max(ShellAxes.Y, 1.f);
+		const float Az = FMath::Max(ShellAxes.Z, 1.f);
+		const float Score = (Ln * Ln) / (Ax * Ax) + (Lr * Lr) / (Ay * Ay) + (Lu * Lu) / (Az * Az);
+		if (Score > 1.f && Score > KINDA_SMALL_NUMBER)
+		{
+			const float Scale = FMath::InvSqrt(Score);
+			InOutPoint = Center + Normal * (Ln * Scale) + Right * (Lr * Scale) + Up * (Lu * Scale);
+		}
+		return;
+	}
+
 	// Inertia ellipsoid in (Forward, Right, Up), centre shifted slightly rearward.
 	FVector3f Forward = CombatPose.bActive ? FVector3f(CombatPose.Forward) : InertiaForward;
 	Forward.Z = 0.f;
@@ -540,6 +577,18 @@ void FSlimeSolver::SetSpread(bool bInSpread, float InSpreadRadius, float InSprea
 	SpreadRadius = InSpreadRadius;
 	SpreadPush = InSpreadPush;
 	SpreadHalfHeight = FMath::Max(InSpreadHalfHeight, 0.5f);
+}
+
+void FSlimeSolver::SetClingPlane(bool bInCling, const FVector& InPoint, const FVector& InNormal)
+{
+	bCling = bInCling && !InNormal.IsNearlyZero();
+	ClingPoint = FVector3f(InPoint);
+	ClingNormal = FVector3f(InNormal.GetSafeNormal());
+	if (ClingNormal.SizeSquared() < KINDA_SMALL_NUMBER)
+	{
+		bCling = false;
+		ClingNormal = FVector3f::ForwardVector;
+	}
 }
 
 void FSlimeSolver::SetSqueeze(float InAmount, const FVector& InFreeDirection)
@@ -677,6 +726,14 @@ void FSlimeSolver::Step(float Dt)
 		ShellAxes = FVector3f(MembraneRadius * Slack, MembraneRadius * Slack, FMath::Max(Params.ParticleSpacing * 1.25f, 3.f));
 		ShellBackShift = 0.f;
 	}
+	else if (bCling)
+	{
+		const float Base = MembraneRadius * Slack;
+		ShellAxes.X = Base * 0.85f;
+		ShellAxes.Y = Base * 1.08f;
+		ShellAxes.Z = Base * 1.08f;
+		ShellBackShift = 0.f;
+	}
 	else
 	{
 		const float Base = MembraneRadius * Slack;
@@ -741,6 +798,12 @@ void FSlimeSolver::Step(float Dt)
 	{
 		FSlimeParticle& Particle = Particles[Index];
 		FVector3f Accel(0.f, 0.f, Gravity);
+		if (bCling && !Particle.IsBallistic())
+		{
+			// Pull into the wall the way ground gravity pulls into the floor.
+			Accel = ClingNormal * Gravity;
+			Accel.Z += Gravity * 0.15f;
+		}
 
 		if (!Particle.IsBallistic())
 		{
@@ -770,7 +833,15 @@ void FSlimeSolver::Step(float Dt)
 					Accel += ToCenter * ((Distance - MembraneRadius) * MembraneK);
 				}
 
-				if (UpwardRestore > 0.f && Offset.Z < 0.f)
+				if (bCling)
+				{
+					const float AlongNormal = Offset | ClingNormal;
+					if (AlongNormal < 0.f)
+					{
+						Accel += ClingNormal * (UpwardRestore * (-AlongNormal));
+					}
+				}
+				else if (UpwardRestore > 0.f && Offset.Z < 0.f)
 				{
 					Accel.Z += UpwardRestore * (-Offset.Z);
 				}
@@ -1346,6 +1417,9 @@ void FSlimeSolver::ResolveCollisions()
 			}
 
 			// Body uses the capsule floor; each clone shot uses its own traced floor.
+			// Cling replaces the horizontal floor for the attached body so it does not
+			// stretch down to the real ground.
+			const bool bBodyCling = bCling && !Particle.IsBallistic();
 			float PlaneZ = FloorZ;
 			if (Particle.IsBallistic())
 			{
@@ -1355,11 +1429,23 @@ void FSlimeSolver::ResolveCollisions()
 					PlaneZ = *ShotFloor;
 				}
 			}
-			if (Point.Z - LocalContactRadius < PlaneZ)
+			if (!bBodyCling && Point.Z - LocalContactRadius < PlaneZ)
 			{
 				Load += PlaneZ + LocalContactRadius - Point.Z;
 				Point.Z = PlaneZ + LocalContactRadius;
 				Accumulated += FVector3f::UpVector;
+			}
+
+			if (bBodyCling)
+			{
+				const float Dist = (Point - ClingPoint) | ClingNormal;
+				if (Dist < LocalContactRadius)
+				{
+					const float Push = LocalContactRadius - Dist;
+					Point += ClingNormal * Push;
+					Load += Push;
+					Accumulated += ClingNormal;
+				}
 			}
 
 			if (Point.Z + LocalContactRadius > CeilingZ)

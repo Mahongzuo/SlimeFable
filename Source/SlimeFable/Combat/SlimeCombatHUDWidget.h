@@ -11,6 +11,7 @@ class UProgressBar;
 class UTextBlock;
 class UImage;
 class UCanvasPanel;
+class UButton;
 
 UCLASS()
 class SLIMEFABLE_API USlimeCombatHUDWidget : public UUserWidget
@@ -29,6 +30,9 @@ public:
 protected:
 	void BuildLayoutIfNeeded();
 	void Refresh();
+
+	UFUNCTION()
+	void HandleUnstuckClicked();
 
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeCombatComponent> Combat;
@@ -53,6 +57,9 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UProgressBar> UltimateBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UButton> UnstuckButton;
 
 	bool bBuiltInCode = false;
 };

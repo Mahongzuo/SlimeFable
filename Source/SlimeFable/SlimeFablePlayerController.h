@@ -52,8 +52,7 @@ protected:
 
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
-
-	/** Input mapping context setup */
+	virtual void PlayerTick(float DeltaTime) override;
 	virtual void SetupInputComponent() override;
 
 	/** Returns true if the player should use UMG touch controls */
@@ -62,6 +61,8 @@ protected:
 	void TogglePauseMenu();
 	void OpenPauseMenu();
 	void ClosePauseMenu();
+	void UpdateAltCursor();
+	bool IsPauseMenuOpen() const;
 
 	UFUNCTION()
 	void HandlePauseContinue();

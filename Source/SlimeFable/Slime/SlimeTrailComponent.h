@@ -18,6 +18,7 @@ class UProceduralMeshComponent;
 class USkeletalMesh;
 class USkeletalMeshComponent;
 class USlimeBodyComponent;
+class USlimeClingComponent;
 class USlimeElementComponent;
 
 UENUM(BlueprintType)
@@ -172,6 +173,8 @@ protected:
 
 	bool CanStamp(const FSlimeTrailProfile& Profile) const;
 	bool ResolveStampLocation(FVector& OutLocation, FVector& OutNormal) const;
+	const USlimeClingComponent* GetOwnerCling() const;
+	bool IsOwnerClinging() const;
 	void TryStamp(const FSlimeTrailProfile& Profile);
 	void StampDecal(const FSlimeTrailProfile& Profile, const FVector& Location, const FVector& Normal, float Size);
 	void StampGroundNiagara(const FSlimeTrailProfile& Profile, const FVector& Location, const FVector& Normal, float Size);
@@ -184,6 +187,8 @@ protected:
 	void TickShotLinkArcs();
 	void ClearShotLinkArcs();
 	void RecycleOldestStamp();
+	void UpdateClingFireFx();
+	void ClearClingFireFx();
 
 	UMaterialInterface* ResolveMaterial(const TSoftObjectPtr<UMaterialInterface>& Soft) const;
 	UNiagaraSystem* ResolveNiagara(const TSoftObjectPtr<UNiagaraSystem>& Soft) const;
@@ -216,6 +221,9 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UNiagaraComponent> AttachedNiagaraComp;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNiagaraComponent> ClingFireNiagaraComp;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ActiveOverlay;
