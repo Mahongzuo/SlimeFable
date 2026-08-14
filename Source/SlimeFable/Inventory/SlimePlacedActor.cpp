@@ -84,34 +84,16 @@ void ASlimePlacedActor::SetHighlight(bool bEnabled)
 	bHighlighted = bEnabled;
 	if (bEnabled)
 	{
+		// Edge-only Fresnel overlay — do not tint / emissive-boost base materials.
 		if (UMaterialInterface* Overlay = ResolveOutlineMaterial())
 		{
 			Mesh->SetOverlayMaterial(Overlay);
 		}
-		const FLinearColor WarmEdge(0.92f, 0.72f, 0.32f, 1.f);
-		for (int32 Index = 0; Index < Mesh->GetNumMaterials(); ++Index)
-		{
-			if (UMaterialInstanceDynamic* Dyn = Mesh->CreateAndSetMaterialInstanceDynamic(Index))
-			{
-				Dyn->SetVectorParameterValue(TEXT("EmissiveColor"), WarmEdge * 4.f);
-				Dyn->SetScalarParameterValue(TEXT("EmissiveStrength"), 4.f);
-				Dyn->SetVectorParameterValue(TEXT("BaseColor"), WarmEdge);
-			}
-		}
-		Mesh->SetRelativeScale3D(RestRelativeScale * HighlightScaleMul);
 	}
 	else
 	{
 		Mesh->SetOverlayMaterial(nullptr);
 		Mesh->SetRelativeScale3D(RestRelativeScale);
-		if (UStaticMesh* StaticMesh = Mesh->GetStaticMesh())
-		{
-			const TArray<FStaticMaterial>& Mats = StaticMesh->GetStaticMaterials();
-			for (int32 Index = 0; Index < Mats.Num(); ++Index)
-			{
-				Mesh->SetMaterial(Index, Mats[Index].MaterialInterface);
-			}
-		}
 	}
 }
 

@@ -16,6 +16,7 @@ void USlimeFableGameInstance::Init()
 	Super::Init();
 
 	EnsureLoadingBackgroundBrush();
+	EnsureLoadingStatusFont();
 
 	PreLoadMapHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &USlimeFableGameInstance::BeginLoadingScreen);
 	PostLoadMapHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &USlimeFableGameInstance::EndLoadingScreen);
@@ -41,6 +42,8 @@ void USlimeFableGameInstance::Shutdown()
 	}
 
 	CachedLoadingBackground.Reset();
+	bHasCachedLoadingStatusFont = false;
+	CachedLoadingStatusFont = FSlateFontInfo();
 	Super::Shutdown();
 }
 
@@ -52,6 +55,15 @@ void USlimeFableGameInstance::EnsureLoadingBackgroundBrush()
 	}
 }
 
+void USlimeFableGameInstance::EnsureLoadingStatusFont()
+{
+	if (!bHasCachedLoadingStatusFont)
+	{
+		CachedLoadingStatusFont = SSlimeLoadingScreen::CreateStatusFontOnGameThread(22.f);
+		bHasCachedLoadingStatusFont = true;
+	}
+}
+
 void USlimeFableGameInstance::BeginLoadingScreen(const FString& MapName)
 {
 	if (IsRunningDedicatedServer())
@@ -60,6 +72,7 @@ void USlimeFableGameInstance::BeginLoadingScreen(const FString& MapName)
 	}
 
 	EnsureLoadingBackgroundBrush();
+	EnsureLoadingStatusFont();
 
 	// Hide "Preparing Shaders" chrome for the whole travel; gate restores later.
 	bPrevScreenMessagesEnabled = GAreScreenMessagesEnabled;
@@ -72,7 +85,8 @@ void USlimeFableGameInstance::BeginLoadingScreen(const FString& MapName)
 	Attributes.bWaitForManualStop = false;
 	Attributes.MinimumLoadingScreenDisplayTime = 0.2f;
 	Attributes.WidgetLoadingScreen = SNew(SSlimeLoadingScreen)
-		.BackgroundBrush(CachedLoadingBackground);
+		.BackgroundBrush(CachedLoadingBackground)
+		.StatusFont(CachedLoadingStatusFont);
 
 	if (IGameMoviePlayer* MoviePlayer = GetMoviePlayer())
 	{

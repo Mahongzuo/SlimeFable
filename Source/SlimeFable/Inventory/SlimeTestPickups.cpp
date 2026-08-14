@@ -52,8 +52,22 @@ void ASlimePickupSouvenir::PrepareDefinition(USlimeInventorySubsystem& Inventory
 	const FName DerivedId(*FString::Printf(TEXT("Souvenir_%s"), *AssetName));
 	ItemIdOverride = DerivedId;
 
-	if (Inventory.FindDefinition(DerivedId))
+	if (USlimeItemDefinition* Existing = Inventory.FindDefinition(DerivedId))
 	{
+		if (USlimeSouvenirDefinition* ExistingSouvenir = Cast<USlimeSouvenirDefinition>(Existing))
+		{
+			ExistingSouvenir->StoryImage = SouvenirImage;
+			ExistingSouvenir->Icon = SouvenirImage;
+			ExistingSouvenir->StoryVideo = SouvenirVideo;
+			if (!SouvenirDisplayName.IsEmpty())
+			{
+				ExistingSouvenir->DisplayName = SouvenirDisplayName;
+			}
+			if (!SouvenirStoryText.IsEmpty())
+			{
+				ExistingSouvenir->StoryText = SouvenirStoryText;
+			}
+		}
 		return;
 	}
 
@@ -68,6 +82,7 @@ void ASlimePickupSouvenir::PrepareDefinition(USlimeInventorySubsystem& Inventory
 		: SouvenirStoryText;
 	Def->StoryImage = SouvenirImage;
 	Def->Icon = SouvenirImage;
+	Def->StoryVideo = SouvenirVideo;
 	Inventory.RegisterItemDefinition(Def);
 
 	if (UTexture2D* Tex = SouvenirImage.LoadSynchronous())

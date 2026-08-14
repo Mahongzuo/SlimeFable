@@ -55,9 +55,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
 	TSoftObjectPtr<UMaterialInterface> OutlineOverlayMaterial;
 
-	/** Extra scale applied while highlighted so the pickup stays readable without a perfect outline MI. */
+	/** Kept for BP compatibility; highlight no longer scales the mesh (default 1). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ClampMin = "1.0", ClampMax = "1.5"))
-	float HighlightScaleMul = 1.18f;
+	float HighlightScaleMul = 1.0f;
 
 	/** Extra cm above mesh bounds top for the interact prompt. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ClampMin = "0.0", Units = "cm"))

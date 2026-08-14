@@ -203,7 +203,8 @@ void USlimeSouvenirViewerWidget::ApplyLook()
 		DimBrush.ImageSize = FVector2D(32.f, 32.f);
 		DimOverlay->SetBrush(DimBrush);
 	}
-	FMenuUIStyle::ApplyTitleFont(TitleText, 32.f, FMenuUIStyle::WarmTitleColor());
+	// Chinese title must use KuaiLe — Marker has no CJK and shows "字" placeholders.
+	FMenuUIStyle::ApplyBrushCJKFont(TitleText, 32.f, FMenuUIStyle::WarmTitleColor());
 	FMenuUIStyle::ApplyBrushCJKFont(StoryText, 18.f, FMenuUIStyle::WarmTextColor());
 
 	UMaterialInterface* BrushBtn = FMenuUIStyle::LoadButtonMaterial();
@@ -319,8 +320,10 @@ void USlimeSouvenirViewerWidget::OnPlayClicked()
 	UFileMediaSource* Source = Souvenir->StoryVideo.LoadSynchronous();
 	if (!Source)
 	{
-		Source = NewObject<UFileMediaSource>(this);
-		Source->SetFilePath(TEXT("./Movies/H3_I2V_Turbo_00002_.mp4"));
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("Souvenir %s: StoryVideo failed to load; assign a FileMediaSource under /Game/Movies"),
+			*Souvenir->ItemId.ToString());
+		return;
 	}
 	MediaPlayer->OpenSource(Source);
 	MediaPlayer->Play();

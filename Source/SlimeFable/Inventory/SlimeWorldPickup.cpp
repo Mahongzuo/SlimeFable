@@ -100,38 +100,18 @@ void ASlimeWorldPickup::SetHighlight(bool bEnabled)
 	bHighlighted = bEnabled;
 	if (bEnabled)
 	{
+		// Edge-only Fresnel overlay — do not tint / emissive-boost base materials
+		// (that washed out the whole mesh and hid the original look).
 		if (UMaterialInterface* Overlay = ResolveOutlineMaterial())
 		{
 			Mesh->SetOverlayMaterial(Overlay);
 		}
-
-		// Warm emissive boost on base materials so highlight is obvious even if overlay is weak.
-		const FLinearColor WarmEdge(0.92f, 0.72f, 0.32f, 1.f);
-		for (int32 Index = 0; Index < Mesh->GetNumMaterials(); ++Index)
-		{
-			if (UMaterialInstanceDynamic* Dyn = Mesh->CreateAndSetMaterialInstanceDynamic(Index))
-			{
-				Dyn->SetVectorParameterValue(TEXT("EmissiveColor"), WarmEdge * 4.f);
-				Dyn->SetScalarParameterValue(TEXT("EmissiveStrength"), 4.f);
-				Dyn->SetVectorParameterValue(TEXT("BaseColor"), WarmEdge);
-			}
-		}
-		Mesh->SetRelativeScale3D(RestRelativeScale * HighlightScaleMul);
 	}
 	else
 	{
 		Mesh->SetOverlayMaterial(nullptr);
 		Mesh->SetRenderCustomDepth(false);
 		Mesh->SetRelativeScale3D(RestRelativeScale);
-		// Restore materials by clearing dynamic instances — recreate from mesh asset defaults.
-		if (UStaticMesh* StaticMesh = Mesh->GetStaticMesh())
-		{
-			const TArray<FStaticMaterial>& Mats = StaticMesh->GetStaticMaterials();
-			for (int32 Index = 0; Index < Mats.Num(); ++Index)
-			{
-				Mesh->SetMaterial(Index, Mats[Index].MaterialInterface);
-			}
-		}
 	}
 }
 

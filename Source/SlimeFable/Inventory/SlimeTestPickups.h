@@ -7,6 +7,7 @@
 #include "SlimeTestPickups.generated.h"
 
 class UTexture2D;
+class UFileMediaSource;
 
 /** Drop into a level to test consumable pickup (HealJelly). */
 UCLASS(Blueprintable)
@@ -48,6 +49,10 @@ public:
 	/** 自定义故事文字；留空则用默认文案。仅在设置了 SouvenirImage 时生效。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir", meta = (MultiLine = "true"))
 	FText SouvenirStoryText;
+
+	/** 故事视频（FileMediaSource）；留空则查看页不显示播放按钮。仅在设置了 SouvenirImage 时生效。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir")
+	TSoftObjectPtr<UFileMediaSource> SouvenirVideo;
 
 protected:
 	virtual void PrepareDefinition(USlimeInventorySubsystem& Inventory) override;

@@ -52,8 +52,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placeable")
 	TSoftObjectPtr<UMaterialInterface> OutlineOverlayMaterial;
 
+	/** Kept for BP compatibility; highlight no longer scales the mesh (default 1). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placeable", meta = (ClampMin = "1.0", ClampMax = "1.5"))
-	float HighlightScaleMul = 1.18f;
+	float HighlightScaleMul = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Placeable", meta = (ClampMin = "0.0", Units = "cm"))
 	float PromptHeightOffset = 40.f;

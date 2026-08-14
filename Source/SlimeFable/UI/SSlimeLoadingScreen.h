@@ -6,6 +6,7 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
+#include "Fonts/SlateFontInfo.h"
 
 class SProgressBar;
 class STextBlock;
@@ -19,9 +20,12 @@ class SSlimeLoadingScreen : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SSlimeLoadingScreen)
 		: _BackgroundBrush()
+		, _StatusFont()
 	{}
 		/** Prebuilt on the game thread (dynamic slate resource or solid color). */
 		SLATE_ARGUMENT(TSharedPtr<FSlateBrush>, BackgroundBrush)
+		/** Prebuilt on the game thread from a disk TTF — never a UFont*. */
+		SLATE_ARGUMENT(FSlateFontInfo, StatusFont)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -30,6 +34,9 @@ public:
 
 	/** Game-thread only: build a brush safe for the loading slate thread. */
 	static TSharedPtr<FSlateBrush> CreateBackgroundBrushOnGameThread();
+
+	/** Game-thread only: path-based composite font (no UObject) for MoviePlayer. */
+	static FSlateFontInfo CreateStatusFontOnGameThread(float Size = 22.f);
 
 private:
 	TOptional<float> GetProgressPercent() const;

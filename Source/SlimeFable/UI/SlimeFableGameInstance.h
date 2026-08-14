@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "Styling/SlateBrush.h"
+#include "Fonts/SlateFontInfo.h"
 #include "SlimeFableGameInstance.generated.h"
 
 class USlimeLoadingGateWidget;
@@ -20,6 +21,7 @@ public:
 
 protected:
 	void EnsureLoadingBackgroundBrush();
+	void EnsureLoadingStatusFont();
 	void BeginLoadingScreen(const FString& MapName);
 	void EndLoadingScreen(UWorld* LoadedWorld);
 	void ShowLoadingGate(UWorld* LoadedWorld);
@@ -32,6 +34,10 @@ protected:
 
 	/** Built once on the game thread; reused so PreLoadMap never touches RHI/UObjects. */
 	TSharedPtr<FSlateBrush> CachedLoadingBackground;
+
+	/** Path-based composite font for MoviePlayer (no UFont*). */
+	FSlateFontInfo CachedLoadingStatusFont;
+	bool bHasCachedLoadingStatusFont = false;
 
 	UPROPERTY()
 	TObjectPtr<USlimeLoadingGateWidget> ActiveLoadingGate;

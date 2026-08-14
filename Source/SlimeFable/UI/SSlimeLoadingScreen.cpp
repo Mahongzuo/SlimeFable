@@ -13,6 +13,10 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Styling/CoreStyle.h"
+#include "Fonts/CompositeFont.h"
+#include "HAL/PlatformFileManager.h"
+#include "Misc/Paths.h"
 
 namespace SlimeLoadingScreenPrivate
 {
@@ -86,6 +90,29 @@ namespace SlimeLoadingScreenPrivate
 		return false;
 #endif
 	}
+
+	static FString FindLoadingScreenFontPath()
+	{
+		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+		const FString ProjectFont = FPaths::ProjectContentDir() / TEXT("UI/Fonts/ZCOOLKuaiLe-Regular.ttf");
+		if (PlatformFile.FileExists(*ProjectFont))
+		{
+			return FPaths::ConvertRelativePathToFull(ProjectFont);
+		}
+		const TArray<FString> SystemCandidates = {
+			TEXT("C:/Windows/Fonts/msyh.ttc"),
+			TEXT("C:/Windows/Fonts/msyhbd.ttc"),
+			TEXT("C:/Windows/Fonts/simhei.ttf"),
+		};
+		for (const FString& Path : SystemCandidates)
+		{
+			if (PlatformFile.FileExists(*Path))
+			{
+				return Path;
+			}
+		}
+		return FString();
+	}
 }
 
 TSharedPtr<FSlateBrush> SSlimeLoadingScreen::CreateBackgroundBrushOnGameThread()
@@ -103,6 +130,32 @@ TSharedPtr<FSlateBrush> SSlimeLoadingScreen::CreateBackgroundBrushOnGameThread()
 	}
 
 	return SlimeLoadingScreenPrivate::MakeSolidBackground();
+}
+
+FSlateFontInfo SSlimeLoadingScreen::CreateStatusFontOnGameThread(float Size)
+{
+	check(IsInGameThread());
+
+	static TSharedPtr<const FCompositeFont> CachedComposite;
+	if (!CachedComposite.IsValid())
+	{
+		const FString FontPath = SlimeLoadingScreenPrivate::FindLoadingScreenFontPath();
+		if (!FontPath.IsEmpty())
+		{
+			CachedComposite = MakeShared<FStandaloneCompositeFont>(
+				FName(TEXT("Regular")),
+				FontPath,
+				EFontHinting::Default,
+				EFontLoadingPolicy::LazyLoad);
+		}
+	}
+
+	if (CachedComposite.IsValid())
+	{
+		return FSlateFontInfo(CachedComposite, Size, FName(TEXT("Regular")));
+	}
+
+	return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), Size);
 }
 
 void SSlimeLoadingScreen::Construct(const FArguments& InArgs)
@@ -132,7 +185,12 @@ void SSlimeLoadingScreen::Construct(const FArguments& InArgs)
 		.SetFillImage(FillBrush)
 		.SetEnableFillAnimation(false);
 
-	const FSlateFontInfo StatusFont = FMenuUIStyle::MakeBrushCJKFont(22.f);
+	// Never call MakeBrushCJKFont / LoadObject<UFont> here — MoviePlayer paints on SlateLoadingThread.
+	FSlateFontInfo StatusFont = InArgs._StatusFont;
+	if (!StatusFont.HasValidFont())
+	{
+		StatusFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 22);
+	}
 
 	ChildSlot
 	[
