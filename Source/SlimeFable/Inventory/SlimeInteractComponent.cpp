@@ -4,12 +4,14 @@
 
 #include "SlimeWorldPickup.h"
 #include "SlimePlacedActor.h"
+#include "SlimeVehiclePickup.h"
 #include "SlimeInventorySubsystem.h"
 #include "SlimePlacementComponent.h"
 #include "UI/SlimeInventoryWidget.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "SlimeAbilityComponent.h"
+#include "SlimeVehicleComponent.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
@@ -70,6 +72,14 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 		return;
 	}
 
+	if (const USlimeVehicleComponent* Vehicle = Pawn->FindComponentByClass<USlimeVehicleComponent>())
+	{
+		if (Vehicle->IsUsingVehicle())
+		{
+			return;
+		}
+	}
+
 	const FVector Loc = Pawn->GetActorLocation();
 	const float RadiusSq = FMath::Square(InteractRadius);
 	float BestDistSq = TNumericLimits<float>::Max();
@@ -82,6 +92,13 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 		if (!IsValid(Pickup))
 		{
 			continue;
+		}
+		if (const ASlimeVehiclePickup* VehiclePickup = Cast<ASlimeVehiclePickup>(Pickup))
+		{
+			if (!VehiclePickup->CanBeUsedBy(Pawn))
+			{
+				continue;
+			}
 		}
 		const float DistSq = FVector::DistSquared(Loc, Pickup->GetActorLocation());
 		if (DistSq <= RadiusSq && DistSq < BestDistSq)
@@ -127,18 +144,42 @@ bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation
 	return false;
 }
 
+FText USlimeInteractComponent::GetFocusedPromptVerb() const
+{
+	if (ASlimeWorldPickup* Pickup = FocusedPickup.Get())
+	{
+		return Pickup->GetInteractPromptVerb();
+	}
+	if (FocusedPlaced.IsValid())
+	{
+		return FText::FromString(TEXT("拾取"));
+	}
+	return FText::GetEmpty();
+}
+
 bool USlimeInteractComponent::TryInteract()
 {
 	if (!CanInteractNow())
 	{
 		return false;
 	}
-	RefreshFocusedTarget();
+
 	APawn* Pawn = Cast<APawn>(GetOwner());
 	if (!Pawn)
 	{
 		return false;
 	}
+
+	if (USlimeVehicleComponent* Vehicle = Pawn->FindComponentByClass<USlimeVehicleComponent>())
+	{
+		if (Vehicle->IsUsingVehicle())
+		{
+			Vehicle->ExitVehicle(true);
+			return true;
+		}
+	}
+
+	RefreshFocusedTarget();
 	if (ASlimeWorldPickup* Pickup = FocusedPickup.Get())
 	{
 		return Pickup->TryPickup(Pawn);

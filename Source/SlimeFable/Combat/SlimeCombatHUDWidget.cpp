@@ -393,7 +393,11 @@ void USlimeCombatHUDWidget::Refresh()
 							const FString KeyName = InputSettings
 								? InputSettings->GetKeyDisplayName(ESlimeInputAction::Interact).ToString()
 								: TEXT("F");
-							Prompt = FText::FromString(FString::Printf(TEXT("%s 拾取"), *KeyName));
+							const FString Verb = Interact->GetFocusedPromptVerb().ToString();
+							Prompt = FText::FromString(FString::Printf(
+								TEXT("%s %s"),
+								*KeyName,
+								Verb.IsEmpty() ? TEXT("拾取") : *Verb));
 						}
 					}
 				}

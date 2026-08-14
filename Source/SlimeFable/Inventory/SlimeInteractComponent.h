@@ -43,6 +43,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	bool GetFocusedPromptWorldLocation(FVector& OutLocation) const;
 
+	/** Verb for the focused interactable (e.g. 拾取 / 使用载具). Empty if none. */
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	FText GetFocusedPromptVerb() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ClampMin = "100.0", Units = "cm"))
 	float InteractRadius = 1000.f;
 

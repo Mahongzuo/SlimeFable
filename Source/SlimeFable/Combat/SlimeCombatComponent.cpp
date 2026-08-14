@@ -28,6 +28,7 @@
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
+#include "SlimeVehicleComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
 #include "SlimeDodgeComponent.h"
 
@@ -437,6 +438,16 @@ bool USlimeCombatComponent::TrySkill(ESlimeSkillSlot Slot)
 	if (!SlimeCombat::IsComboSlot(Slot) && Slot != ESlimeSkillSlot::Skill1 && Slot != ESlimeSkillSlot::Skill2 && Slot != ESlimeSkillSlot::Skill3)
 	{
 		return false;
+	}
+	if (const AActor* Owner = GetOwner())
+	{
+		if (const USlimeVehicleComponent* Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>())
+		{
+			if (Vehicle->IsUsingVehicle())
+			{
+				return false;
+			}
+		}
 	}
 	if (!CanStartAction())
 	{

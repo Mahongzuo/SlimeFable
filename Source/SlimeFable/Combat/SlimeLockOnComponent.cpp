@@ -16,6 +16,7 @@
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "SlimeVehicleComponent.h"
 
 USlimeLockOnComponent::USlimeLockOnComponent()
 {
@@ -113,6 +114,17 @@ void USlimeLockOnComponent::ToggleLockOn()
 	{
 		ClearLockOn();
 		return;
+	}
+
+	if (const AActor* Owner = GetOwner())
+	{
+		if (const USlimeVehicleComponent* Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>())
+		{
+			if (Vehicle->IsUsingVehicle())
+			{
+				return;
+			}
+		}
 	}
 
 	if (AActor* Target = FindBestTarget())

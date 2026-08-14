@@ -25,7 +25,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	bool TryPickup(APawn* Picker);
+	virtual bool TryPickup(APawn* Picker);
 
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void SetHighlight(bool bEnabled);
@@ -36,6 +36,10 @@ public:
 	/** World point above the mesh bounds top (for HUD interact prompt). */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	FVector GetPromptWorldLocation() const;
+
+	/** Verb shown after the interact key, e.g. "拾取" or "使用载具". */
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	virtual FText GetInteractPromptVerb() const;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> Mesh;

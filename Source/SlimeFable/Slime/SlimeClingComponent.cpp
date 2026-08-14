@@ -13,6 +13,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeVehicleComponent.h"
 
 USlimeClingComponent::USlimeClingComponent()
 {
@@ -98,6 +99,22 @@ void USlimeClingComponent::UpdateCling(float DeltaTime)
 	if (!Movement)
 	{
 		return;
+	}
+
+	if (const USlimeVehicleComponent* Vehicle = OwnerCharacter->FindComponentByClass<USlimeVehicleComponent>())
+	{
+		if (Vehicle->IsUsingVehicle())
+		{
+			if (bClinging)
+			{
+				ExitCling(EClingExit::Falling);
+			}
+			SetWalkStepBoost(0.f);
+			bHasMoveInput = false;
+			MoveRight = 0.f;
+			MoveForward = 0.f;
+			return;
+		}
 	}
 
 	if (Body && Body->IsSpreading())

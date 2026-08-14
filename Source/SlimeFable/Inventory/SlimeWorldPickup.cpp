@@ -73,6 +73,11 @@ FVector ASlimeWorldPickup::GetPromptWorldLocation() const
 	return GetActorLocation() + FVector(0.f, 0.f, 80.f + PromptHeightOffset);
 }
 
+FText ASlimeWorldPickup::GetInteractPromptVerb() const
+{
+	return FText::FromString(TEXT("拾取"));
+}
+
 UMaterialInterface* ASlimeWorldPickup::ResolveOutlineMaterial()
 {
 	if (CachedOutlineMaterial)

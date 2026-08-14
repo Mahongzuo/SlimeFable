@@ -210,10 +210,12 @@ void ASlimeSkillProjectile::Tick(float DeltaSeconds)
 
 	FCollisionObjectQueryParams ObjQuery;
 	ObjQuery.AddObjectTypesToQuery(ECC_Pawn);
+	ObjQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
+	ObjQuery.AddObjectTypesToQuery(ECC_PhysicsBody);
+	ObjQuery.AddObjectTypesToQuery(ECC_GameTraceChannel1);
 	if (Age >= WorldCollisionGrace)
 	{
 		ObjQuery.AddObjectTypesToQuery(ECC_WorldStatic);
-		ObjQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
 	}
 
 	bool bExplode = false;
@@ -228,7 +230,11 @@ void ASlimeSkillProjectile::Tick(float DeltaSeconds)
 		Params))
 	{
 		AActor* Target = Hit.GetActor();
-		if (Target && USlimeHitProbe::IsHostile(Source.Get(), Target))
+		if (Target && USlimeHitProbe::TrySliceActor(Target, Hit.GetComponent(), Hit.ImpactPoint, Velocity.GetSafeNormal()))
+		{
+			bExplode = true;
+		}
+		else if (Target && USlimeHitProbe::IsHostile(Source.Get(), Target))
 		{
 			AlreadyHit.Reset();
 			FSlimeSkillDef Impact = Skill;

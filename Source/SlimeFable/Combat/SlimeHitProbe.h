@@ -40,6 +40,13 @@ public:
 	static ESlimeTeam GetTeam(const AActor* Actor);
 	static FVector ResolveOrigin(AActor* Instigator, const FSlimeHitSpec& Spec, const FVector& Forward);
 
+	/** If Target implements ISlimeSliceable, invoke SliceAt and return true. */
+	static bool TrySliceActor(
+		AActor* Target,
+		UPrimitiveComponent* HitComponent,
+		const FVector& Origin,
+		const FVector& Forward);
+
 private:
 	static bool GatherOverlaps(
 		UWorld* World,

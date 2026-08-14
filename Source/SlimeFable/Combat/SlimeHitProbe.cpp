@@ -9,10 +9,65 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
+#include "Materials/MaterialInterface.h"
+#include "ProceduralMeshComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeSliceable.h"
+#include "SlimeSliceableComponent.h"
+#include "SlimeSliceUtil.h"
 #include "SlimeStatusComponent.h"
+#include "Sound/SoundBase.h"
+#include "UObject/UObjectGlobals.h"
+
+namespace
+{
+	UClass* GetBlueprintSliceablesInterface()
+	{
+		static TWeakObjectPtr<UClass> Cached;
+		if (!Cached.IsValid())
+		{
+			Cached = LoadObject<UClass>(nullptr, TEXT("/Game/Blueprints/Food/I_Sliceables.I_Sliceables_C"));
+		}
+		return Cached.Get();
+	}
+
+	UMaterialInterface* GetDefaultWatermelonCapMaterial()
+	{
+		static TWeakObjectPtr<UMaterialInterface> Cached;
+		if (!Cached.IsValid())
+		{
+			Cached = LoadObject<UMaterialInterface>(
+				nullptr,
+				TEXT("/Game/StaticMeshes/Food/Watermelon/MI_watermelon_inside.MI_watermelon_inside"));
+		}
+		return Cached.Get();
+	}
+
+	USoundBase* GetDefaultFruitSliceSound()
+	{
+		static TWeakObjectPtr<USoundBase> Cached;
+		if (!Cached.IsValid())
+		{
+			Cached = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/SFX/sfx_fruitslice_01.sfx_fruitslice_01"));
+		}
+		return Cached.Get();
+	}
+
+	bool ImplementsBlueprintSliceables(const AActor* Target)
+	{
+		if (!Target)
+		{
+			return false;
+		}
+		if (UClass* Iface = GetBlueprintSliceablesInterface())
+		{
+			return Target->GetClass()->ImplementsInterface(Iface);
+		}
+		return false;
+	}
+}
 
 static TAutoConsoleVariable<int32> CVarSlimeHitDebug(
 	TEXT("sl.HitDebug"),
@@ -96,11 +151,19 @@ bool USlimeHitProbe::GatherOverlaps(
 		break;
 	}
 
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_Pawn);
+	ObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+	// Project custom Object Channel "Slicable" (see DefaultEngine.ini).
+	ObjParams.AddObjectTypesToQuery(ECC_GameTraceChannel1);
+
 	const bool bHit = World->OverlapMultiByObjectType(
 		OutOverlaps,
 		QueryOrigin,
 		Rotation,
-		FCollisionObjectQueryParams(ECC_Pawn),
+		ObjParams,
 		Shape,
 		Params);
 
@@ -156,6 +219,83 @@ void USlimeHitProbe::ApplyToActor(
 	}
 }
 
+bool USlimeHitProbe::TrySliceActor(
+	AActor* Target,
+	UPrimitiveComponent* HitComponent,
+	const FVector& Origin,
+	const FVector& Forward)
+{
+	if (!Target)
+	{
+		return false;
+	}
+
+	const bool bImplementsCpp = Target->GetClass()->ImplementsInterface(USlimeSliceable::StaticClass());
+	USlimeSliceableComponent* SliceComp = Target->FindComponentByClass<USlimeSliceableComponent>();
+	const bool bImplementsBp = ImplementsBlueprintSliceables(Target);
+	if (!bImplementsCpp && !SliceComp && !bImplementsBp)
+	{
+		return false;
+	}
+
+	UProceduralMeshComponent* MeshToSlice = Cast<UProceduralMeshComponent>(HitComponent);
+	if (!MeshToSlice)
+	{
+		MeshToSlice = Target->FindComponentByClass<UProceduralMeshComponent>();
+	}
+	if (!MeshToSlice)
+	{
+		return false;
+	}
+
+	// Ensure query hits work even if the BP left a custom Object Type.
+	if (MeshToSlice->GetCollisionObjectType() != ECC_WorldDynamic
+		&& MeshToSlice->GetCollisionObjectType() != ECC_PhysicsBody
+		&& MeshToSlice->GetCollisionObjectType() != ECC_WorldStatic)
+	{
+		MeshToSlice->SetCollisionObjectType(ECC_WorldDynamic);
+		MeshToSlice->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		MeshToSlice->SetGenerateOverlapEvents(true);
+	}
+
+	FVector PlanePos = Target->GetActorLocation();
+	if (HitComponent)
+	{
+		FVector Closest = PlanePos;
+		if (HitComponent->GetClosestPointOnCollision(Origin, Closest) > 0.f)
+		{
+			PlanePos = Closest;
+		}
+		else
+		{
+			PlanePos = MeshToSlice->Bounds.Origin;
+		}
+	}
+	else
+	{
+		PlanePos = MeshToSlice->Bounds.Origin;
+	}
+
+	const FVector Dir = Forward.GetSafeNormal();
+	const FVector PlaneNormal = Dir.IsNearlyZero() ? FVector::ForwardVector : Dir;
+
+	if (bImplementsCpp)
+	{
+		ISlimeSliceable::Execute_SliceAt(Target, PlanePos, PlaneNormal, MeshToSlice);
+		return true;
+	}
+	if (SliceComp)
+	{
+		SliceComp->SliceAt(PlanePos, PlaneNormal, MeshToSlice);
+		return true;
+	}
+
+	// Existing BP_watermelon_slice: bypass Do Once / SliceMe and cut in C++ so multi-slice works.
+	UMaterialInterface* Cap = GetDefaultWatermelonCapMaterial();
+	USoundBase* Sfx = GetDefaultFruitSliceSound();
+	return USlimeSliceUtil::SliceProceduralMeshAt(MeshToSlice, PlanePos, PlaneNormal, Cap, Sfx);
+}
+
 int32 USlimeHitProbe::PerformHit(
 	AActor* Instigator,
 	const FSlimeSkillDef& Skill,
@@ -182,17 +322,6 @@ int32 USlimeHitProbe::PerformHit(
 		{
 			continue;
 		}
-		if (!IsHostile(Instigator, Target))
-		{
-			continue;
-		}
-		if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
-		{
-			if (!Health->IsAlive())
-			{
-				continue;
-			}
-		}
 
 		const FVector HitLocation = Target->GetActorLocation();
 		if (Skill.Hit.Shape == ESlimeHitShape::Cone)
@@ -201,6 +330,24 @@ int32 USlimeHitProbe::PerformHit(
 			const float Cos = FVector::DotProduct(Dir, ToTarget);
 			const float MinCos = FMath::Cos(FMath::DegreesToRadians(Skill.Hit.ConeHalfAngle));
 			if (Cos < MinCos)
+			{
+				continue;
+			}
+		}
+
+		if (TrySliceActor(Target, Overlap.GetComponent(), Origin, Dir))
+		{
+			AlreadyHit.Add(Target);
+			continue;
+		}
+
+		if (!IsHostile(Instigator, Target))
+		{
+			continue;
+		}
+		if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+		{
+			if (!Health->IsAlive())
 			{
 				continue;
 			}

@@ -21,6 +21,9 @@
 #include "SlimeTrailComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
 #include "Inventory/SlimeInteractComponent.h"
+#include "SlimeVehicleComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
@@ -141,6 +144,27 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimePlacement = CreateDefaultSubobject<USlimePlacementComponent>(TEXT("SlimePlacement"));
 	SlimeInteract = CreateDefaultSubobject<USlimeInteractComponent>(TEXT("SlimeInteract"));
 	SlimeDodge = CreateDefaultSubobject<USlimeDodgeComponent>(TEXT("SlimeDodge"));
+	SlimeVehicle = CreateDefaultSubobject<USlimeVehicleComponent>(TEXT("SlimeVehicle"));
+
+	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
+	VehicleMesh->SetupAttachment(RootComponent);
+	VehicleMesh->SetRelativeLocation(FVector(0.f, 0.f, -24.f));
+	VehicleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	VehicleMesh->SetGenerateOverlapEvents(false);
+	VehicleMesh->SetHiddenInGame(true);
+	VehicleMesh->SetVisibility(false);
+	VehicleMesh->SetCastShadow(true);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> VehicleMeshAsset(TEXT("/Engine/BasicShapes/Cone.Cone"));
+	if (VehicleMeshAsset.Succeeded())
+	{
+		VehicleMesh->SetStaticMesh(VehicleMeshAsset.Object);
+		VehicleMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.35f));
+	}
+	if (SlimeVehicle)
+	{
+		SlimeVehicle->SetVehicleMesh(VehicleMesh);
+	}
+
 	if (SlimeHealth)
 	{
 		SlimeHealth->Team = ESlimeTeam::Player;
@@ -324,6 +348,10 @@ void ASlimeCharacter::DoMove(float Right, float Forward)
 
 void ASlimeCharacter::Jump()
 {
+	if (SlimeVehicle && SlimeVehicle->IsUsingVehicle())
+	{
+		return;
+	}
 	if (SlimeCling && SlimeCling->TryWallJump())
 	{
 		return;
@@ -333,6 +361,11 @@ void ASlimeCharacter::Jump()
 
 void ASlimeCharacter::Unstuck()
 {
+	if (SlimeVehicle && SlimeVehicle->IsUsingVehicle())
+	{
+		SlimeVehicle->ExitVehicle(false);
+	}
+
 	if (SlimeCling)
 	{
 		SlimeCling->TryDetach();

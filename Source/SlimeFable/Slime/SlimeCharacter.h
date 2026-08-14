@@ -21,6 +21,8 @@ class USlimeTrailComponent;
 class USlimePlacementComponent;
 class USlimeInteractComponent;
 class USlimeDodgeComponent;
+class USlimeVehicleComponent;
+class UStaticMeshComponent;
 
 /**
  *  The slime pawn.
@@ -111,6 +113,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	USlimeDodgeComponent* GetSlimeDodge() const { return SlimeDodge; }
 
+	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
+	USlimeVehicleComponent* GetSlimeVehicle() const { return SlimeVehicle; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
+	UStaticMeshComponent* GetVehicleMesh() const { return VehicleMesh; }
+
 	/** Teleport back to this pawn's spawn and reset cling / body. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void Unstuck();
@@ -194,6 +202,13 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<USlimeDodgeComponent> SlimeDodge;
+
+	/** Flyer mesh under the slime; hidden until mounted. Adjust transform in BP. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Vehicle")
+	TObjectPtr<UStaticMeshComponent> VehicleMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Vehicle")
+	TObjectPtr<USlimeVehicleComponent> SlimeVehicle;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;
