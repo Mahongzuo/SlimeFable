@@ -216,6 +216,17 @@ void UMainMenuWidget::ApplyMaterialLabLook()
 	StyleChildLabel(KeybindButton, 22.f);
 	StyleChildLabel(GraphicsButton, 22.f);
 	StyleChildLabel(QuitButton, 22.f);
+
+	auto BindHover = [](UButton* Button)
+	{
+		UTextBlock* Label = Button ? Cast<UTextBlock>(Button->GetContent()) : nullptr;
+		FMenuUIStyle::BindInkButtonHover(Button, Label);
+	};
+	BindHover(PlayTodayButton);
+	BindHover(SelectLevelButton);
+	BindHover(KeybindButton);
+	BindHover(GraphicsButton);
+	BindHover(QuitButton);
 }
 
 void UMainMenuWidget::RefreshTodayInfo()

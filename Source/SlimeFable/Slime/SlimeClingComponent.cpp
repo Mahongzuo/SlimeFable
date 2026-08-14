@@ -191,7 +191,20 @@ void USlimeClingComponent::UpdateCling(float DeltaTime)
 		}
 		else
 		{
-			TryWalkUpShortObstacle(WallHit);
+			if (!bHasMoveInput)
+			{
+				SetWalkStepBoost(0.f);
+			}
+			else
+			{
+				FVector HorizVel = Movement->Velocity;
+				HorizVel.Z = 0.0;
+				if (HorizVel.SizeSquared() < 400.0)
+				{
+					SetWalkStepBoost(0.f);
+				}
+				TryWalkUpShortObstacle(WallHit);
+			}
 		}
 	}
 	else
@@ -419,34 +432,42 @@ bool USlimeClingComponent::MaintainWall(FHitResult& OutHit) const
 	};
 
 	FHitResult Hit;
-	if (TryProbe(Loc, Hit) && IsAcceptableClingHit(Hit))
+	const bool bCenterHit = TryProbe(Loc, Hit);
+	if (bCenterHit && IsAcceptableClingHit(Hit))
 	{
 		OutHit = Hit;
 		return true;
 	}
 
-	const float Lateral[] = { Radius * 0.5f, Radius, -Radius * 0.5f, -Radius };
+	FHitResult Fallback = Hit;
+	bool bHaveFallback = bCenterHit;
+
+	// Only probe sideways when the center maintain failed or was a bad seam normal.
+	const float Lateral[] = { Radius * 0.5f, -Radius * 0.5f };
 	for (const float Off : Lateral)
 	{
-		if (!Right.IsNearlyZero() && TryProbe(Loc + Right * double(Off), Hit) && IsAcceptableClingHit(Hit))
+		if (Right.IsNearlyZero())
 		{
-			OutHit = Hit;
+			break;
+		}
+		FHitResult SideHit;
+		if (!TryProbe(Loc + Right * double(Off), SideHit))
+		{
+			continue;
+		}
+		if (IsAcceptableClingHit(SideHit))
+		{
+			OutHit = SideHit;
 			return true;
 		}
+		Fallback = SideHit;
+		bHaveFallback = true;
 	}
 
-	if (TryProbe(Loc, Hit))
+	if (bHaveFallback && IsClingableWall(Fallback))
 	{
-		OutHit = Hit;
+		OutHit = Fallback;
 		return true;
-	}
-	for (const float Off : Lateral)
-	{
-		if (!Right.IsNearlyZero() && TryProbe(Loc + Right * double(Off), Hit))
-		{
-			OutHit = Hit;
-			return true;
-		}
 	}
 	return false;
 }
@@ -768,7 +789,10 @@ bool USlimeClingComponent::TryWalkUpShortObstacle(const FHitResult& Hit)
 	}
 
 	const float LipRise = LipZ - FootZ;
-	if (LipRise > MaxRise || LipRise < 8.f)
+	const float NativeStep = Body ? Body->GetDefaultStepHeight() : Movement->MaxStepHeight;
+	const float BoostCap = NativeStep + 12.f;
+	// CMC already clears lips within NativeStep; only assist a single extra band, never multi-stair hops.
+	if (LipRise <= NativeStep || LipRise > MaxRise || LipRise < 8.f)
 	{
 		SetWalkStepBoost(0.f);
 		return false;
@@ -786,7 +810,7 @@ bool USlimeClingComponent::TryWalkUpShortObstacle(const FHitResult& Hit)
 		return false;
 	}
 
-	SetWalkStepBoost(LipRise + 10.f);
+	SetWalkStepBoost(FMath::Min(LipRise + 10.f, BoostCap));
 	return true;
 }
 
@@ -835,7 +859,7 @@ bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostCo
 	const FVector Loc = OwnerCapsule->GetComponentLocation();
 	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
 	const float MaxDist = Radius + 45.f;
-	const float SideOffsets[] = { 6.f, 14.f, 24.f };
+	const float SideOffsets[] = { 8.f, 20.f };
 	const FVector SweepDirs[] = {
 		-WallNormal,
 		-Strafe,
@@ -902,26 +926,23 @@ bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostCo
 				const float Dist = (Dir | -WallNormal) > 0.7f
 					? FMath::Max(WallProbeDistance, Radius * 2.f + 24.f)
 					: Radius * 2.f + 40.f;
-				TArray<FHitResult> Hits;
-				if (!World->SweepMultiByChannel(Hits, Start, Start + Dir * double(Dist), FQuat::Identity, ECC_Pawn, Shape, Query))
+				FHitResult Hit;
+				if (!World->SweepSingleByChannel(Hit, Start, Start + Dir * double(Dist), FQuat::Identity, ECC_Pawn, Shape, Query)
+					|| !AcceptTransferHit(Hit))
 				{
 					continue;
 				}
-
-				for (const FHitResult& Hit : Hits)
+				const float DistSq = float(FVector::DistSquared(Hit.ImpactPoint, Loc));
+				if (DistSq < BestDistSq)
 				{
-					if (!AcceptTransferHit(Hit))
-					{
-						continue;
-					}
-					const float DistSq = float(FVector::DistSquared(Hit.ImpactPoint, Loc));
-					if (DistSq < BestDistSq)
-					{
-						BestDistSq = DistSq;
-						BestHit = Hit;
-						bFound = true;
-					}
+					BestDistSq = DistSq;
+					BestHit = Hit;
+					bFound = true;
 				}
+			}
+			if (bFound)
+			{
+				break;
 			}
 		}
 

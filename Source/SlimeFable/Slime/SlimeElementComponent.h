@@ -114,6 +114,8 @@ private:
 
 	/** The material instance only exists once the body has created its mesh section. */
 	bool EnsureDynamicMaterial();
+	/** X-ray occlusion-edge MID; created once the XRay mesh section exists. */
+	bool EnsureXRayDynamicMaterial();
 	void ApplyProfileToMaterial(const FSlimeElementProfile& Profile) const;
 	static FSlimeElementProfile BlendProfiles(const FSlimeElementProfile& From, const FSlimeElementProfile& To, float Alpha);
 
@@ -125,6 +127,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> BodyMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> XRayMaterial;
 
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeBodyComponent> BodyComponent;

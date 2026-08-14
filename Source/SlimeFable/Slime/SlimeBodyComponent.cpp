@@ -83,6 +83,7 @@ void USlimeBodyComponent::ApplyParams()
 	// The vertex budget defines the index buffer, so the section has to be recreated.
 	bMeshSectionCreated = false;
 	bShadowMeshSectionCreated = false;
+	bXRayMeshSectionCreated = false;
 }
 
 void USlimeBodyComponent::ResolveMaterial()
@@ -101,6 +102,12 @@ void USlimeBodyComponent::ResolveMaterial()
 	if (!ResolvedShadowMaterial && !ShadowCasterMaterialPath.IsNull())
 	{
 		ResolvedShadowMaterial = ShadowCasterMaterialPath.LoadSynchronous();
+	}
+
+	ResolvedXRayMaterial = XRayMaterial;
+	if (!ResolvedXRayMaterial && !XRayMaterialPath.IsNull())
+	{
+		ResolvedXRayMaterial = XRayMaterialPath.LoadSynchronous();
 	}
 }
 
@@ -306,6 +313,7 @@ void USlimeBodyComponent::UpdateFloor()
 	};
 
 	bool bBodyFloor = false;
+	float MovementFloorZ = 0.f;
 	if (bClingVisual)
 	{
 		// Keep the leftover horizontal plane at the capsule so a far ground trace
@@ -318,7 +326,8 @@ void USlimeBodyComponent::UpdateFloor()
 		const UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
 		if (Movement && Movement->CurrentFloor.bBlockingHit)
 		{
-			FloorZ = float(Movement->CurrentFloor.HitResult.ImpactPoint.Z);
+			MovementFloorZ = float(Movement->CurrentFloor.HitResult.ImpactPoint.Z);
+			FloorZ = MovementFloorZ;
 			bBodyFloor = true;
 		}
 	}
@@ -328,6 +337,31 @@ void USlimeBodyComponent::UpdateFloor()
 		{
 			// Airborne over a void: keep the plane below the body so it does not clamp anything.
 			FloorZ = float(Foot.Z - 400.0);
+		}
+	}
+	else if (!bClingVisual && OwnerCharacter)
+	{
+		// Prefer the floor directly under the feet when CurrentFloor perched on a higher tread.
+		float NearFloorZ = FloorZ;
+		if (TraceFloorUnder(Foot, 4.f, NearFloorZ) && MovementFloorZ > NearFloorZ + 6.f)
+		{
+			FloorZ = NearFloorZ;
+		}
+
+		UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
+		if (Movement && Movement->IsMovingOnGround())
+		{
+			FVector HorizVel = Movement->Velocity;
+			HorizVel.Z = 0.0;
+			const float Hang = float(Foot.Z) - FloorZ;
+			const float MaxSnap = FMath::Max(Movement->MaxStepHeight, DefaultStepHeight);
+			if (HorizVel.SizeSquared() < 400.0
+				&& Movement->Velocity.Z > -50.f
+				&& Hang > 4.f
+				&& Hang <= MaxSnap)
+			{
+				OwnerCharacter->AddActorWorldOffset(FVector(0.0, 0.0, double(-Hang)), true);
+			}
 		}
 	}
 
@@ -566,6 +600,7 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 	// ---- Low ceiling -----------------------------------------------------------------
 
 	const float ProbeCeiling = DefaultCapsuleHalfHeight * 2.f + 40.f;
+	const float StepCeilingIgnore = DefaultStepHeight + 8.f;
 	float AvailableHeight = ProbeCeiling;
 	{
 		const float SphereRadius = FMath::Max(MinCapsuleRadius * 0.9f, 2.f);
@@ -575,7 +610,12 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(SphereRadius), Query)
 			&& float(Hit.ImpactNormal.GetSafeNormal().Z) <= -0.45f)
 		{
-			AvailableHeight = float(Hit.ImpactPoint.Z - Foot.Z);
+			const float HitHeight = float(Hit.ImpactPoint.Z - Foot.Z);
+			// Stair tread undersides sit within one step of the feet — not a real ceiling.
+			if (HitHeight > StepCeilingIgnore)
+			{
+				AvailableHeight = HitHeight;
+			}
 		}
 		CeilingZ = AvailableHeight < ProbeCeiling ? float(Foot.Z) + AvailableHeight : NoCeilingZ;
 	}
@@ -597,9 +637,18 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 
 		FVector Heading = GetOwner()->GetVelocity();
 		Heading.Z = 0.0;
-		if (!Heading.IsNearlyZero())
+		if (Heading.IsNearlyZero() && OwnerCharacter)
 		{
-			ProbeCenter += Heading.GetSafeNormal() * double(LookAheadDistance);
+			if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
+			{
+				Heading = Movement->GetLastInputVector();
+				Heading.Z = 0.0;
+			}
+		}
+		const FVector HeadingDir = Heading.IsNearlyZero() ? FVector::ZeroVector : Heading.GetSafeNormal();
+		if (!HeadingDir.IsNearlyZero())
+		{
+			ProbeCenter += HeadingDir * double(LookAheadDistance);
 		}
 
 		auto IsBlockedAt = [World, ProbeHalfHeight, &Query](const FVector& Center, float Radius)
@@ -609,9 +658,33 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 				FCollisionShape::MakeCapsule(Radius, ProbeHalfHeight), Query);
 		};
 
-		// A solid wall ahead is not a corridor. Only shrink radius when the body is already
-		// inside a tight gap (current pose blocked as well as the look-ahead).
-		if (IsBlockedAt(ProbeCenter, DefaultCapsuleRadius) && IsBlockedAt(BaseCenter, DefaultCapsuleRadius))
+		auto IsStepRiserPinch = [&]() -> bool
+		{
+			if (HeadingDir.IsNearlyZero())
+			{
+				return false;
+			}
+			const FVector SweepStart = BaseCenter;
+			const FVector SweepEnd = BaseCenter + HeadingDir * double(FMath::Max(LookAheadDistance, DefaultCapsuleRadius));
+			FHitResult RiserHit;
+			if (!World->SweepSingleByChannel(
+				RiserHit, SweepStart, SweepEnd, FQuat::Identity, ECC_Pawn,
+				FCollisionShape::MakeSphere(FMath::Max(MinCapsuleRadius * 0.8f, 2.f)), Query))
+			{
+				return false;
+			}
+			const float NormalZ = float(RiserHit.ImpactNormal.GetSafeNormal().Z);
+			if (FMath::Abs(NormalZ) > 0.35f)
+			{
+				return false;
+			}
+			const float HitAboveFoot = float(RiserHit.ImpactPoint.Z - Foot.Z);
+			return HitAboveFoot >= -4.f && HitAboveFoot <= DefaultStepHeight + 8.f;
+		};
+
+		// A solid wall / stair riser ahead is not a corridor. Only shrink radius for true side pinches.
+		if (IsBlockedAt(ProbeCenter, DefaultCapsuleRadius) && IsBlockedAt(BaseCenter, DefaultCapsuleRadius)
+			&& !IsStepRiserPinch())
 		{
 			float Low = MinCapsuleRadius;
 			float High = DefaultCapsuleRadius;
@@ -742,6 +815,15 @@ void USlimeBodyComponent::TryOozeEscape(float DeltaTime)
 	{
 		return;
 	}
+
+	// Only ooze when actually stuck — avoid paying SafeMove every squeezed walk frame.
+	FVector HorizVel = Movement->Velocity;
+	HorizVel.Z = 0.0;
+	if (HorizVel.SizeSquared() > 2500.0)
+	{
+		return;
+	}
+
 	Dir = Dir.GetSafeNormal();
 
 	// Prefer the squeeze free axis when it roughly agrees with input (crawl out of the pinch).
@@ -775,9 +857,8 @@ void USlimeBodyComponent::ApplyCapsuleSize(float NewRadius, float NewHalfHeight)
 
 	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
 	{
-		const float HeightRatio = NewHalfHeight / FMath::Max(DefaultCapsuleHalfHeight, KINDA_SMALL_NUMBER);
 		const float BaseStep = StepHeightBoost > KINDA_SMALL_NUMBER ? StepHeightBoost : DefaultStepHeight;
-		Movement->MaxStepHeight = BaseStep * HeightRatio;
+		Movement->MaxStepHeight = BaseStep;
 		const float Scaled = DefaultWalkSpeed * FMath::Lerp(1.f, SqueezeSpeedScale, SqueezeAmount);
 		Movement->MaxWalkSpeed = SqueezeAmount >= 0.55f
 			? FMath::Max(Scaled, DefaultWalkSpeed * 0.35f)
@@ -866,6 +947,10 @@ void USlimeBodyComponent::RebuildSurface()
 	{
 		ShadowMesh->SetWorldLocation(FVector::ZeroVector);
 	}
+	if (XRayMesh)
+	{
+		XRayMesh->SetWorldLocation(FVector::ZeroVector);
+	}
 
 	FSlimeSurfaceParams ActiveSurface = SurfaceParams;
 	if (bSpread || Solver.GetLandingSettleRemaining() > 0.f)
@@ -919,6 +1004,10 @@ void USlimeBodyComponent::UpdateMeshFollow()
 	{
 		ShadowMesh->SetWorldLocation(Offset);
 	}
+	if (XRayMesh)
+	{
+		XRayMesh->SetWorldLocation(Offset);
+	}
 }
 
 void USlimeBodyComponent::PushMeshSection()
@@ -963,12 +1052,7 @@ void USlimeBodyComponent::PushMeshSection()
 	SurfaceMesh->bCastContactShadow = false;
 	SurfaceMesh->bReceiveMobileCSMShadows = false;
 
-	if (!ShadowMesh)
-	{
-		return;
-	}
-
-	// Slightly shrink the opaque proxy so its CSM does not stick to the translucent shell.
+	// Slightly shrink the opaque proxy / x-ray so edges don't stick to the translucent shell.
 	constexpr float ShadowProxyScale = 0.92f;
 	FVector ShadowCentroid = FVector::ZeroVector;
 	for (const FVector& Vertex : Vertices)
@@ -984,30 +1068,62 @@ void USlimeBodyComponent::PushMeshSection()
 		ShadowVertices.Add(ShadowCentroid + (Vertex - ShadowCentroid) * ShadowProxyScale);
 	}
 
-	if (!bShadowMeshSectionCreated)
+	if (ShadowMesh)
 	{
-		ShadowMesh->ClearAllMeshSections();
-		ShadowMesh->CreateMeshSection_LinearColor(
-			0, ShadowVertices, Indices, Normals,
-			NoUVs, NoColors, NoTangents, false);
-		if (ResolvedShadowMaterial)
+		if (!bShadowMeshSectionCreated)
 		{
-			ShadowMesh->SetMaterial(0, ResolvedShadowMaterial);
+			ShadowMesh->ClearAllMeshSections();
+			ShadowMesh->CreateMeshSection_LinearColor(
+				0, ShadowVertices, Indices, Normals,
+				NoUVs, NoColors, NoTangents, false);
+			if (ResolvedShadowMaterial)
+			{
+				ShadowMesh->SetMaterial(0, ResolvedShadowMaterial);
+			}
+			bShadowMeshSectionCreated = true;
 		}
-		bShadowMeshSectionCreated = true;
-	}
-	else
-	{
-		ShadowMesh->UpdateMeshSection_LinearColor(0, ShadowVertices, Normals, NoUVs, NoColors, NoTangents);
+		else
+		{
+			ShadowMesh->UpdateMeshSection_LinearColor(0, ShadowVertices, Normals, NoUVs, NoColors, NoTangents);
+		}
+
+		// Hidden from view; only casts a ground shadow. Create/Update can reset flags.
+		ShadowMesh->SetHiddenInGame(true);
+		ShadowMesh->SetVisibility(false);
+		ShadowMesh->bCastHiddenShadow = true;
+		ShadowMesh->SetCastShadow(true);
+		ShadowMesh->bCastDynamicShadow = true;
+		ShadowMesh->bCastVolumetricTranslucentShadow = false;
+		ShadowMesh->bCastContactShadow = false;
 	}
 
-	ShadowMesh->SetHiddenInGame(true);
-	ShadowMesh->SetVisibility(false);
-	ShadowMesh->bCastHiddenShadow = true;
-	ShadowMesh->SetCastShadow(true);
-	ShadowMesh->bCastDynamicShadow = true;
-	ShadowMesh->bCastVolumetricTranslucentShadow = false;
-	ShadowMesh->bCastContactShadow = false;
+	if (XRayMesh)
+	{
+		if (!bXRayMeshSectionCreated)
+		{
+			XRayMesh->ClearAllMeshSections();
+			XRayMesh->CreateMeshSection_LinearColor(
+				0, ShadowVertices, Indices, Normals,
+				NoUVs, NoColors, NoTangents, false);
+			if (ResolvedXRayMaterial)
+			{
+				XRayMesh->SetMaterial(0, ResolvedXRayMaterial);
+			}
+			bXRayMeshSectionCreated = true;
+		}
+		else
+		{
+			XRayMesh->UpdateMeshSection_LinearColor(0, ShadowVertices, Normals, NoUVs, NoColors, NoTangents);
+		}
+
+		XRayMesh->SetHiddenInGame(false);
+		XRayMesh->SetVisibility(true);
+		XRayMesh->SetCastShadow(false);
+		XRayMesh->bCastDynamicShadow = false;
+		XRayMesh->bCastVolumetricTranslucentShadow = false;
+		XRayMesh->bCastContactShadow = false;
+		// Do not reassign material every rebuild — ElementComponent owns the MID.
+	}
 }
 
 void USlimeBodyComponent::UpdateQuality()
@@ -1131,10 +1247,8 @@ void USlimeBodyComponent::SetStepHeightBoost(float BoostedMaxStep)
 
 	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
 	{
-		const float HeightRatio = OwnerCapsule->GetUnscaledCapsuleHalfHeight()
-			/ FMath::Max(DefaultCapsuleHalfHeight, KINDA_SMALL_NUMBER);
 		const float BaseStep = StepHeightBoost > KINDA_SMALL_NUMBER ? StepHeightBoost : DefaultStepHeight;
-		Movement->MaxStepHeight = BaseStep * HeightRatio;
+		Movement->MaxStepHeight = BaseStep;
 	}
 }
 

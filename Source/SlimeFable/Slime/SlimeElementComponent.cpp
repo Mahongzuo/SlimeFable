@@ -22,6 +22,7 @@ namespace SlimeElementParams
 	static const FName NoiseScale(TEXT("NoiseScale"));
 	static const FName RimPower(TEXT("RimPower"));
 	static const FName SqueezeAmount(TEXT("SqueezeAmount"));
+	static const FName XRayColor(TEXT("XRayColor"));
 }
 
 namespace SlimeDashNiagaraDefaults
@@ -124,6 +125,7 @@ void USlimeElementComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	// The body creates its mesh section on its own schedule, so keep trying until a slot exists.
+	EnsureXRayDynamicMaterial();
 	if (!EnsureDynamicMaterial())
 	{
 		return;
@@ -186,24 +188,51 @@ bool USlimeElementComponent::EnsureDynamicMaterial()
 	return true;
 }
 
-void USlimeElementComponent::ApplyProfileToMaterial(const FSlimeElementProfile& Profile) const
+bool USlimeElementComponent::EnsureXRayDynamicMaterial()
 {
-	if (!BodyMaterial)
+	UProceduralMeshComponent* Mesh = BodyComponent ? BodyComponent->GetXRayMesh() : nullptr;
+	if (!Mesh || Mesh->GetNumSections() == 0)
 	{
-		return;
+		return XRayMaterial != nullptr;
 	}
 
-	BodyMaterial->SetVectorParameterValue(SlimeElementParams::BaseColor, Profile.BaseColor);
-	BodyMaterial->SetVectorParameterValue(SlimeElementParams::SubsurfaceColor, Profile.SubsurfaceColor);
-	BodyMaterial->SetVectorParameterValue(SlimeElementParams::EmissiveColor, Profile.EmissiveColor);
-	BodyMaterial->SetVectorParameterValue(SlimeElementParams::RimColor, Profile.RimColor);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::EmissiveIntensity, Profile.EmissiveIntensity);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, Profile.Opacity * OpacityScale);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Roughness, Profile.Roughness);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::Refraction, Profile.Refraction);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::FlowSpeed, Profile.FlowSpeed);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::NoiseScale, Profile.NoiseScale);
-	BodyMaterial->SetScalarParameterValue(SlimeElementParams::RimPower, Profile.RimPower);
+	if (XRayMaterial && Mesh->GetMaterial(0) == XRayMaterial)
+	{
+		return true;
+	}
+
+	XRayMaterial = Mesh->CreateAndSetMaterialInstanceDynamic(0);
+	if (!XRayMaterial)
+	{
+		return false;
+	}
+
+	const FSlimeElementProfile& Profile = TransitionRemaining > 0.f ? TransitionFrom : TransitionTo;
+	XRayMaterial->SetVectorParameterValue(SlimeElementParams::XRayColor, Profile.BaseColor);
+	return true;
+}
+
+void USlimeElementComponent::ApplyProfileToMaterial(const FSlimeElementProfile& Profile) const
+{
+	if (BodyMaterial)
+	{
+		BodyMaterial->SetVectorParameterValue(SlimeElementParams::BaseColor, Profile.BaseColor);
+		BodyMaterial->SetVectorParameterValue(SlimeElementParams::SubsurfaceColor, Profile.SubsurfaceColor);
+		BodyMaterial->SetVectorParameterValue(SlimeElementParams::EmissiveColor, Profile.EmissiveColor);
+		BodyMaterial->SetVectorParameterValue(SlimeElementParams::RimColor, Profile.RimColor);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::EmissiveIntensity, Profile.EmissiveIntensity);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, Profile.Opacity * OpacityScale);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Roughness, Profile.Roughness);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Refraction, Profile.Refraction);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::FlowSpeed, Profile.FlowSpeed);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::NoiseScale, Profile.NoiseScale);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::RimPower, Profile.RimPower);
+	}
+
+	if (XRayMaterial)
+	{
+		XRayMaterial->SetVectorParameterValue(SlimeElementParams::XRayColor, Profile.BaseColor);
+	}
 }
 
 FSlimeElementProfile USlimeElementComponent::BlendProfiles(const FSlimeElementProfile& From, const FSlimeElementProfile& To, float Alpha)

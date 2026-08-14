@@ -185,6 +185,8 @@ void UKeybindSettingsWidget::ApplyLook()
 	UMaterialInterface* BrushBtn = FMenuUIStyle::LoadButtonMaterial();
 	FMenuUIStyle::ApplyMaterialButtonStyle(ResetButton, BrushBtn, FVector2D(320.f, 56.f));
 	FMenuUIStyle::ApplyMaterialButtonStyle(BackButton, BrushBtn, FVector2D(320.f, 56.f));
+	FMenuUIStyle::BindInkButtonHover(ResetButton, ResetButton ? Cast<UTextBlock>(ResetButton->GetContent()) : nullptr);
+	FMenuUIStyle::BindInkButtonHover(BackButton, BackButton ? Cast<UTextBlock>(BackButton->GetContent()) : nullptr);
 
 	auto StyleChildLabel = [](UButton* Button, float Size)
 	{
@@ -266,6 +268,7 @@ void UKeybindSettingsWidget::RefreshList()
 		KeyLabel->SetJustification(ETextJustify::Center);
 		FMenuUIStyle::ApplyMarkerFont(KeyLabel, 18.f, FMenuUIStyle::WarmTextColor());
 		KeyButton->AddChild(KeyLabel);
+		FMenuUIStyle::BindInkButtonHover(KeyButton, KeyLabel);
 		ActionKeyLabels.Add(Action, KeyLabel);
 
 		USlimeKeybindRowProxy* Proxy = NewObject<USlimeKeybindRowProxy>(this);

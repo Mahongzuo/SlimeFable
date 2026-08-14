@@ -61,5 +61,11 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> UnstuckButton;
 
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> HotbarLabels;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> InteractPrompt;
+
 	bool bBuiltInCode = false;
 };

@@ -24,6 +24,8 @@ void UDaySlotWidget::NativeConstruct()
 	if (SlotButton)
 	{
 		SlotButton->OnClicked.AddUniqueDynamic(this, &UDaySlotWidget::HandleClicked);
+		SlotButton->OnHovered.AddUniqueDynamic(this, &UDaySlotWidget::HandleHovered);
+		SlotButton->OnUnhovered.AddUniqueDynamic(this, &UDaySlotWidget::HandleUnhovered);
 	}
 	ApplyVisuals();
 }
@@ -87,15 +89,26 @@ void UDaySlotWidget::ApplyVisuals()
 		return;
 	}
 
-	const FLinearColor CellFill = bIsTodayCached
+	FLinearColor CellFill = bIsTodayCached
 		? FLinearColor(0.42f, 0.32f, 0.18f, 0.88f)
 		: FLinearColor(0.08f, 0.07f, 0.06f, 0.72f);
-	const FLinearColor CellBorder = bIsTodayCached
+	FLinearColor CellBorder = bIsTodayCached
 		? FLinearColor(0.92f, 0.72f, 0.32f, 0.95f)
 		: FLinearColor(0.55f, 0.48f, 0.38f, 0.55f);
-	const FLinearColor TextColor = bIsTodayCached
+	FLinearColor TextColor = bIsTodayCached
 		? FLinearColor(1.f, 0.9f, 0.55f, 1.f)
 		: FMenuUIStyle::WarmTextColor();
+
+	if (bHovered)
+	{
+		CellFill = FLinearColor(
+			FMath::Min(CellFill.R + 0.1f, 1.f),
+			FMath::Min(CellFill.G + 0.08f, 1.f),
+			FMath::Min(CellFill.B + 0.04f, 1.f),
+			FMath::Min(CellFill.A + 0.08f, 1.f));
+		CellBorder = FMenuUIStyle::TodayEdgeColor();
+		TextColor = FMenuUIStyle::TodayEdgeColor();
+	}
 
 	if (DayLabel && DayNumber > 0)
 	{
@@ -117,7 +130,7 @@ void UDaySlotWidget::ApplyVisuals()
 		FillBrush.OutlineSettings.CornerRadii = FVector4(10.f, 10.f, 10.f, 10.f);
 		FillBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
 		FillBrush.OutlineSettings.Color = FSlateColor(CellBorder);
-		FillBrush.OutlineSettings.Width = bIsTodayCached ? 2.5f : 1.25f;
+		FillBrush.OutlineSettings.Width = (bIsTodayCached || bHovered) ? 2.5f : 1.25f;
 		FillBrush.ImageSize = FVector2D(SlotSize, SlotSize);
 		SlotBackground->SetBrush(FillBrush);
 	}
@@ -130,6 +143,22 @@ void UDaySlotWidget::ApplyVisuals()
 			FVector2D(SlotSize, SlotSize),
 			FMargin(0.f));
 	}
+}
+
+void UDaySlotWidget::ApplyHoverVisuals(bool bInHovered)
+{
+	bHovered = bInHovered;
+	ApplyVisuals();
+}
+
+void UDaySlotWidget::HandleHovered()
+{
+	ApplyHoverVisuals(true);
+}
+
+void UDaySlotWidget::HandleUnhovered()
+{
+	ApplyHoverVisuals(false);
 }
 
 void UDaySlotWidget::HandleClicked()

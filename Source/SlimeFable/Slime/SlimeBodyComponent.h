@@ -59,6 +59,14 @@ public:
 	TSoftObjectPtr<UMaterialInterface> ShadowCasterMaterialPath =
 		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeShadowCaster.M_SlimeShadowCaster")));
 
+	/** Translucent X-ray silhouette when occluded by world geometry. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface")
+	TObjectPtr<UMaterialInterface> XRayMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
+	TSoftObjectPtr<UMaterialInterface> XRayMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Materials/M_SlimeXRay.M_SlimeXRay")));
+
 	/** Solver steps per second. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "20.0", ClampMax = "90.0"))
 	float StepRate = 60.f;
@@ -81,7 +89,7 @@ public:
 
 	/** Refresh early when the body has moved this far since the last gather, in cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "2.0"))
-	float ColliderRefreshDistance = 20.f;
+	float ColliderRefreshDistance = 35.f;
 
 	/** Query box scale over the body bounds. Above 1 so walls enter the set before contact. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Collision", meta = (ClampMin = "1.0", ClampMax = "3.0"))
@@ -105,7 +113,7 @@ public:
 	float DefaultCapsuleRadius = 32.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Squeeze", meta = (ClampMin = "8.0"))
-	float DefaultCapsuleHalfHeight = 26.f;
+	float DefaultCapsuleHalfHeight = 20.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Squeeze", meta = (ClampMin = "4.0"))
 	float MinCapsuleRadius = 6.f;
@@ -241,11 +249,16 @@ public:
 
 	void SetShadowMesh(UProceduralMeshComponent* InMesh) { ShadowMesh = InMesh; }
 
+	void SetXRayMesh(UProceduralMeshComponent* InMesh) { XRayMesh = InMesh; }
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetSurfaceMesh() const { return SurfaceMesh; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetShadowMesh() const { return ShadowMesh; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	UProceduralMeshComponent* GetXRayMesh() const { return XRayMesh; }
 
 	/** Pancake mode. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
@@ -256,6 +269,8 @@ public:
 
 	/** Temporary MaxStepHeight used while walking onto short props. 0 restores the default. */
 	void SetStepHeightBoost(float BoostedMaxStep);
+
+	float GetDefaultStepHeight() const { return DefaultStepHeight; }
 
 	/** Rebuilds the dome and clears every transient state. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
@@ -358,6 +373,9 @@ private:
 	TObjectPtr<UProceduralMeshComponent> ShadowMesh;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UProceduralMeshComponent> XRayMesh;
+
+	UPROPERTY(Transient)
 	TObjectPtr<ACharacter> OwnerCharacter;
 
 	UPROPERTY(Transient)
@@ -368,6 +386,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ResolvedShadowMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedXRayMaterial;
 
 	float StepAccumulator = 0.f;
 	float SurfaceAccumulator = 0.f;
@@ -398,6 +419,7 @@ private:
 	bool bClingVisual = false;
 	bool bMeshSectionCreated = false;
 	bool bShadowMeshSectionCreated = false;
+	bool bXRayMeshSectionCreated = false;
 	bool bWarnedTruncation = false;
 
 	FVector ClingPoint = FVector::ZeroVector;

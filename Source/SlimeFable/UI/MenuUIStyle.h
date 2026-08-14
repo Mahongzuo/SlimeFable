@@ -19,6 +19,7 @@ struct FMenuUIStyle
 	static FLinearColor WarmTextColor();
 	static FLinearColor WarmMutedTextColor();
 	static FLinearColor WarmTitleColor();
+	static FLinearColor TodayEdgeColor();
 
 	static UTexture2D* LoadMenuBackgroundTexture();
 	static UMaterialInterface* LoadButtonMaterial();
@@ -49,4 +50,7 @@ struct FMenuUIStyle
 	static void ApplyFlatButtonStyle(UButton* Button, FLinearColor Fill, FVector2D Size, FMargin Padding = FMargin(18.f, 10.f));
 	static void ApplyMenuBackground(UImage* Image);
 	static void ApplyImageMaterial(UImage* Image, UMaterialInterface* Material);
+
+	/** Visible hover: warm-gold outline already in style + slight scale / label tint. */
+	static void BindInkButtonHover(UButton* Button, UTextBlock* Label);
 };

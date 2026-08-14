@@ -197,7 +197,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	};
 
 	// Drive Body/UI directly so Enhanced Input handlers can hard-return while polling is on.
-	const bool bFlatten = IsDown(ESlimeInputAction::Flatten, EKeys::Z);
+	const bool bFlatten = IsDown(ESlimeInputAction::Flatten, EKeys::C);
 	if (bFlatten != bPollFlattenDown)
 	{
 		bPollFlattenDown = bFlatten;
@@ -227,7 +227,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		Body->SetRecalling(bAbsorb);
 	}
 
-	const bool bLaunch = IsDown(ESlimeInputAction::Launch, EKeys::Q);
+	const bool bLaunch = IsDown(ESlimeInputAction::Launch, EKeys::G);
 	if (bLaunch && !bPollLaunchDown)
 	{
 		bPollLaunchDown = true;

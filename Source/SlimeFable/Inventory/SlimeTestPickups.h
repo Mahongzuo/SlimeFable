@@ -1,0 +1,54 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "SlimeWorldPickup.h"
+#include "SlimeTestPickups.generated.h"
+
+class UTexture2D;
+
+/** Drop into a level to test consumable pickup (HealJelly). */
+UCLASS(Blueprintable)
+class SLIMEFABLE_API ASlimePickupConsumable : public ASlimeWorldPickup
+{
+	GENERATED_BODY()
+
+public:
+	ASlimePickupConsumable();
+};
+
+/** Drop into a level to test placeable pickup (FlatStone). */
+UCLASS(Blueprintable)
+class SLIMEFABLE_API ASlimePickupPlaceable : public ASlimeWorldPickup
+{
+	GENERATED_BODY()
+
+public:
+	ASlimePickupPlaceable();
+};
+
+/** Drop into a level to test souvenir pickup (OldPostcard). */
+UCLASS(Blueprintable)
+class SLIMEFABLE_API ASlimePickupSouvenir : public ASlimeWorldPickup
+{
+	GENERATED_BODY()
+
+public:
+	ASlimePickupSouvenir();
+
+	/** 选一张贴图作为该纪念品的展示大图与背包图标；留空则使用默认的旧明信片。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir")
+	TSoftObjectPtr<UTexture2D> SouvenirImage;
+
+	/** 自定义纪念品名称；留空则用贴图资产名。仅在设置了 SouvenirImage 时生效。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir")
+	FText SouvenirDisplayName;
+
+	/** 自定义故事文字；留空则用默认文案。仅在设置了 SouvenirImage 时生效。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir", meta = (MultiLine = "true"))
+	FText SouvenirStoryText;
+
+protected:
+	virtual void PrepareDefinition(USlimeInventorySubsystem& Inventory) override;
+};

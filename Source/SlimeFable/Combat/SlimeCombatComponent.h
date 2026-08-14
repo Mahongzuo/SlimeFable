@@ -57,6 +57,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	float GetSkillCooldownRemaining(ESlimeSkillSlot Slot) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void ReduceSkillCooldowns(float Seconds);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void ReduceSkillCooldownsPercent(float Percent);
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	float ResolveOutgoingDamage(const FSlimeSkillDef& Skill) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void ApplyOutgoingDamageMul(float Mul, float DurationSeconds);
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	float GetAttackPower() const { return AttackPower; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	float GetOutgoingDamageMul() const { return OutgoingDamageMul; }
+
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	FSlimeElementKitData GetCurrentKit() const;
 
@@ -65,6 +83,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	FVector GetAimDirection() const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.0"))
+	float AttackPower = 10.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	TObjectPtr<USlimeCombatCatalog> Catalog;
@@ -106,6 +127,7 @@ private:
 	void SpawnVfx(const FSlimeSkillDef& Def, const FVector& Location) const;
 	void AwardResources(const FSlimeSkillDef& Def, int32 HitCount);
 	void TickCooldowns(float DeltaTime);
+	void TickDamageBuff(float DeltaTime);
 	void PollCombatKeys();
 	int32 SkillCdIndex(ESlimeElement InElement, ESlimeSkillSlot Slot) const;
 	APlayerController* GetPlayerController() const;
@@ -153,6 +175,9 @@ private:
 	float Resonance = 0.f;
 	float Ultimate = 0.f;
 	float SkillCd[18];
+
+	float OutgoingDamageMul = 1.f;
+	float DamageBuffRemaining = 0.f;
 
 	bool bPollAttackDown = false;
 	bool bPollSkill1Down = false;

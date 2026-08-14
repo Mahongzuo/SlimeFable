@@ -61,6 +61,7 @@ public:
 
 protected:
 	void FillDefaults();
+	void MigrateBindSchemeIfNeeded();
 	FString ActionConfigName(ESlimeInputAction Action) const;
 
 	UPROPERTY()

@@ -135,6 +135,10 @@ struct SLIMEFABLE_API FSlimeSkillDef
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Damage", meta = (ClampMin = "0.0"))
 	float Damage = 12.f;
 
+	/** Scales AttackPower into final damage. Default 0 keeps legacy flat Damage tables. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Damage", meta = (ClampMin = "0.0"))
+	float AtkScale = 0.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Damage", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float Knockback = 280.f;
 

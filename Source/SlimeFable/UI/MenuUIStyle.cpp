@@ -1,6 +1,17 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MenuUIStyle.h"
+#include "UI/MenuButtonHoverHelper.h"
+#include "Engine/Font.h"
+#include "Engine/Texture2D.h"
+#include "Fonts/SlateFontInfo.h"
+#include "Materials/MaterialInterface.h"
+#include "Components/Button.h"
+#include "Components/Image.h"
+#include "Components/TextBlock.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Misc/Paths.h"
+#include "SlimeFable.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
@@ -50,6 +61,49 @@ namespace MenuUIStylePrivate
 		return FString();
 	}
 
+	static void AppendCjkRanges(FCompositeSubFont& Sub)
+	{
+		Sub.CharacterRanges.Add(FInt32Range(0x3000, 0x303F));
+		Sub.CharacterRanges.Add(FInt32Range(0x3040, 0x30FF));
+		Sub.CharacterRanges.Add(FInt32Range(0x3400, 0x4DBF));
+		Sub.CharacterRanges.Add(FInt32Range(0x4E00, 0x9FFF));
+		Sub.CharacterRanges.Add(FInt32Range(0xF900, 0xFAFF));
+		Sub.CharacterRanges.Add(FInt32Range(0xFF00, 0xFFEF));
+	}
+
+	static void AppendCjkSubFontFromUFont(FStandaloneCompositeFont& Font, UFont* CjkFont)
+	{
+		if (!CjkFont)
+		{
+			return;
+		}
+		const FCompositeFont* CjkComposite = CjkFont->GetCompositeFont();
+		if (!CjkComposite)
+		{
+			return;
+		}
+		FCompositeSubFont& Sub = Font.SubTypefaces.AddDefaulted_GetRef();
+		Sub.Typeface = CjkComposite->DefaultTypeface;
+		AppendCjkRanges(Sub);
+	}
+
+	static void AppendCjkSubFontFromPath(FStandaloneCompositeFont& Font, const FString& CjkPath)
+	{
+		FCompositeSubFont& Sub = Font.SubTypefaces.AddDefaulted_GetRef();
+		Sub.Typeface = FTypeface(FName(TEXT("Regular")), CjkPath, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+		AppendCjkRanges(Sub);
+	}
+
+	static UFont* LoadKuaiLeUFont()
+	{
+		if (UFont* Font = LoadObj<UFont>(
+				TEXT("/Game/UI/Fonts/ZCOOLKuaiLe-Regular_Font.ZCOOLKuaiLe-Regular_Font")))
+		{
+			return Font;
+		}
+		return LoadObj<UFont>(TEXT("/Game/UI/Fonts/Font_ZCOOLKuaiLe.Font_ZCOOLKuaiLe"));
+	}
+
 	static TSharedPtr<const FCompositeFont> GetOrCreateKuaiLeComposite()
 	{
 		static TSharedPtr<const FCompositeFont> Cached;
@@ -58,9 +112,22 @@ namespace MenuUIStylePrivate
 			return Cached;
 		}
 
+		if (UFont* KuaiLeAsset = LoadKuaiLeUFont())
+		{
+			if (const FCompositeFont* AssetComposite = KuaiLeAsset->GetCompositeFont())
+			{
+				TSharedRef<FStandaloneCompositeFont> Font = MakeShared<FStandaloneCompositeFont>();
+				Font->DefaultTypeface = AssetComposite->DefaultTypeface;
+				Font->FallbackTypeface = AssetComposite->FallbackTypeface;
+				Cached = Font;
+				return Cached;
+			}
+		}
+
 		const FString KuaiLe = FindKuaiLePath();
 		if (!KuaiLe.IsEmpty())
 		{
+			UE_LOG(LogSlimeFable, Warning, TEXT("MenuUIStyle: using loose KuaiLe TTF (editor only; prefer cooked UFont for packages)"));
 			Cached = MakeShared<FStandaloneCompositeFont>(
 				FName(TEXT("Regular")),
 				KuaiLe,
@@ -72,7 +139,7 @@ namespace MenuUIStylePrivate
 		const FString YaHei = FindYaHeiPath();
 		if (!YaHei.IsEmpty())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("MenuUIStyle: ZCOOLKuaiLe missing, falling back to system CJK font"));
+			UE_LOG(LogSlimeFable, Warning, TEXT("MenuUIStyle: ZCOOLKuaiLe UFont missing, falling back to system CJK font"));
 			Cached = MakeShared<FStandaloneCompositeFont>(
 				FName(TEXT("Regular")),
 				YaHei,
@@ -83,19 +150,6 @@ namespace MenuUIStylePrivate
 		return nullptr;
 	}
 
-	static void AppendCjkSubFont(FStandaloneCompositeFont& Font, const FString& CjkPath)
-	{
-		FCompositeSubFont& Sub = Font.SubTypefaces.AddDefaulted_GetRef();
-		Sub.Typeface = FTypeface(FName(TEXT("Regular")), CjkPath, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
-		// Cover common CJK + fullwidth punctuation used in menu copy.
-		Sub.CharacterRanges.Add(FInt32Range(0x3000, 0x303F));
-		Sub.CharacterRanges.Add(FInt32Range(0x3040, 0x30FF));
-		Sub.CharacterRanges.Add(FInt32Range(0x3400, 0x4DBF));
-		Sub.CharacterRanges.Add(FInt32Range(0x4E00, 0x9FFF));
-		Sub.CharacterRanges.Add(FInt32Range(0xF900, 0xFAFF));
-		Sub.CharacterRanges.Add(FInt32Range(0xFF00, 0xFFEF));
-	}
-
 	static TSharedPtr<const FCompositeFont> GetOrCreateMixedComposite()
 	{
 		static TSharedPtr<const FCompositeFont> Cached;
@@ -104,9 +158,9 @@ namespace MenuUIStylePrivate
 			return Cached;
 		}
 
-		const FString CjkPath = FindKuaiLePath().IsEmpty() ? FindYaHeiPath() : FindKuaiLePath();
 		UFont* Marker = LoadObj<UFont>(
 			TEXT("/Game/UIMaterialLab/Fonts/PermanentMarker-Regular_Font.PermanentMarker-Regular_Font"));
+		UFont* KuaiLeAsset = LoadKuaiLeUFont();
 
 		if (Marker)
 		{
@@ -115,16 +169,24 @@ namespace MenuUIStylePrivate
 				TSharedRef<FStandaloneCompositeFont> Font = MakeShared<FStandaloneCompositeFont>();
 				Font->DefaultTypeface = MarkerComposite->DefaultTypeface;
 				Font->FallbackTypeface = MarkerComposite->FallbackTypeface;
-				if (!CjkPath.IsEmpty())
+				if (KuaiLeAsset)
 				{
-					AppendCjkSubFont(*Font, CjkPath);
+					AppendCjkSubFontFromUFont(*Font, KuaiLeAsset);
+				}
+				else
+				{
+					const FString CjkPath = FindKuaiLePath().IsEmpty() ? FindYaHeiPath() : FindKuaiLePath();
+					if (!CjkPath.IsEmpty())
+					{
+						UE_LOG(LogSlimeFable, Warning, TEXT("MenuUIStyle: Mixed font CJK from disk path (not package-safe)"));
+						AppendCjkSubFontFromPath(*Font, CjkPath);
+					}
 				}
 				Cached = Font;
 				return Cached;
 			}
 		}
 
-		// No Marker asset — fall back to KuaiLe/YaHei alone.
 		return GetOrCreateKuaiLeComposite();
 	}
 }
@@ -142,6 +204,11 @@ FLinearColor FMenuUIStyle::WarmMutedTextColor()
 FLinearColor FMenuUIStyle::WarmTitleColor()
 {
 	return FLinearColor(0.97f, 0.93f, 0.84f, 1.f);
+}
+
+FLinearColor FMenuUIStyle::TodayEdgeColor()
+{
+	return FLinearColor(0.92f, 0.72f, 0.32f, 1.f);
 }
 
 UTexture2D* FMenuUIStyle::LoadMenuBackgroundTexture()
@@ -168,7 +235,7 @@ UFont* FMenuUIStyle::LoadTitleFont()
 
 UFont* FMenuUIStyle::LoadBrushCJKFontAsset()
 {
-	return MenuUIStylePrivate::LoadObj<UFont>(TEXT("/Game/UI/Fonts/Font_ZCOOLKuaiLe.Font_ZCOOLKuaiLe"));
+	return MenuUIStylePrivate::LoadKuaiLeUFont();
 }
 
 FSlateFontInfo FMenuUIStyle::MakeMarkerFont(float Size)
@@ -272,10 +339,24 @@ void FMenuUIStyle::ApplyMaterialButtonStyle(UButton* Button, UMaterialInterface*
 
 	FButtonStyle Style = Button->GetStyle();
 	const FSlateBrush Normal = MakeMaterialBrush(Material, Size);
+
 	FSlateBrush Hovered = Normal;
-	Hovered.TintColor = FSlateColor(FLinearColor(1.12f, 1.08f, 0.95f, 1.f));
+	Hovered.TintColor = FSlateColor(FLinearColor(1.08f, 1.02f, 0.88f, 1.f));
+	Hovered.DrawAs = ESlateBrushDrawType::RoundedBox;
+	Hovered.OutlineSettings.CornerRadii = FVector4(10.f, 10.f, 10.f, 10.f);
+	Hovered.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+	Hovered.OutlineSettings.Color = FSlateColor(TodayEdgeColor());
+	Hovered.OutlineSettings.Width = 2.25f;
+	if (Material)
+	{
+		Hovered.SetResourceObject(Material);
+		Hovered.DrawAs = ESlateBrushDrawType::Image;
+		// Keep material look but add a warm outline via a companion rounded overlay is hard in one brush;
+		// tint + foreground change carry most of the feedback with BindInkButtonHover.
+	}
+
 	FSlateBrush Pressed = Normal;
-	Pressed.TintColor = FSlateColor(FLinearColor(0.85f, 0.85f, 0.85f, 1.f));
+	Pressed.TintColor = FSlateColor(FLinearColor(0.82f, 0.78f, 0.7f, 1.f));
 
 	Style.SetNormal(Normal);
 	Style.SetHovered(Hovered);
@@ -283,6 +364,9 @@ void FMenuUIStyle::ApplyMaterialButtonStyle(UButton* Button, UMaterialInterface*
 	Style.SetDisabled(Normal);
 	Style.SetNormalPadding(FMargin(18.f, 10.f));
 	Style.SetPressedPadding(FMargin(18.f, 12.f, 18.f, 8.f));
+	Style.NormalForeground = FSlateColor(WarmTextColor());
+	Style.HoveredForeground = FSlateColor(TodayEdgeColor());
+	Style.PressedForeground = FSlateColor(WarmMutedTextColor());
 	Button->SetStyle(Style);
 }
 
@@ -293,22 +377,52 @@ void FMenuUIStyle::ApplyFlatButtonStyle(UButton* Button, FLinearColor Fill, FVec
 		return;
 	}
 
-	FSlateBrush Brush;
-	Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-	Brush.TintColor = FSlateColor(Fill);
-	Brush.ImageSize = Size;
-	Brush.OutlineSettings.CornerRadii = FVector4(8.f, 8.f, 8.f, 8.f);
-	Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-	Brush.OutlineSettings.Width = 0.f;
+	auto MakeBrush = [&](FLinearColor Color, float OutlineWidth, FLinearColor OutlineColor) -> FSlateBrush
+	{
+		FSlateBrush Brush;
+		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Brush.TintColor = FSlateColor(Color);
+		Brush.ImageSize = Size;
+		Brush.OutlineSettings.CornerRadii = FVector4(8.f, 8.f, 8.f, 8.f);
+		Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+		Brush.OutlineSettings.Width = OutlineWidth;
+		Brush.OutlineSettings.Color = FSlateColor(OutlineColor);
+		return Brush;
+	};
+
+	const FSlateBrush Normal = MakeBrush(Fill, 0.f, FLinearColor::Transparent);
+	const FSlateBrush Hovered = MakeBrush(
+		FLinearColor(Fill.R + 0.08f, Fill.G + 0.06f, Fill.B + 0.03f, FMath::Min(Fill.A + 0.1f, 1.f)),
+		2.f,
+		TodayEdgeColor());
+	const FSlateBrush Pressed = MakeBrush(
+		FLinearColor(Fill.R * 0.85f, Fill.G * 0.85f, Fill.B * 0.85f, Fill.A),
+		1.5f,
+		TodayEdgeColor() * 0.8f);
 
 	FButtonStyle Style = Button->GetStyle();
-	Style.SetNormal(Brush);
-	Style.SetHovered(Brush);
-	Style.SetPressed(Brush);
-	Style.SetDisabled(Brush);
+	Style.SetNormal(Normal);
+	Style.SetHovered(Hovered);
+	Style.SetPressed(Pressed);
+	Style.SetDisabled(Normal);
 	Style.SetNormalPadding(Padding);
 	Style.SetPressedPadding(Padding);
 	Button->SetStyle(Style);
+}
+
+void FMenuUIStyle::BindInkButtonHover(UButton* Button, UTextBlock* Label)
+{
+	if (!Button)
+	{
+		return;
+	}
+
+	UMenuButtonHoverHelper* Helper = NewObject<UMenuButtonHoverHelper>(Button);
+	Helper->Button = Button;
+	Helper->Label = Label;
+	Helper->NormalLabelColor = Label ? Label->GetColorAndOpacity().GetSpecifiedColor() : WarmTextColor();
+	Button->OnHovered.AddUniqueDynamic(Helper, &UMenuButtonHoverHelper::HandleHovered);
+	Button->OnUnhovered.AddUniqueDynamic(Helper, &UMenuButtonHoverHelper::HandleUnhovered);
 }
 
 void FMenuUIStyle::ApplyMenuBackground(UImage* Image)

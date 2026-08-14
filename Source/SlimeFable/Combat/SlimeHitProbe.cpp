@@ -10,6 +10,7 @@
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeCombatComponent.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeStatusComponent.h"
 
@@ -128,13 +129,22 @@ void USlimeHitProbe::ApplyToActor(
 {
 	const FVector Impulse = Forward.GetSafeNormal() * Skill.Knockback + FVector::UpVector * Skill.LaunchZ;
 
+	float DamageAmount = Skill.Damage;
+	if (Instigator)
+	{
+		if (USlimeCombatComponent* Combat = Instigator->FindComponentByClass<USlimeCombatComponent>())
+		{
+			DamageAmount = Combat->ResolveOutgoingDamage(Skill);
+		}
+	}
+
 	if (ICombatDamageable* Damageable = Cast<ICombatDamageable>(Target))
 	{
-		Damageable->ApplyDamage(Skill.Damage, Instigator, HitLocation, Impulse);
+		Damageable->ApplyDamage(DamageAmount, Instigator, HitLocation, Impulse);
 	}
 	else if (USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
 	{
-		Health->ApplyDamage(Skill.Damage, Instigator, HitLocation, Impulse);
+		Health->ApplyDamage(DamageAmount, Instigator, HitLocation, Impulse);
 	}
 
 	if (Skill.bAppliesElementAura)

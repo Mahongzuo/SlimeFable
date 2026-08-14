@@ -14,9 +14,16 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeCharacter.h"
+#include "Inventory/SlimeInventorySubsystem.h"
+#include "Inventory/SlimeItemDefinition.h"
+#include "Inventory/SlimeInteractComponent.h"
+#include "Inventory/SlimeWorldPickup.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Styling/SlateTypes.h"
@@ -68,7 +75,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton)
+	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt)
 	{
 		return;
 	}
@@ -203,6 +210,56 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	FMenuUIStyle::ApplyMaterialButtonStyle(UnstuckButton, InkMat, FVector2D(200.f, 48.f));
 	FMenuUIStyle::ApplyBrushCJKFont(UnstuckLabel, 18.f, FMenuUIStyle::WarmTextColor());
 	UnstuckButton->OnClicked.AddDynamic(this, &USlimeCombatHUDWidget::HandleUnstuckClicked);
+
+	UHorizontalBox* HotbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarRow"));
+	if (UCanvasPanelSlot* HotbarSlot = Root->AddChildToCanvas(HotbarRow))
+	{
+		HotbarSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		HotbarSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		HotbarSlot->SetPosition(FVector2D(0.f, -28.f));
+		HotbarSlot->SetAutoSize(true);
+	}
+	HotbarLabels.Reset();
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("HotBox%d"), Index));
+		Box->SetWidthOverride(56.f);
+		Box->SetHeightOverride(56.f);
+		HotbarRow->AddChildToHorizontalBox(Box);
+
+		UOverlay* Cell = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), *FString::Printf(TEXT("HotCell%d"), Index));
+		Box->AddChild(Cell);
+
+		UImage* Bg = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), *FString::Printf(TEXT("HotBg%d"), Index));
+		if (ButtonMat)
+		{
+			FMenuUIStyle::ApplyImageMaterial(Bg, ButtonMat);
+		}
+		if (UOverlaySlot* BgSlot = Cell->AddChildToOverlay(Bg))
+		{
+			BgSlot->SetHorizontalAlignment(HAlign_Fill);
+			BgSlot->SetVerticalAlignment(VAlign_Fill);
+		}
+
+		UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *FString::Printf(TEXT("HotLbl%d"), Index));
+		Label->SetJustification(ETextJustify::Center);
+		if (UOverlaySlot* LabelSlot = Cell->AddChildToOverlay(Label))
+		{
+			LabelSlot->SetHorizontalAlignment(HAlign_Center);
+			LabelSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		HotbarLabels.Add(Label);
+	}
+
+	InteractPrompt = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("InteractPrompt"));
+	InteractPrompt->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* PromptSlot = Root->AddChildToCanvas(InteractPrompt))
+	{
+		PromptSlot->SetAnchors(FAnchors(0.f, 0.f));
+		PromptSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		PromptSlot->SetAutoSize(true);
+		PromptSlot->SetPosition(FVector2D(-1000.f, -1000.f));
+	}
 }
 
 void USlimeCombatHUDWidget::Refresh()
@@ -261,6 +318,80 @@ void USlimeCombatHUDWidget::Refresh()
 		if (UTextBlock* Label = Cast<UTextBlock>(UnstuckButton->GetChildAt(0)))
 		{
 			FMenuUIStyle::ApplyBrushCJKFont(Label, 18.f, FMenuUIStyle::WarmTextColor());
+		}
+	}
+
+	const UGameInstance* GI = GetGameInstance();
+	const USlimeInputSettings* InputSettings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr;
+	USlimeInventorySubsystem* Inv = GI ? GI->GetSubsystem<USlimeInventorySubsystem>() : nullptr;
+	static const ESlimeInputAction HotbarActions[6] = {
+		ESlimeInputAction::Hotbar1, ESlimeInputAction::Hotbar2, ESlimeInputAction::Hotbar3,
+		ESlimeInputAction::Hotbar4, ESlimeInputAction::Hotbar5, ESlimeInputAction::Hotbar6
+	};
+	for (int32 Index = 0; Index < HotbarLabels.Num(); ++Index)
+	{
+		UTextBlock* Label = HotbarLabels[Index];
+		if (!Label)
+		{
+			continue;
+		}
+		FString Line = InputSettings ? InputSettings->GetKeyDisplayName(HotbarActions[Index]).ToString() : FString::FromInt(Index + 1);
+		if (Inv)
+		{
+			const FName ItemId = Inv->GetHotbarItem(Index);
+			if (!ItemId.IsNone())
+			{
+				if (const USlimeItemDefinition* Def = Inv->FindDefinition(ItemId))
+				{
+					Line = FString::Printf(TEXT("%s\n%s"), *Line, *Def->DisplayName.ToString());
+				}
+			}
+		}
+		Label->SetText(FText::FromString(Line));
+		FMenuUIStyle::ApplyMixedMenuFont(Label, 14.f, FMenuUIStyle::WarmTitleColor());
+	}
+
+	if (InteractPrompt)
+	{
+		bool bShow = false;
+		FText Prompt = FText::GetEmpty();
+		FVector2D ScreenPos = FVector2D::ZeroVector;
+		if (APlayerController* PC = GetOwningPlayer())
+		{
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				if (USlimeInteractComponent* Interact = Pawn->FindComponentByClass<USlimeInteractComponent>())
+				{
+					FVector WorldPos;
+					if (Interact->GetFocusedPromptWorldLocation(WorldPos))
+					{
+						FVector2D Projected;
+						if (UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
+								PC, WorldPos, Projected, false))
+						{
+							bShow = true;
+							ScreenPos = Projected;
+							const FString KeyName = InputSettings
+								? InputSettings->GetKeyDisplayName(ESlimeInputAction::Interact).ToString()
+								: TEXT("F");
+							Prompt = FText::FromString(FString::Printf(TEXT("%s 拾取"), *KeyName));
+						}
+					}
+				}
+			}
+		}
+		InteractPrompt->SetVisibility(bShow ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		InteractPrompt->SetText(Prompt);
+		FMenuUIStyle::ApplyMixedMenuFont(InteractPrompt, 22.f, FMenuUIStyle::TodayEdgeColor());
+		if (bShow)
+		{
+			if (UCanvasPanelSlot* PromptSlot = Cast<UCanvasPanelSlot>(InteractPrompt->Slot))
+			{
+				PromptSlot->SetAnchors(FAnchors(0.f, 0.f));
+				PromptSlot->SetAlignment(FVector2D(0.5f, 1.f));
+				PromptSlot->SetAutoSize(true);
+				PromptSlot->SetPosition(ScreenPos);
+			}
 		}
 	}
 }

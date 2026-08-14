@@ -23,5 +23,13 @@ enum class ESlimeInputAction : uint8
 	Skill2 UMETA(DisplayName = "技能2"),
 	Skill3 UMETA(DisplayName = "技能3"),
 	LockOn UMETA(DisplayName = "锁定"),
+	Inventory UMETA(DisplayName = "背包"),
+	Interact UMETA(DisplayName = "拾取/交互"),
+	Hotbar1 UMETA(DisplayName = "消耗品快捷1"),
+	Hotbar2 UMETA(DisplayName = "消耗品快捷2"),
+	Hotbar3 UMETA(DisplayName = "消耗品快捷3"),
+	Hotbar4 UMETA(DisplayName = "放置品快捷1"),
+	Hotbar5 UMETA(DisplayName = "放置品快捷2"),
+	Hotbar6 UMETA(DisplayName = "放置品快捷3"),
 	COUNT UMETA(Hidden)
 };

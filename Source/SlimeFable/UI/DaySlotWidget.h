@@ -31,9 +31,16 @@ public:
 protected:
 	void BuildLayoutIfNeeded();
 	void ApplyVisuals();
+	void ApplyHoverVisuals(bool bHovered);
 
 	UFUNCTION()
 	void HandleClicked();
+
+	UFUNCTION()
+	void HandleHovered();
+
+	UFUNCTION()
+	void HandleUnhovered();
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> SlotButton;
@@ -52,6 +59,7 @@ protected:
 
 	int32 DayNumber = 0;
 	bool bIsTodayCached = false;
+	bool bHovered = false;
 	bool bBuiltInCode = false;
 
 public:

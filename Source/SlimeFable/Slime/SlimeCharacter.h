@@ -18,6 +18,8 @@ class USlimeHealthComponent;
 class USlimeLockOnComponent;
 class USlimeStatusComponent;
 class USlimeTrailComponent;
+class USlimePlacementComponent;
+class USlimeInteractComponent;
 
 /**
  *  The slime pawn.
@@ -99,6 +101,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeClingComponent* GetSlimeCling() const { return SlimeCling; }
 
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimePlacementComponent* GetSlimePlacement() const { return SlimePlacement; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeInteractComponent* GetSlimeInteract() const { return SlimeInteract; }
+
 	/** Teleport back to this pawn's spawn and reset cling / body. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void Unstuck();
@@ -108,6 +116,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetShadowMesh() const { return ShadowMesh; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	UProceduralMeshComponent* GetXRayMesh() const { return XRayMesh; }
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
@@ -137,6 +148,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<UProceduralMeshComponent> ShadowMesh;
 
+	/**
+	 * Visible translucent copy with depth-test disabled; material shows warm gold only where
+	 * the slime is occluded by world geometry (PixelDepth vs SceneDepth).
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
+	TObjectPtr<UProceduralMeshComponent> XRayMesh;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<USlimeBodyComponent> SlimeBody;
 
@@ -163,6 +181,12 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
 	TObjectPtr<USlimeClingComponent> SlimeCling;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	TObjectPtr<USlimePlacementComponent> SlimePlacement;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	TObjectPtr<USlimeInteractComponent> SlimeInteract;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

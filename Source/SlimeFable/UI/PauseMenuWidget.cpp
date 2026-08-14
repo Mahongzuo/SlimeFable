@@ -211,6 +211,17 @@ void UPauseMenuWidget::ApplyLook()
 	StyleLabel(KeybindButton);
 	StyleLabel(GraphicsButton);
 	StyleLabel(MainMenuButton);
+
+	auto BindHover = [](UButton* Button)
+	{
+		UTextBlock* Label = (Button && Button->GetChildrenCount() > 0) ? Cast<UTextBlock>(Button->GetChildAt(0)) : nullptr;
+		FMenuUIStyle::BindInkButtonHover(Button, Label);
+	};
+	BindHover(ContinueButton);
+	BindHover(LevelSelectButton);
+	BindHover(KeybindButton);
+	BindHover(GraphicsButton);
+	BindHover(MainMenuButton);
 }
 
 void UPauseMenuWidget::OpenKeybindSettings()

@@ -265,6 +265,10 @@ void ULevelSelectWidget::ApplyMaterialLabLook()
 	StyleChildLabel(PrevMonthButton, 22.f, true);
 	StyleChildLabel(NextMonthButton, 22.f, true);
 	StyleChildLabel(BackButton, 22.f, false);
+
+	FMenuUIStyle::BindInkButtonHover(PrevMonthButton, PrevMonthButton ? Cast<UTextBlock>(PrevMonthButton->GetContent()) : nullptr);
+	FMenuUIStyle::BindInkButtonHover(NextMonthButton, NextMonthButton ? Cast<UTextBlock>(NextMonthButton->GetContent()) : nullptr);
+	FMenuUIStyle::BindInkButtonHover(BackButton, BackButton ? Cast<UTextBlock>(BackButton->GetContent()) : nullptr);
 }
 
 void ULevelSelectWidget::RefreshForCurrentMonth()

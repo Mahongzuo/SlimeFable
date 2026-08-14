@@ -12,10 +12,25 @@
 namespace SlimeInputPrivate
 {
 	static const TCHAR* ConfigSection = TEXT("SlimeInput");
+	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
+	static constexpr int32 CurrentBindSchemeVersion = 2;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
 	static const TCHAR* DefaultMoveContextPath =
 		TEXT("/Game/ThirdPerson/Input/IMC_Default.IMC_Default");
+
+	static FKey LegacyDefaultKey(ESlimeInputAction Action)
+	{
+		switch (Action)
+		{
+		case ESlimeInputAction::Flatten: return EKeys::Z;
+		case ESlimeInputAction::Launch: return EKeys::Q;
+		case ESlimeInputAction::Skill1: return EKeys::One;
+		case ESlimeInputAction::Skill2: return EKeys::Two;
+		case ESlimeInputAction::Skill3: return EKeys::Three;
+		default: return EKeys::Invalid;
+		}
+	}
 }
 
 void USlimeInputSettings::Initialize(FSubsystemCollectionBase& Collection)
@@ -23,6 +38,7 @@ void USlimeInputSettings::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 	FillDefaults();
 	Load();
+	MigrateBindSchemeIfNeeded();
 	AppliedMovementKeys = Keys;
 }
 
@@ -44,16 +60,24 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::MoveLeft: return EKeys::A;
 	case ESlimeInputAction::MoveRight: return EKeys::D;
 	case ESlimeInputAction::Jump: return EKeys::SpaceBar;
-	case ESlimeInputAction::Flatten: return EKeys::Z;
+	case ESlimeInputAction::Flatten: return EKeys::C;
 	case ESlimeInputAction::Absorb: return EKeys::X;
 	case ESlimeInputAction::ResetBody: return EKeys::T;
-	case ESlimeInputAction::Launch: return EKeys::Q;
+	case ESlimeInputAction::Launch: return EKeys::G;
 	case ESlimeInputAction::ElementWheel: return EKeys::Tab;
 	case ESlimeInputAction::Attack: return EKeys::LeftMouseButton;
-	case ESlimeInputAction::Skill1: return EKeys::One;
-	case ESlimeInputAction::Skill2: return EKeys::Two;
-	case ESlimeInputAction::Skill3: return EKeys::Three;
+	case ESlimeInputAction::Skill1: return EKeys::Q;
+	case ESlimeInputAction::Skill2: return EKeys::E;
+	case ESlimeInputAction::Skill3: return EKeys::R;
 	case ESlimeInputAction::LockOn: return EKeys::MiddleMouseButton;
+	case ESlimeInputAction::Inventory: return EKeys::B;
+	case ESlimeInputAction::Interact: return EKeys::F;
+	case ESlimeInputAction::Hotbar1: return EKeys::One;
+	case ESlimeInputAction::Hotbar2: return EKeys::Two;
+	case ESlimeInputAction::Hotbar3: return EKeys::Three;
+	case ESlimeInputAction::Hotbar4: return EKeys::Four;
+	case ESlimeInputAction::Hotbar5: return EKeys::Five;
+	case ESlimeInputAction::Hotbar6: return EKeys::Six;
 	default: return EKeys::Invalid;
 	}
 }
@@ -96,6 +120,14 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::Skill2: return FText::FromString(TEXT("技能2"));
 	case ESlimeInputAction::Skill3: return FText::FromString(TEXT("技能3"));
 	case ESlimeInputAction::LockOn: return FText::FromString(TEXT("锁定"));
+	case ESlimeInputAction::Inventory: return FText::FromString(TEXT("背包"));
+	case ESlimeInputAction::Interact: return FText::FromString(TEXT("拾取/交互"));
+	case ESlimeInputAction::Hotbar1: return FText::FromString(TEXT("消耗品快捷1"));
+	case ESlimeInputAction::Hotbar2: return FText::FromString(TEXT("消耗品快捷2"));
+	case ESlimeInputAction::Hotbar3: return FText::FromString(TEXT("消耗品快捷3"));
+	case ESlimeInputAction::Hotbar4: return FText::FromString(TEXT("放置品快捷1"));
+	case ESlimeInputAction::Hotbar5: return FText::FromString(TEXT("放置品快捷2"));
+	case ESlimeInputAction::Hotbar6: return FText::FromString(TEXT("放置品快捷3"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -149,6 +181,12 @@ void USlimeInputSettings::Save()
 		return;
 	}
 
+	GConfig->SetInt(
+		SlimeInputPrivate::ConfigSection,
+		SlimeInputPrivate::SchemeVersionKey,
+		SlimeInputPrivate::CurrentBindSchemeVersion,
+		GGameUserSettingsIni);
+
 	for (ESlimeInputAction Action : GetAllActions())
 	{
 		GConfig->SetString(
@@ -183,6 +221,69 @@ void USlimeInputSettings::Load()
 			}
 		}
 	}
+}
+
+void USlimeInputSettings::MigrateBindSchemeIfNeeded()
+{
+	if (!GConfig)
+	{
+		return;
+	}
+
+	int32 Version = 0;
+	GConfig->GetInt(
+		SlimeInputPrivate::ConfigSection,
+		SlimeInputPrivate::SchemeVersionKey,
+		Version,
+		GGameUserSettingsIni);
+
+	if (Version >= SlimeInputPrivate::CurrentBindSchemeVersion)
+	{
+		return;
+	}
+
+	auto RemapIfLegacy = [this](ESlimeInputAction Action)
+	{
+		const FKey Legacy = SlimeInputPrivate::LegacyDefaultKey(Action);
+		if (!Legacy.IsValid())
+		{
+			return;
+		}
+		const FKey Current = GetKey(Action);
+		if (Current == Legacy)
+		{
+			Keys.Add(Action, GetDefaultKey(Action));
+		}
+	};
+
+	// Order matters: free Launch/Flatten first, then assign skills onto Q/E/R.
+	RemapIfLegacy(ESlimeInputAction::Launch);
+	RemapIfLegacy(ESlimeInputAction::Flatten);
+	RemapIfLegacy(ESlimeInputAction::Skill1);
+	RemapIfLegacy(ESlimeInputAction::Skill2);
+	RemapIfLegacy(ESlimeInputAction::Skill3);
+
+	// Ensure new actions exist with defaults if missing from old configs.
+	const ESlimeInputAction NewActions[] = {
+		ESlimeInputAction::Inventory,
+		ESlimeInputAction::Interact,
+		ESlimeInputAction::Hotbar1,
+		ESlimeInputAction::Hotbar2,
+		ESlimeInputAction::Hotbar3,
+		ESlimeInputAction::Hotbar4,
+		ESlimeInputAction::Hotbar5,
+		ESlimeInputAction::Hotbar6
+	};
+	for (ESlimeInputAction Action : NewActions)
+	{
+		if (!Keys.Contains(Action) || !GetKey(Action).IsValid())
+		{
+			Keys.Add(Action, GetDefaultKey(Action));
+		}
+	}
+
+	Save();
+	UE_LOG(LogSlimeFable, Log, TEXT("SlimeInputSettings: migrated bind scheme to v%d."), SlimeInputPrivate::CurrentBindSchemeVersion);
 }
 
 bool USlimeInputSettings::IsKeyDown(const APlayerController* PC, ESlimeInputAction Action) const

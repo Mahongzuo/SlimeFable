@@ -28,6 +28,7 @@
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
+#include "Inventory/SlimePlacementComponent.h"
 
 USlimeCombatComponent::USlimeCombatComponent()
 {
@@ -303,6 +304,16 @@ bool USlimeCombatComponent::CanStartAction() const
 	{
 		return false;
 	}
+	if (const AActor* Owner = GetOwner())
+	{
+		if (const USlimePlacementComponent* Placement = Owner->FindComponentByClass<USlimePlacementComponent>())
+		{
+			if (Placement->IsPlacing())
+			{
+				return false;
+			}
+		}
+	}
 	return true;
 }
 
@@ -311,6 +322,7 @@ void USlimeCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	TickCooldowns(DeltaTime);
+	TickDamageBuff(DeltaTime);
 
 	if (bComboOpen && !bAttacking)
 	{
@@ -369,15 +381,15 @@ void USlimeCombatComponent::PollCombatKeys()
 	{
 		TryComboAttack();
 	}
-	if (WasPressed(ESlimeInputAction::Skill1, EKeys::One))
+	if (WasPressed(ESlimeInputAction::Skill1, EKeys::Q))
 	{
 		TrySkill(ESlimeSkillSlot::Skill1);
 	}
-	if (WasPressed(ESlimeInputAction::Skill2, EKeys::Two))
+	if (WasPressed(ESlimeInputAction::Skill2, EKeys::E))
 	{
 		TrySkill(ESlimeSkillSlot::Skill2);
 	}
-	if (WasPressed(ESlimeInputAction::Skill3, EKeys::Three))
+	if (WasPressed(ESlimeInputAction::Skill3, EKeys::R))
 	{
 		TrySkill(ESlimeSkillSlot::Skill3);
 	}
@@ -480,11 +492,64 @@ float USlimeCombatComponent::GetSkillCooldownRemaining(ESlimeSkillSlot Slot) con
 	return SkillCd[SkillCdIndex(Current, Slot)];
 }
 
+void USlimeCombatComponent::ReduceSkillCooldowns(float Seconds)
+{
+	if (Seconds <= 0.f)
+	{
+		return;
+	}
+	for (int32 Index = 0; Index < 18; ++Index)
+	{
+		SkillCd[Index] = FMath::Max(SkillCd[Index] - Seconds, 0.f);
+	}
+}
+
+void USlimeCombatComponent::ReduceSkillCooldownsPercent(float Percent)
+{
+	const float Clamped = FMath::Clamp(Percent, 0.f, 1.f);
+	if (Clamped <= 0.f)
+	{
+		return;
+	}
+	for (int32 Index = 0; Index < 18; ++Index)
+	{
+		SkillCd[Index] *= (1.f - Clamped);
+	}
+}
+
+float USlimeCombatComponent::ResolveOutgoingDamage(const FSlimeSkillDef& Skill) const
+{
+	return FMath::Max((AttackPower * Skill.AtkScale + Skill.Damage) * OutgoingDamageMul, 0.f);
+}
+
+void USlimeCombatComponent::ApplyOutgoingDamageMul(float Mul, float DurationSeconds)
+{
+	OutgoingDamageMul = FMath::Max(Mul, 0.f);
+	DamageBuffRemaining = FMath::Max(DurationSeconds, 0.f);
+	if (DamageBuffRemaining <= 0.f)
+	{
+		OutgoingDamageMul = 1.f;
+	}
+}
+
 void USlimeCombatComponent::TickCooldowns(float DeltaTime)
 {
 	for (int32 Index = 0; Index < 18; ++Index)
 	{
 		SkillCd[Index] = FMath::Max(SkillCd[Index] - DeltaTime, 0.f);
+	}
+}
+
+void USlimeCombatComponent::TickDamageBuff(float DeltaTime)
+{
+	if (DamageBuffRemaining <= 0.f)
+	{
+		return;
+	}
+	DamageBuffRemaining = FMath::Max(DamageBuffRemaining - DeltaTime, 0.f);
+	if (DamageBuffRemaining <= 0.f)
+	{
+		OutgoingDamageMul = 1.f;
 	}
 }
 

@@ -18,6 +18,8 @@
 #include "SlimeLockOnComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
+#include "Inventory/SlimePlacementComponent.h"
+#include "Inventory/SlimeInteractComponent.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
@@ -28,8 +30,8 @@ ASlimeCharacter::ASlimeCharacter()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	// A 40 cm tall dome, not a humanoid.
-	GetCapsuleComponent()->InitCapsuleSize(32.f, 26.f);
+	// A ~40 cm tall dome, not a humanoid.
+	GetCapsuleComponent()->InitCapsuleSize(32.f, 20.f);
 
 	// ACharacter::JumpMaxCount is already exposed; default to double jump.
 	JumpMaxCount = 2;
@@ -96,6 +98,7 @@ ASlimeCharacter::ASlimeCharacter()
 	ShadowMesh->bUseComplexAsSimpleCollision = false;
 	ShadowMesh->SetGenerateOverlapEvents(false);
 	ShadowMesh->bUseAsyncCooking = false;
+	// Hidden from view; only casts a ground shadow (avoids translucent self-shadow noise).
 	ShadowMesh->SetHiddenInGame(true);
 	ShadowMesh->SetVisibility(false);
 	ShadowMesh->bCastHiddenShadow = true;
@@ -105,9 +108,26 @@ ASlimeCharacter::ASlimeCharacter()
 	ShadowMesh->bCastVolumetricTranslucentShadow = false;
 	ShadowMesh->bCastContactShadow = false;
 
+	XRayMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SlimeXRay"));
+	XRayMesh->SetupAttachment(RootComponent);
+	XRayMesh->SetUsingAbsoluteLocation(true);
+	XRayMesh->SetUsingAbsoluteRotation(true);
+	XRayMesh->SetUsingAbsoluteScale(true);
+	XRayMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	XRayMesh->bUseComplexAsSimpleCollision = false;
+	XRayMesh->SetGenerateOverlapEvents(false);
+	XRayMesh->bUseAsyncCooking = false;
+	XRayMesh->SetHiddenInGame(false);
+	XRayMesh->SetVisibility(true);
+	XRayMesh->SetCastShadow(false);
+	XRayMesh->bCastDynamicShadow = false;
+	XRayMesh->bCastVolumetricTranslucentShadow = false;
+	XRayMesh->bCastContactShadow = false;
+
 	SlimeBody = CreateDefaultSubobject<USlimeBodyComponent>(TEXT("SlimeBody"));
 	SlimeBody->SetSurfaceMesh(SurfaceMesh);
 	SlimeBody->SetShadowMesh(ShadowMesh);
+	SlimeBody->SetXRayMesh(XRayMesh);
 
 	SlimeElement = CreateDefaultSubobject<USlimeElementComponent>(TEXT("SlimeElement"));
 	SlimeAbilities = CreateDefaultSubobject<USlimeAbilityComponent>(TEXT("SlimeAbilities"));
@@ -117,6 +137,8 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimeCombat = CreateDefaultSubobject<USlimeCombatComponent>(TEXT("SlimeCombat"));
 	SlimeLockOn = CreateDefaultSubobject<USlimeLockOnComponent>(TEXT("SlimeLockOn"));
 	SlimeCling = CreateDefaultSubobject<USlimeClingComponent>(TEXT("SlimeCling"));
+	SlimePlacement = CreateDefaultSubobject<USlimePlacementComponent>(TEXT("SlimePlacement"));
+	SlimeInteract = CreateDefaultSubobject<USlimeInteractComponent>(TEXT("SlimeInteract"));
 	if (SlimeHealth)
 	{
 		SlimeHealth->Team = ESlimeTeam::Player;
@@ -134,6 +156,12 @@ void ASlimeCharacter::BeginPlay()
 	if (ShadowMesh)
 	{
 		ShadowMesh->SetWorldTransform(FTransform::Identity);
+		ShadowMesh->SetHiddenInGame(true);
+		ShadowMesh->SetVisibility(false);
+	}
+	if (XRayMesh)
+	{
+		XRayMesh->SetWorldTransform(FTransform::Identity);
 	}
 
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
