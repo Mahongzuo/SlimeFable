@@ -38,10 +38,11 @@ bool USlimePlacementComponent::BeginPlacement(USlimePlaceableDefinition* Definit
 		PreviewActor = World->SpawnActor<ASlimePlacePreview>(ASlimePlacePreview::StaticClass(), GetOwner()->GetActorLocation(), FRotator::ZeroRotator, Params);
 		if (PreviewActor)
 		{
-			if (UStaticMesh* Mesh = Definition->PreviewMesh.LoadSynchronous())
+			if (UStaticMesh* PreviewMesh = Definition->PreviewMesh.LoadSynchronous())
 			{
-				PreviewActor->SetPreviewMesh(Mesh);
+				PreviewActor->SetPreviewMesh(PreviewMesh);
 			}
+			PreviewActor->SetActorScale3D(Definition->PlacedMeshScale);
 		}
 	}
 	return true;

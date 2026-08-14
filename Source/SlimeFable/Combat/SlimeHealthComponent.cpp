@@ -51,9 +51,23 @@ void USlimeHealthComponent::ApplyHealing(float Healing)
 	OnHealthChanged.Broadcast(CurrentHP, MaxHP);
 }
 
+void USlimeHealthComponent::SetInvulnerableFor(float Seconds)
+{
+	if (UWorld* World = GetWorld())
+	{
+		InvulnerableUntil = FMath::Max(InvulnerableUntil, World->GetTimeSeconds() + FMath::Max(Seconds, 0.f));
+	}
+}
+
+bool USlimeHealthComponent::IsInvulnerable() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->GetTimeSeconds() < InvulnerableUntil;
+}
+
 float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse)
 {
-	if (!IsAlive() || Damage <= 0.f || bDissolving)
+	if (!IsAlive() || Damage <= 0.f || bDissolving || IsInvulnerable())
 	{
 		return 0.f;
 	}

@@ -3,6 +3,7 @@
 #include "SlimeTestPickups.h"
 #include "SlimeInventorySubsystem.h"
 #include "SlimeItemDefinition.h"
+#include "SlimePlacedActor.h"
 #include "Engine/Texture2D.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Components/StaticMeshComponent.h"
@@ -27,6 +28,35 @@ ASlimePickupPlaceable::ASlimePickupPlaceable()
 	{
 		Mesh->SetStaticMesh(MeshAsset.Object);
 		Mesh->SetWorldScale3D(FVector(0.55f, 0.55f, 0.28f));
+	}
+}
+
+void ASlimePickupPlaceable::PrepareDefinition(USlimeInventorySubsystem& Inventory)
+{
+	const FName Id = GetItemId();
+	if (Id.IsNone())
+	{
+		return;
+	}
+
+	USlimePlaceableDefinition* Def = Cast<USlimePlaceableDefinition>(Inventory.FindDefinition(Id));
+	if (!Def)
+	{
+		Def = NewObject<USlimePlaceableDefinition>(&Inventory, Id);
+		Def->ItemId = Id;
+		Def->DisplayName = FText::FromName(Id);
+		Def->PlacedActorClass = TSoftClassPtr<ASlimePlacedActor>(
+			FSoftObjectPath(TEXT("/Game/Blueprints/Items/BP_PlacedProp.BP_PlacedProp_C")));
+		Inventory.RegisterItemDefinition(Def);
+	}
+
+	if (Mesh)
+	{
+		if (UStaticMesh* StaticMesh = Mesh->GetStaticMesh())
+		{
+			Def->PreviewMesh = StaticMesh;
+		}
+		Def->PlacedMeshScale = Mesh->GetRelativeScale3D();
 	}
 }
 

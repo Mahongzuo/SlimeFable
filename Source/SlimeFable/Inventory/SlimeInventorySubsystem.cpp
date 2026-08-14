@@ -62,6 +62,7 @@ void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
 			FSoftObjectPath(TEXT("/Game/Blueprints/Items/BP_PlacedProp.BP_PlacedProp_C")));
 		Def->PreviewMesh = TSoftObjectPtr<UStaticMesh>(
 			FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+		Def->PlacedMeshScale = FVector(0.55f, 0.55f, 0.28f);
 		Definitions.Add(Id, Def);
 	};
 

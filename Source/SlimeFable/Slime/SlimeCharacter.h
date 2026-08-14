@@ -20,6 +20,7 @@ class USlimeStatusComponent;
 class USlimeTrailComponent;
 class USlimePlacementComponent;
 class USlimeInteractComponent;
+class USlimeDodgeComponent;
 
 /**
  *  The slime pawn.
@@ -107,6 +108,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeInteractComponent* GetSlimeInteract() const { return SlimeInteract; }
 
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	USlimeDodgeComponent* GetSlimeDodge() const { return SlimeDodge; }
+
 	/** Teleport back to this pawn's spawn and reset cling / body. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void Unstuck();
@@ -187,6 +191,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	TObjectPtr<USlimeInteractComponent> SlimeInteract;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<USlimeDodgeComponent> SlimeDodge;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

@@ -86,6 +86,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placeable")
 	TSoftObjectPtr<UStaticMesh> PreviewMesh;
 
+	/** Relative scale applied to the placed mesh (copied from world pickup on collect). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placeable")
+	FVector PlacedMeshScale = FVector(0.5f, 0.5f, 0.35f);
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Placeable", meta = (ClampMin = "0.0", ClampMax = "45.0"))
 	float MaxSlopeDegrees = 12.f;
 };

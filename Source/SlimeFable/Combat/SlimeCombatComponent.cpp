@@ -29,6 +29,7 @@
 #include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
 #include "Inventory/SlimePlacementComponent.h"
+#include "SlimeDodgeComponent.h"
 
 USlimeCombatComponent::USlimeCombatComponent()
 {
@@ -627,8 +628,18 @@ bool USlimeCombatComponent::StartAction(const FSlimeSkillDef& Def, bool bFromCom
 		{
 			VfxLoc = GetBlobOrigin() + ActiveForward * 80.f;
 		}
-		SpawnVfx(Def, VfxLoc);
+	SpawnVfx(Def, VfxLoc);
 	}
+
+	// AI / non-player attacks open the player's perfect-dodge window.
+	if (const APawn* OwnerPawn = Cast<APawn>(GetOwner()))
+	{
+		if (!OwnerPawn->IsPlayerControlled())
+		{
+			USlimeDodgeComponent::NotifyPlayerIncomingAttack(this, GetOwner());
+		}
+	}
+
 	return true;
 }
 

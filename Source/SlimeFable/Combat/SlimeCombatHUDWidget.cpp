@@ -16,6 +16,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Widget.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeCharacter.h"
@@ -27,6 +28,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Styling/SlateTypes.h"
+#include "Types/SlateEnums.h"
 #include "UI/MenuUIStyle.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
@@ -45,6 +47,9 @@ namespace
 USlimeCombatHUDWidget::USlimeCombatHUDWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	// Combat HUD is read/click chrome only. Focusable widgets swallow Tab (element wheel)
+	// and Space (jump) via Slate navigation / button activation.
+	SetIsFocusable(false);
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 }
 
@@ -192,6 +197,13 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 
 	UnstuckButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("UnstuckButton"));
 	UnstuckButton->SetVisibility(ESlateVisibility::Visible);
+	// Public property applied at slate build; keeps Space/Enter from activating Unstuck.
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	UnstuckButton->IsFocusable = false;
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	UnstuckButton->SetClickMethod(EButtonClickMethod::MouseDown);
+	UnstuckButton->SetTouchMethod(EButtonTouchMethod::DownAndUp);
+	UnstuckButton->SetPressMethod(EButtonPressMethod::DownAndUp);
 	UTextBlock* UnstuckLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("UnstuckLabel"));
 	UnstuckLabel->SetText(FText::FromString(TEXT("脱离卡死")));
 	UnstuckLabel->SetJustification(ETextJustify::Center);
@@ -209,6 +221,13 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	UMaterialInterface* InkMat = FMenuUIStyle::LoadButtonMaterial();
 	FMenuUIStyle::ApplyMaterialButtonStyle(UnstuckButton, InkMat, FVector2D(200.f, 48.f));
 	FMenuUIStyle::ApplyBrushCJKFont(UnstuckLabel, 18.f, FMenuUIStyle::WarmTextColor());
+	// Prevent Tab / directional focus navigation from selecting this button.
+	UnstuckButton->SetNavigationRuleBase(EUINavigation::Next, EUINavigationRule::Escape);
+	UnstuckButton->SetNavigationRuleBase(EUINavigation::Previous, EUINavigationRule::Escape);
+	UnstuckButton->SetNavigationRuleBase(EUINavigation::Left, EUINavigationRule::Escape);
+	UnstuckButton->SetNavigationRuleBase(EUINavigation::Right, EUINavigationRule::Escape);
+	UnstuckButton->SetNavigationRuleBase(EUINavigation::Up, EUINavigationRule::Escape);
+	UnstuckButton->SetNavigationRuleBase(EUINavigation::Down, EUINavigationRule::Escape);
 	UnstuckButton->OnClicked.AddDynamic(this, &USlimeCombatHUDWidget::HandleUnstuckClicked);
 
 	UHorizontalBox* HotbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarRow"));

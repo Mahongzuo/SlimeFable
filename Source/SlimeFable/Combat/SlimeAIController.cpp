@@ -3,6 +3,7 @@
 #include "SlimeAIController.h"
 
 #include "Kismet/GameplayStatics.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeEnemyCharacter.h"
 
@@ -50,10 +51,16 @@ void ASlimeAIController::Tick(float DeltaSeconds)
 	if (Dist > AggroRange)
 	{
 		StopMovement();
+		PathRefreshRemaining = 0.f;
 		return;
 	}
 
-	MoveToActor(Player, AttackRange * 0.7f);
+	PathRefreshRemaining -= DeltaSeconds;
+	if (PathRefreshRemaining <= 0.f || GetMoveStatus() != EPathFollowingStatus::Moving)
+	{
+		MoveToActor(Player, AttackRange * 0.7f);
+		PathRefreshRemaining = PathRefreshInterval;
+	}
 
 	FVector ToPlayer = Player->GetActorLocation() - MyPawn->GetActorLocation();
 	ToPlayer.Z = 0.f;

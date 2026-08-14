@@ -260,6 +260,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetXRayMesh() const { return XRayMesh; }
 
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	UMaterialInterface* GetResolvedBodyMaterial() const { return ResolvedMaterial; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	UMaterialInterface* GetResolvedXRayMaterial() const { return ResolvedXRayMaterial; }
+
 	/** Pancake mode. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetSpread(bool bInSpread);

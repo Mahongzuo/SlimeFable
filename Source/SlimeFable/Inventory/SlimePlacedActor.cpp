@@ -47,6 +47,19 @@ void ASlimePlacedActor::ConfigureFromItem(FName InItemId, USlimeItemDefinition* 
 {
 	SourceItemId = InItemId;
 	ItemDefinition = InDefinition;
+
+	if (USlimePlaceableDefinition* Placeable = Cast<USlimePlaceableDefinition>(InDefinition))
+	{
+		if (Mesh)
+		{
+			if (UStaticMesh* Preview = Placeable->PreviewMesh.LoadSynchronous())
+			{
+				Mesh->SetStaticMesh(Preview);
+			}
+			Mesh->SetRelativeScale3D(Placeable->PlacedMeshScale);
+			RestRelativeScale = Mesh->GetRelativeScale3D();
+		}
+	}
 }
 
 FVector ASlimePlacedActor::GetPromptWorldLocation() const

@@ -34,6 +34,7 @@ public class SlimeFable : ModuleRules
 			"SlimeFable/DayLevel",
 			"SlimeFable/Slime",
 			"SlimeFable/Combat",
+			"SlimeFable/Enemy",
 			"SlimeFable/Inventory",
 			"SlimeFable/Settings",
 			"SlimeFable/UI",

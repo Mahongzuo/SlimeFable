@@ -28,6 +28,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI", meta = (ClampMin = "0.1", Units = "s"))
 	float AttackInterval = 0.55f;
 
+	/** How often to repath while chasing. Avoids RestartMove every frame. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI", meta = (ClampMin = "0.05", Units = "s"))
+	float PathRefreshInterval = 0.25f;
+
 protected:
 	APawn* FindPlayerPawn() const;
 
@@ -35,4 +39,5 @@ protected:
 	TObjectPtr<USlimeCombatComponent> Combat;
 
 	float AttackCooldown = 0.f;
+	float PathRefreshRemaining = 0.f;
 };

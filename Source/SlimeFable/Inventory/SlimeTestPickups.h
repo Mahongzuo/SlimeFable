@@ -27,6 +27,9 @@ class SLIMEFABLE_API ASlimePickupPlaceable : public ASlimeWorldPickup
 
 public:
 	ASlimePickupPlaceable();
+
+protected:
+	virtual void PrepareDefinition(USlimeInventorySubsystem& Inventory) override;
 };
 
 /** Drop into a level to test souvenir pickup (OldPostcard). */

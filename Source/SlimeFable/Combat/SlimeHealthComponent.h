@@ -61,6 +61,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void ResetHP();
 
+	/** Ignore damage (and hit flash) until WorldTimeSeconds reaches this. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	float InvulnerableUntil = -1.f;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void SetInvulnerableFor(float Seconds);
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	bool IsInvulnerable() const;
+
 private:
 	void HandleDeath(AActor* DamageCauser);
 	void BeginDeathDissolve();

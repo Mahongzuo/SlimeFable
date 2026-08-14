@@ -15,6 +15,7 @@
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeDodgeComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
@@ -139,6 +140,7 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimeCling = CreateDefaultSubobject<USlimeClingComponent>(TEXT("SlimeCling"));
 	SlimePlacement = CreateDefaultSubobject<USlimePlacementComponent>(TEXT("SlimePlacement"));
 	SlimeInteract = CreateDefaultSubobject<USlimeInteractComponent>(TEXT("SlimeInteract"));
+	SlimeDodge = CreateDefaultSubobject<USlimeDodgeComponent>(TEXT("SlimeDodge"));
 	if (SlimeHealth)
 	{
 		SlimeHealth->Team = ESlimeTeam::Player;
