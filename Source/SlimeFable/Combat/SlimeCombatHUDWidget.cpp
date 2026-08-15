@@ -17,9 +17,15 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Widget.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeCharacter.h"
+#include "SlimeLockOnComponent.h"
+#include "SlimeHealthComponent.h"
+#include "EnemyCharacter.h"
+#include "SlimeEnemyCharacter.h"
+#include "Components/Border.h"
 #include "Inventory/SlimeInventorySubsystem.h"
 #include "Inventory/SlimeItemDefinition.h"
 #include "Inventory/SlimeInteractComponent.h"
@@ -76,11 +82,12 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	Refresh();
+	RefreshLockOnBar(InDeltaTime);
 }
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt)
+	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel)
 	{
 		return;
 	}
@@ -279,6 +286,74 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		PromptSlot->SetAutoSize(true);
 		PromptSlot->SetPosition(FVector2D(-1000.f, -1000.f));
 	}
+
+	LockOnPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LockOnPanel"));
+	LockOnPanel->SetVisibility(ESlateVisibility::Collapsed);
+	{
+		FSlateBrush Brush;
+		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Brush.TintColor = FSlateColor(FLinearColor(0.05f, 0.045f, 0.035f, 0.78f));
+		Brush.OutlineSettings.CornerRadii = FVector4(8.f, 8.f, 8.f, 8.f);
+		Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+		Brush.OutlineSettings.Color = FSlateColor(FLinearColor(0.72f, 0.64f, 0.46f, 0.45f));
+		Brush.OutlineSettings.Width = 1.4f;
+		LockOnPanel->SetBrush(Brush);
+		LockOnPanel->SetPadding(FMargin(12.f, 8.f, 16.f, 10.f));
+	}
+	if (UCanvasPanelSlot* LockSlot = Root->AddChildToCanvas(LockOnPanel))
+	{
+		LockSlot->SetAnchors(FAnchors(0.5f, 0.f));
+		LockSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		LockSlot->SetPosition(FVector2D(0.f, 22.f));
+		LockSlot->SetAutoSize(true);
+		LockSlot->SetZOrder(12);
+	}
+
+	UHorizontalBox* LockRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("LockRow"));
+	LockOnPanel->SetContent(LockRow);
+
+	USizeBox* IconBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LockIconBox"));
+	IconBox->SetWidthOverride(36.f);
+	IconBox->SetHeightOverride(36.f);
+	if (UHorizontalBoxSlot* IconSlot = LockRow->AddChildToHorizontalBox(IconBox))
+	{
+		IconSlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+		IconSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("LockIcon"));
+	if (ButtonMat)
+	{
+		FMenuUIStyle::ApplyImageMaterial(Icon, ButtonMat);
+	}
+	else
+	{
+		Icon->SetColorAndOpacity(FMenuUIStyle::TodayEdgeColor());
+	}
+	IconBox->AddChild(Icon);
+
+	UVerticalBox* LockTexts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LockTexts"));
+	if (UHorizontalBoxSlot* TextSlot = LockRow->AddChildToHorizontalBox(LockTexts))
+	{
+		TextSlot->SetSize(ESlateSizeRule::Fill);
+		TextSlot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	LockOnName = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LockOnName"));
+	LockTexts->AddChildToVerticalBox(LockOnName);
+
+	USizeBox* BarBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LockBarBox"));
+	BarBox->SetWidthOverride(520.f);
+	BarBox->SetHeightOverride(20.f);
+	if (UVerticalBoxSlot* BarSlot = LockTexts->AddChildToVerticalBox(BarBox))
+	{
+		BarSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	}
+
+	LockOnBar = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("LockOnBar"));
+	LockOnBarMID = FMenuUIStyle::CreateHealthBarMID(this);
+	FMenuUIStyle::ApplyHealthBarImage(LockOnBar, LockOnBarMID, FVector2D(520.f, 20.f));
+	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, 1.f, 1.f, 0.f, 26.f);
+	BarBox->AddChild(LockOnBar);
 }
 
 void USlimeCombatHUDWidget::Refresh()
@@ -417,6 +492,156 @@ void USlimeCombatHUDWidget::Refresh()
 			}
 		}
 	}
+}
+
+namespace
+{
+	bool LooksLikeInternalActorName(const FString& Name)
+	{
+		if (Name.IsEmpty())
+		{
+			return true;
+		}
+		for (const TCHAR Char : Name)
+		{
+			if (Char >= 0x4E00 && Char <= 0x9FFF)
+			{
+				return false;
+			}
+		}
+		if (Name.Contains(TEXT(" ")))
+		{
+			return false;
+		}
+		const FString Upper = Name.ToUpper();
+		return Upper.Contains(TEXT("ENEMY"))
+			|| Upper.Contains(TEXT("CHARACTER"))
+			|| Upper.Contains(TEXT("ACTOR"))
+			|| Upper.StartsWith(TEXT("BP_"));
+	}
+
+	FString StripInternalActorName(FString Raw)
+	{
+		if (Raw.StartsWith(TEXT("UEDPIE_")))
+		{
+			const int32 Second = Raw.Find(TEXT("_"), ESearchCase::IgnoreCase, ESearchDir::FromStart, 7);
+			if (Second != INDEX_NONE)
+			{
+				Raw.RightChopInline(Second + 1);
+			}
+		}
+		if (Raw.EndsWith(TEXT("_C")))
+		{
+			Raw.LeftChopInline(2);
+		}
+		int32 Underscore = INDEX_NONE;
+		if (Raw.FindLastChar(TEXT('_'), Underscore))
+		{
+			if (Raw.Mid(Underscore + 1).IsNumeric())
+			{
+				Raw.LeftInline(Underscore);
+			}
+		}
+		if (Raw.StartsWith(TEXT("BP_")))
+		{
+			Raw.RightChopInline(3);
+		}
+		return Raw;
+	}
+
+	FText ResolveLockOnDisplayName(AActor* Target)
+	{
+		FText Named;
+		if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Target))
+		{
+			Named = Enemy->DisplayName;
+		}
+		else if (const ASlimeEnemyCharacter* SlimeEnemy = Cast<ASlimeEnemyCharacter>(Target))
+		{
+			Named = SlimeEnemy->DisplayName;
+		}
+		if (!Named.IsEmpty())
+		{
+			return Named;
+		}
+
+		const FString Cleaned = Target ? StripInternalActorName(Target->GetActorNameOrLabel()) : FString();
+		if (LooksLikeInternalActorName(Cleaned))
+		{
+			return FText::FromString(TEXT("敌人"));
+		}
+		return FText::FromString(Cleaned);
+	}
+}
+
+void USlimeCombatHUDWidget::RefreshLockOnBar(float DeltaTime)
+{
+	if (!LockOnPanel || !LockOnName || !LockOnBar)
+	{
+		return;
+	}
+
+	AActor* Target = nullptr;
+	if (APawn* Pawn = GetOwningPlayerPawn())
+	{
+		if (const USlimeLockOnComponent* Lock = Pawn->FindComponentByClass<USlimeLockOnComponent>())
+		{
+			Target = Lock->GetLockedTarget();
+		}
+	}
+
+	if (!Target)
+	{
+		LockOnPanel->SetVisibility(ESlateVisibility::Collapsed);
+		LastLockTarget.Reset();
+		LockOnGhostDelay = 0.f;
+		LockOnFlash = 0.f;
+		return;
+	}
+
+	LockOnPanel->SetVisibility(ESlateVisibility::HitTestInvisible);
+	LockOnName->SetText(ResolveLockOnDisplayName(Target));
+	FMenuUIStyle::ApplyMixedMenuFont(LockOnName, 18.f, FMenuUIStyle::WarmTitleColor());
+
+	float Percent = 1.f;
+	if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+	{
+		Percent = Health->GetHealthPercent();
+	}
+
+	if (LastLockTarget.Get() != Target)
+	{
+		LastLockTarget = Target;
+		LockOnHealthPercent = Percent;
+		LockOnGhostPercent = Percent;
+		LockOnGhostDelay = 0.f;
+		LockOnFlash = 0.f;
+	}
+	else if (Percent < LockOnHealthPercent - 0.001f)
+	{
+		LockOnGhostDelay = 0.15f;
+		LockOnFlash = 1.f;
+	}
+
+	LockOnHealthPercent = Percent;
+
+	if (Percent > LockOnGhostPercent)
+	{
+		LockOnGhostPercent = Percent;
+		LockOnGhostDelay = 0.f;
+	}
+
+	if (LockOnGhostDelay > 0.f)
+	{
+		LockOnGhostDelay -= DeltaTime;
+	}
+	else
+	{
+		LockOnGhostPercent = FMath::FInterpConstantTo(LockOnGhostPercent, Percent, DeltaTime, 1.2f);
+	}
+
+	LockOnFlash = FMath::FInterpTo(LockOnFlash, 0.f, DeltaTime, 12.f);
+	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, Percent, LockOnGhostPercent, LockOnFlash, 26.f);
 }
 
 void USlimeCombatHUDWidget::HandleUnstuckClicked()

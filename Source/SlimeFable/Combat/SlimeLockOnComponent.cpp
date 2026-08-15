@@ -28,6 +28,21 @@ void USlimeLockOnComponent::BeginPlay()
 	Super::BeginPlay();
 }
 
+bool USlimeLockOnComponent::IsLockedByLocalPlayer(const UObject* WorldContextObject, const AActor* Target)
+{
+	if (!Target)
+	{
+		return false;
+	}
+	APawn* Player = UGameplayStatics::GetPlayerPawn(WorldContextObject, 0);
+	if (!Player)
+	{
+		return false;
+	}
+	const USlimeLockOnComponent* Lock = Player->FindComponentByClass<USlimeLockOnComponent>();
+	return Lock && Lock->GetLockedTarget() == Target;
+}
+
 void USlimeLockOnComponent::BindInput(UEnhancedInputComponent* EnhancedInput)
 {
 	if (EnhancedInput && LockOnAction)

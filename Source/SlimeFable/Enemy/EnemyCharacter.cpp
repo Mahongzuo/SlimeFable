@@ -15,12 +15,16 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeLockOnComponent.h"
 #include "SlimeWorldHealthBar.h"
+#include "Quest/QuestObjectiveComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 
 AEnemyCharacter::AEnemyCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.1f;
 	AutoPossessPlayer = EAutoReceiveInput::Disabled;
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
@@ -56,7 +60,7 @@ AEnemyCharacter::AEnemyCharacter()
 
 	HealthBar = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBar"));
 	HealthBar->SetupAttachment(RootComponent);
-	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, 120.f));
+	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
 	HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
 	HealthBar->SetDrawAtDesiredSize(false);
 	HealthBar->SetDrawSize(FVector2D(110.f, 14.f));
@@ -77,6 +81,131 @@ void AEnemyCharacter::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	RebuildMeshParts();
+	ApplyHealthBarOffset();
+}
+
+void AEnemyCharacter::ApplyHealthBarOffset()
+{
+	if (HealthBar)
+	{
+		HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
+	}
+}
+
+void AEnemyCharacter::RefreshWorldHealthBarVisibility()
+{
+	if (!HealthBar)
+	{
+		return;
+	}
+
+	bool bShow = Health && Health->IsAlive()
+		&& Presence != EEnemyPresence::Sleep
+		&& Presence != EEnemyPresence::Despawned
+		&& !USlimeLockOnComponent::IsLockedByLocalPlayer(this, this);
+
+	if (bShow)
+	{
+		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
+				<= FMath::Square(HealthBarVisibleRange);
+		}
+		else
+		{
+			bShow = false;
+		}
+	}
+
+	HealthBar->SetHiddenInGame(!bShow);
+	HealthBar->SetVisibility(bShow);
+}
+
+void AEnemyCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	RefreshWorldHealthBarVisibility();
+	TickOutOfCombatReset(DeltaSeconds);
+}
+
+bool AEnemyCharacter::IsInCombat() const
+{
+	return Combat && Combat->IsAttacking();
+}
+
+void AEnemyCharacter::OnRestoredToSpawn()
+{
+}
+
+void AEnemyCharacter::FellOutOfWorld(const UDamageType& DmgType)
+{
+	if (Health && Health->IsAlive())
+	{
+		RestoreToSpawn();
+		return;
+	}
+	Super::FellOutOfWorld(DmgType);
+}
+
+void AEnemyCharacter::RestoreToSpawn()
+{
+	if (Health && !Health->IsAlive())
+	{
+		return;
+	}
+
+	OutOfCombatSeconds = 0.f;
+	TeleportTo(SpawnTransform.GetLocation(), SpawnTransform.Rotator(), false, true);
+
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->Velocity = FVector::ZeroVector;
+	}
+
+	if (Health)
+	{
+		Health->ResetHP();
+	}
+	if (Combat)
+	{
+		Combat->InterruptCombat();
+	}
+
+	OnRestoredToSpawn();
+}
+
+void AEnemyCharacter::TickOutOfCombatReset(float DeltaSeconds)
+{
+	if (Health && !Health->IsAlive())
+	{
+		return;
+	}
+
+	const FVector Location = GetActorLocation();
+	if (Location.Z < SpawnTransform.GetLocation().Z - VoidResetDepth)
+	{
+		RestoreToSpawn();
+		return;
+	}
+
+	if (IsInCombat())
+	{
+		OutOfCombatSeconds = 0.f;
+		return;
+	}
+
+	OutOfCombatSeconds += DeltaSeconds;
+
+	const float DistFromSpawn = FVector::Dist2D(Location, SpawnTransform.GetLocation());
+	const float HorizSpeed = GetVelocity().Size2D();
+	constexpr float StuckSpeed = 15.f;
+	const bool bStuck = DistFromSpawn > StuckResetDistance && HorizSpeed < StuckSpeed;
+
+	if (bStuck || (OutOfCombatResetSeconds > 0.f && OutOfCombatSeconds >= OutOfCombatResetSeconds))
+	{
+		RestoreToSpawn();
+	}
 }
 
 void AEnemyCharacter::BeginPlay()
@@ -338,6 +467,10 @@ void AEnemyCharacter::NotifyDanger(const FVector& DangerLocation, AActor* Danger
 
 void AEnemyCharacter::HandleDied()
 {
+	if (UQuestObjectiveComponent* Objective = FindComponentByClass<UQuestObjectiveComponent>())
+	{
+		Objective->TryContribute();
+	}
 	if (HealthBar)
 	{
 		HealthBar->SetVisibility(false);
@@ -401,11 +534,7 @@ void AEnemyCharacter::SetEnemyPresence(EEnemyPresence NewPresence)
 		}
 	}
 
-	if (HealthBar)
-	{
-		HealthBar->SetHiddenInGame(bSleeping);
-		HealthBar->SetVisibility(!bSleeping);
-	}
+	RefreshWorldHealthBarVisibility();
 
 	SetActorHiddenInGame(Presence == EEnemyPresence::Despawned);
 	SetActorEnableCollision(Presence != EEnemyPresence::Despawned);

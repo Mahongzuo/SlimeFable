@@ -35,6 +35,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	AActor* GetLockedTarget() const { return LockedTarget.Get(); }
 
+	UFUNCTION(BlueprintPure, Category = "Combat", meta = (WorldContext = "WorldContextObject"))
+	static bool IsLockedByLocalPlayer(const UObject* WorldContextObject, const AActor* Target);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LockOn", meta = (ClampMin = "100.0", Units = "cm"))
 	float AcquireRange = 2000.f;
 

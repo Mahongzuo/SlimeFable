@@ -10,6 +10,24 @@
 - 新加模块依赖时同步改 `SlimeFable.Build.cs`。
 - Live Coding 开启时完整 UBT 可能被拒；新增 UCLASS/UFUNCTION 通常需要关编辑器编译或重启编辑器。
 
+## Details 分类
+
+关卡里会摆的玩法 Actor / 组件，设计师可改字段统一进 **`0_Config`**，避免埋在 Transform / Mesh / Camera 下面翻找。
+
+```cpp
+UCLASS(meta = (PrioritizeCategories = "0_Config"))
+// ...
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD")
+FText DisplayName;
+```
+
+- 根名固定 `0_Config`。`0_` 字母序靠前；`UCLASS` 上加 `PrioritizeCategories = "0_Config"`，把它抬到 Transform 等引擎类目之前。
+- 子项用管道：`0_Config|HUD`、`0_Config|Stats`、`0_Config|Mesh`、`0_Config|Combat`、`0_Config|Enemy`…
+- 组件指针用 `VisibleAnywhere` + `Category = "Z_Components"` + `AdvancedDisplay`，不要放进 `0_Config`。
+- 不要用 `Slime|Enemy`、`LockOn`、`Quest` 当关卡摆件的主类目。
+- `DisplayName` 等 Actor 字段在 **Actor 根** 上改（World Outliner 点角色本身），不要点 Mesh / Camera 组件。
+- 敌人锁定顶栏名字：`0_Config|HUD` → `DisplayName`；空则回退「敌人」，不显示 `BP_` 内部名。头顶小条只有血量，没有名字文字。
+
 ## 资产
 
 - 日关卡包路径：`/Game/Maps/Days/{MM}/{MMDD}`，资产名即 DayId（如 `0812`）。

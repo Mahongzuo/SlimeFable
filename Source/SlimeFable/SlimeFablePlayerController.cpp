@@ -11,6 +11,7 @@
 #include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
 #include "SlimeFable.h"
+#include "Quest/QuestSubsystem.h"
 #include "UI/PauseMenuWidget.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -203,6 +204,16 @@ void ASlimeFablePlayerController::UpdateAltCursor()
 	if (!IsLocalPlayerController() || IsPauseMenuOpen())
 	{
 		return;
+	}
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+		{
+			if (Quests->IsQuestLogOpen())
+			{
+				return;
+			}
+		}
 	}
 
 	const bool bAltDown = IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt);

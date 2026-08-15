@@ -32,6 +32,7 @@ public class SlimeFable : ModuleRules
 		PublicIncludePaths.AddRange(new string[] {
 			"SlimeFable",
 			"SlimeFable/DayLevel",
+			"SlimeFable/Quest",
 			"SlimeFable/Slime",
 			"SlimeFable/Combat",
 			"SlimeFable/Enemy",

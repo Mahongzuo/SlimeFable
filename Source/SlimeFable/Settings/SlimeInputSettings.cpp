@@ -13,7 +13,7 @@ namespace SlimeInputPrivate
 {
 	static const TCHAR* ConfigSection = TEXT("SlimeInput");
 	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
-	static constexpr int32 CurrentBindSchemeVersion = 2;
+	static constexpr int32 CurrentBindSchemeVersion = 3;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
 	static const TCHAR* DefaultMoveContextPath =
@@ -71,6 +71,7 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::Skill3: return EKeys::R;
 	case ESlimeInputAction::LockOn: return EKeys::MiddleMouseButton;
 	case ESlimeInputAction::Inventory: return EKeys::B;
+	case ESlimeInputAction::QuestLog: return EKeys::J;
 	case ESlimeInputAction::Interact: return EKeys::F;
 	case ESlimeInputAction::Hotbar1: return EKeys::One;
 	case ESlimeInputAction::Hotbar2: return EKeys::Two;
@@ -121,6 +122,7 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::Skill3: return FText::FromString(TEXT("技能3"));
 	case ESlimeInputAction::LockOn: return FText::FromString(TEXT("锁定"));
 	case ESlimeInputAction::Inventory: return FText::FromString(TEXT("背包"));
+	case ESlimeInputAction::QuestLog: return FText::FromString(TEXT("史书"));
 	case ESlimeInputAction::Interact: return FText::FromString(TEXT("拾取/交互"));
 	case ESlimeInputAction::Hotbar1: return FText::FromString(TEXT("消耗品快捷1"));
 	case ESlimeInputAction::Hotbar2: return FText::FromString(TEXT("消耗品快捷2"));
@@ -266,6 +268,7 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 	// Ensure new actions exist with defaults if missing from old configs.
 	const ESlimeInputAction NewActions[] = {
 		ESlimeInputAction::Inventory,
+		ESlimeInputAction::QuestLog,
 		ESlimeInputAction::Interact,
 		ESlimeInputAction::Hotbar1,
 		ESlimeInputAction::Hotbar2,

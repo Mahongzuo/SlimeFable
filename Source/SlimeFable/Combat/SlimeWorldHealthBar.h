@@ -6,7 +6,8 @@
 #include "Blueprint/UserWidget.h"
 #include "SlimeWorldHealthBar.generated.h"
 
-class UProgressBar;
+class UImage;
+class UMaterialInstanceDynamic;
 class USlimeHealthComponent;
 
 UCLASS()
@@ -22,7 +23,10 @@ public:
 
 protected:
 	UPROPERTY(Transient)
-	TObjectPtr<UProgressBar> Bar;
+	TObjectPtr<UImage> Bar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> BarMID;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<USlimeHealthComponent> Health;

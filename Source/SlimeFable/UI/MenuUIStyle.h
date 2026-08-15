@@ -7,6 +7,7 @@
 #include "Fonts/SlateFontInfo.h"
 
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UTexture2D;
 class UFont;
 class UButton;
@@ -23,6 +24,10 @@ struct FMenuUIStyle
 
 	static UTexture2D* LoadMenuBackgroundTexture();
 	static UMaterialInterface* LoadButtonMaterial();
+	static UMaterialInterface* LoadHealthBarMaterial();
+	static UMaterialInstanceDynamic* CreateHealthBarMID(UObject* Outer);
+	static void ApplyHealthBarImage(UImage* Image, UMaterialInstanceDynamic* MID, FVector2D Size);
+	static void SetHealthBarValues(UMaterialInstanceDynamic* MID, float Health, float Ghost, float Flash, float Aspect);
 	static UFont* LoadTitleFont();
 	static UFont* LoadBrushCJKFontAsset();
 

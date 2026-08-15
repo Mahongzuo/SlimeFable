@@ -23,6 +23,8 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetEnemyPresence(EEnemyPresence NewPresence) override;
+	virtual bool IsInCombat() const override;
+	virtual void OnRestoredToSpawn() override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Tower", meta = (ClampMin = "100.0", Units = "cm"))
 	float AttackRange = 1000.f;

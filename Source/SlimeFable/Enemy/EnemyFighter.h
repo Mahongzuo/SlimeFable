@@ -40,6 +40,10 @@ public:
 
 	virtual void BeginPlay() override;
 
+	virtual bool IsInCombat() const override;
+
+	virtual void OnRestoredToSpawn() override;
+
 
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter", meta = (ClampMin = "100.0", Units = "cm"))

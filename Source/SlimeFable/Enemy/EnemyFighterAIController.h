@@ -33,6 +33,9 @@ public:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	bool IsEngaged() const { return State != EEnemyFighterState::Idle; }
+	void ReturnToIdle();
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI", meta = (ClampMin = "0.05", Units = "s"))
 	float PathRefreshInterval = 0.25f;
 

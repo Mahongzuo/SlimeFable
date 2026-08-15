@@ -307,6 +307,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	FVector GetBlobCenter() const { return Solver.GetBodyCenter(); }
 
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	bool GetFragmentCenter(FVector& OutCenter) const { return Solver.GetFragmentCenter(OutCenter); }
+
 	/** COM of each active ballistic mini-slime shot (refreshes shot cache). */
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	void GetActiveShotCenters(TArray<FVector>& OutCenters) const;

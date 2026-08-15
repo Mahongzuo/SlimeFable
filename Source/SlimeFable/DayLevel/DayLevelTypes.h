@@ -67,6 +67,10 @@ struct FDayLevelEntry
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Day Level", meta = (AllowedClasses = "/Script/Engine.World"))
 	FSoftObjectPath Level;
 
+	/** Optional year/chapter sub-levels, keyed by ChapterId (e.g. "1920"). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Day Level")
+	TMap<FName, TSoftObjectPtr<UWorld>> SubLevels;
+
 	/** Convention: SaveGame slot / exploration progress key uses this DayId string. */
 	FString GetSaveSlotKey() const
 	{

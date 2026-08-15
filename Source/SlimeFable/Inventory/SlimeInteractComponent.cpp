@@ -4,6 +4,8 @@
 
 #include "SlimeWorldPickup.h"
 #include "SlimePlacedActor.h"
+#include "Quest/QuestInteractActor.h"
+#include "Quest/QuestSubsystem.h"
 #include "SlimeVehiclePickup.h"
 #include "SlimeInventorySubsystem.h"
 #include "SlimePlacementComponent.h"
@@ -43,6 +45,16 @@ bool USlimeInteractComponent::CanInteractNow() const
 	{
 		return false;
 	}
+	if (const UGameInstance* Game = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (const UQuestSubsystem* Quests = Game->GetSubsystem<UQuestSubsystem>())
+		{
+			if (Quests->IsQuestLogOpen())
+			{
+				return false;
+			}
+		}
+	}
 	if (const USlimeAbilityComponent* Abilities = Pawn->FindComponentByClass<USlimeAbilityComponent>())
 	{
 		if (Abilities->IsWheelOpen())
@@ -64,6 +76,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 {
 	FocusedPickup.Reset();
 	FocusedPlaced.Reset();
+	FocusedQuest.Reset();
 
 	APawn* Pawn = Cast<APawn>(GetOwner());
 	UWorld* World = GetWorld();
@@ -85,6 +98,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 	float BestDistSq = TNumericLimits<float>::Max();
 	ASlimeWorldPickup* BestPickup = nullptr;
 	ASlimePlacedActor* BestPlaced = nullptr;
+	AQuestInteractActor* BestQuest = nullptr;
 
 	for (TActorIterator<ASlimeWorldPickup> It(World); It; ++It)
 	{
@@ -106,6 +120,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 			BestDistSq = DistSq;
 			BestPickup = Pickup;
 			BestPlaced = nullptr;
+			BestQuest = nullptr;
 		}
 	}
 
@@ -122,11 +137,30 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 			BestDistSq = DistSq;
 			BestPlaced = Placed;
 			BestPickup = nullptr;
+			BestQuest = nullptr;
+		}
+	}
+
+	for (TActorIterator<AQuestInteractActor> It(World); It; ++It)
+	{
+		AQuestInteractActor* QuestActor = *It;
+		if (!IsValid(QuestActor) || !QuestActor->CanBeFocused())
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(Loc, QuestActor->GetActorLocation());
+		if (DistSq <= RadiusSq && DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			BestQuest = QuestActor;
+			BestPickup = nullptr;
+			BestPlaced = nullptr;
 		}
 	}
 
 	FocusedPickup = BestPickup;
 	FocusedPlaced = BestPlaced;
+	FocusedQuest = BestQuest;
 }
 
 bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation) const
@@ -141,6 +175,11 @@ bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation
 		OutLocation = Placed->GetPromptWorldLocation();
 		return true;
 	}
+	if (AQuestInteractActor* QuestActor = FocusedQuest.Get())
+	{
+		OutLocation = QuestActor->GetPromptWorldLocation();
+		return true;
+	}
 	return false;
 }
 
@@ -153,6 +192,10 @@ FText USlimeInteractComponent::GetFocusedPromptVerb() const
 	if (FocusedPlaced.IsValid())
 	{
 		return FText::FromString(TEXT("拾取"));
+	}
+	if (AQuestInteractActor* QuestActor = FocusedQuest.Get())
+	{
+		return QuestActor->GetInteractPromptVerb();
 	}
 	return FText::GetEmpty();
 }
@@ -187,6 +230,10 @@ bool USlimeInteractComponent::TryInteract()
 	if (ASlimePlacedActor* Placed = FocusedPlaced.Get())
 	{
 		return Placed->TryPickup(Pawn);
+	}
+	if (AQuestInteractActor* QuestActor = FocusedQuest.Get())
+	{
+		return QuestActor->TryInteract(Pawn);
 	}
 	return false;
 }
@@ -268,7 +315,25 @@ void USlimeInteractComponent::PollKeys()
 
 	if (WasPressed(ESlimeInputAction::Inventory, EKeys::B))
 	{
+		if (UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr)
+		{
+			if (Quests->IsQuestLogOpen())
+			{
+				Quests->CloseQuestLog();
+			}
+		}
 		ToggleInventory();
+	}
+
+	if (WasPressed(ESlimeInputAction::QuestLog, EKeys::J))
+	{
+		if (!IsInventoryOpen())
+		{
+			if (UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr)
+			{
+				Quests->ToggleQuestLog();
+			}
+		}
 	}
 
 	if (WasPressed(ESlimeInputAction::Interact, EKeys::F))

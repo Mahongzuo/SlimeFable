@@ -8,7 +8,8 @@ description: >-
 
 # SlimeFable 日关卡框架
 
-API 与路径细节见 [references/day-level-api.md](references/day-level-api.md)。
+API 与路径细节见 [references/day-level-api.md](references/day-level-api.md)。  
+每日故事资产目录见 [references/day-content-folders.md](references/day-content-folders.md)。
 
 ## 命名与路径
 
@@ -32,7 +33,10 @@ API 与路径细节见 [references/day-level-api.md](references/day-level-api.md
 | 类型 | `Source/SlimeFable/DayLevel/DayLevelTypes.h`（`FDayId`、`FDayLevelEntry`、`UDayLevelRegistry`） |
 | 子系统 | `Source/SlimeFable/DayLevel/DayLevelSubsystem.h` |
 | Tags | `Config/DefaultGameplayTags.ini` → `Exploration.Objective/Collectible/Boss` |
-| 批处理 | `Content/Python/create_day_levels.py` |
+| 批处理关卡 | `Content/Python/create_day_levels.py` |
+| 每日内容 | `/Game/_Slime/Days/MM/MMDD`（Quests / Actors / NPCs / Enemies / Audio / FX） |
+| 批建内容目录 | `Content/Python/create_day_content_folders.py`（366 天；0815 另有 Hub + Y{Year}） |
+| 0815 子图 | `Content/Python/create_0815_sublevels.py`（`SL_0815_YYYY` + Registry.SubLevels） |
 
 ## 工作流
 
@@ -43,6 +47,14 @@ py E:/UE/SlimeFable/Content/Python/create_day_levels.py
 ```
 
 脚本行为：已存在的 `.umap` 跳过；始终按 366 天重写 Registry 条目。
+
+**补齐 366 天内容目录（不是地图）：**
+
+```text
+py E:/UE/SlimeFable/Content/Python/create_day_content_folders.py
+```
+
+已存在的日目录跳过；不创建空 `DA_Quest_*`。分类与 0815 例外见 [day-content-folders.md](references/day-content-folders.md)。
 
 **运行时查询（设计意图）：**
 
@@ -71,7 +83,8 @@ py E:/UE/SlimeFable/Content/Python/create_day_levels.py
 
 ## 不要做
 
-- 用 MCP 循环创建 366 个关卡
-- 把日关卡改回单目录平铺或改名脱离 `MMDD`
+- 用 MCP 循环创建 366 个关卡或 366 个内容目录（用上面两条 Python）
+- 把日关卡 / 每日内容改回单目录平铺或改名脱离 `MMDD`
 - 擅自铺开完整 SaveGame / 探索度统计（除非用户明确要求）
 - 往空日关卡里塞大量占位美术（用户自行制作场景）
+- 批量创建 366 个空 `DA_Quest_*`

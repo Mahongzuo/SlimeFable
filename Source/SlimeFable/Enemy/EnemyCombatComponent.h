@@ -10,7 +10,7 @@
 class UAnimInstance;
 class UNiagaraSystem;
 
-UCLASS(ClassGroup = (Enemy), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Enemy), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API UEnemyCombatComponent : public UActorComponent
 {
 	GENERATED_BODY()

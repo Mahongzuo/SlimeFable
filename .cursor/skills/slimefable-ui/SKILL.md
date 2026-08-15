@@ -42,6 +42,8 @@ description: >-
 | 主菜单 | `UMainMenuWidget`，`/Game/UI/WBP_MainMenu` | 标题 + 三墨迹按钮；今日并进主按钮 |
 | 选关 | `ULevelSelectWidget`，`/Game/UI/WBP_LevelSelect` | 月份导航 + 日历格 + 返回 |
 | 日格 | `UDaySlotWidget`，`/Game/UI/WBP_DaySlot` | 数字格 / 今日高亮 / 点击 DayId |
+| 任务 HUD | `UQuestHUDWidget` | 左上角追踪条（点击开史书）+ 正中完成横幅 + 屏幕寻路点 |
+| 史书 | `UQuestLogWidget` | J 开关；主线/支线列表、切换追踪；轻 DimOverlay，不暂停 |
 
 空 WBP 可走 C++ `RebuildWidget` 拼布局；Designer 绑定优先 `BindWidgetOptional`。
 

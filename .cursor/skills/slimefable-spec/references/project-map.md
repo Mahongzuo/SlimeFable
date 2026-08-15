@@ -19,6 +19,7 @@
 | 路径 | 说明 |
 |------|------|
 | `Source/SlimeFable/DayLevel/` | 日关卡类型与 `UDayLevelSubsystem` |
+| `Source/SlimeFable/Quest/` | 任务书、`UQuestSubsystem`、任务 UI / 交互 Actor |
 | `Source/SlimeFable/Variant_Combat/` | 第三人称战斗模板变体 |
 | `Source/SlimeFable/Variant_Platforming/` | 平台跳跃变体 |
 | `Source/SlimeFable/Variant_SideScrolling/` | 横版变体 |
@@ -32,6 +33,9 @@
 |------|------|
 | `Content/Maps/Main.umap` | 默认入口 / 枢纽 |
 | `Content/Maps/Days/01` … `12` | 366 空日关卡（`MMDD.umap`） |
+| `Content/_Slime/Days/MM/MMDD` | 366 天故事资产目录（Quests / Actors / NPCs / Enemies / Audio / FX） |
+| `Content/_Slime/Quest` | 共用任务 UI / 通用任务 Actor |
+| `Content/Python/create_day_content_folders.py` | 批建 / 补齐 `_Slime/Days` 366 目录 |
 | `Content/Data/DayLevels/DA_DayLevelRegistry` | 日关卡 Primary Data Asset |
 | `Content/ThirdPerson/` | 第三人称模板内容 |
 | `Content/Variant_*` | 官方模板变体关 |

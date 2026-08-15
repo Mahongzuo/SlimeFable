@@ -17,6 +17,19 @@ AEnemyFighterAIController::AEnemyFighterAIController()
 	PrimaryActorTick.bCanEverTick = true;
 }
 
+void AEnemyFighterAIController::ReturnToIdle()
+{
+	StopMovement();
+	ClearTelegraphFx();
+	if (Combat)
+	{
+		Combat->InterruptCombat();
+	}
+	State = EEnemyFighterState::Idle;
+	ActiveMoveIndex = INDEX_NONE;
+	StateTime = 0.f;
+}
+
 void AEnemyFighterAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);

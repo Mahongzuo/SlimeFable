@@ -5,6 +5,7 @@
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
 #include "Fonts/SlateFontInfo.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
@@ -221,6 +222,63 @@ UMaterialInterface* FMenuUIStyle::LoadButtonMaterial()
 {
 	return MenuUIStylePrivate::LoadObj<UMaterialInterface>(
 		TEXT("/Game/UIMaterialLab/Widgets/ComponentMaterials/MaterialInstances/MI_UI_Button.MI_UI_Button"));
+}
+
+UMaterialInterface* FMenuUIStyle::LoadHealthBarMaterial()
+{
+	if (UMaterialInterface* Inst = MenuUIStylePrivate::LoadObj<UMaterialInterface>(
+			TEXT("/Game/UI/Materials/MI_UI_HealthBar.MI_UI_HealthBar")))
+	{
+		return Inst;
+	}
+	return MenuUIStylePrivate::LoadObj<UMaterialInterface>(
+		TEXT("/Game/UI/Materials/M_UI_HealthBar.M_UI_HealthBar"));
+}
+
+UMaterialInstanceDynamic* FMenuUIStyle::CreateHealthBarMID(UObject* Outer)
+{
+	UMaterialInterface* Base = LoadHealthBarMaterial();
+	if (!Base)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("M_UI_HealthBar missing; run create_ui_health_bar_material.py"));
+		return nullptr;
+	}
+	return UMaterialInstanceDynamic::Create(Base, Outer);
+}
+
+void FMenuUIStyle::ApplyHealthBarImage(UImage* Image, UMaterialInstanceDynamic* MID, FVector2D Size)
+{
+	if (!Image)
+	{
+		return;
+	}
+	if (MID)
+	{
+		Image->SetBrush(MakeMaterialBrush(MID, Size));
+		return;
+	}
+
+	FSlateBrush Brush;
+	Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+	Brush.TintColor = FSlateColor(FLinearColor(0.92f, 0.16f, 0.12f, 1.f));
+	Brush.ImageSize = Size;
+	Brush.OutlineSettings.CornerRadii = FVector4(6.f, 6.f, 6.f, 6.f);
+	Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+	Brush.OutlineSettings.Color = FSlateColor(FLinearColor(0.72f, 0.58f, 0.32f, 0.45f));
+	Brush.OutlineSettings.Width = 1.2f;
+	Image->SetBrush(Brush);
+}
+
+void FMenuUIStyle::SetHealthBarValues(UMaterialInstanceDynamic* MID, float Health, float Ghost, float Flash, float Aspect)
+{
+	if (!MID)
+	{
+		return;
+	}
+	MID->SetScalarParameterValue(TEXT("Health"), FMath::Clamp(Health, 0.f, 1.f));
+	MID->SetScalarParameterValue(TEXT("Ghost"), FMath::Clamp(FMath::Max(Ghost, Health), 0.f, 1.f));
+	MID->SetScalarParameterValue(TEXT("Flash"), FMath::Clamp(Flash, 0.f, 1.f));
+	MID->SetScalarParameterValue(TEXT("Aspect"), FMath::Max(Aspect, 1.f));
 }
 
 UFont* FMenuUIStyle::LoadTitleFont()

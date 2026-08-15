@@ -67,6 +67,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
 	void TravelToLevelSelect(const UObject* WorldContextObject);
 
+	UFUNCTION(BlueprintCallable, Category = "Day Level")
+	bool GetSubLevelForDayId(FName DayId, FName ChapterId, TSoftObjectPtr<UWorld>& OutLevel) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	bool TravelToSubLevel(const UObject* WorldContextObject, FName DayId, FName ChapterId);
+
 	static const TCHAR* OpenLevelSelectOption;
 
 protected:

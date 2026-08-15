@@ -6,7 +6,10 @@
 #include "SlimeAIController.h"
 #include "SlimeElementComponent.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeLockOnComponent.h"
 #include "SlimeWorldHealthBar.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Pawn.h"
 
 ASlimeEnemyCharacter::ASlimeEnemyCharacter()
 {
@@ -16,7 +19,8 @@ ASlimeEnemyCharacter::ASlimeEnemyCharacter()
 
 	HealthBar = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBar"));
 	HealthBar->SetupAttachment(RootComponent);
-	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, 72.f));
+	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
+	PrimaryActorTick.bCanEverTick = true;
 	HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
 	HealthBar->SetDrawAtDesiredSize(false);
 	HealthBar->SetDrawSize(FVector2D(96.f, 12.f));
@@ -29,6 +33,49 @@ void ASlimeEnemyCharacter::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 	ApplyStartingElement();
+	ApplyHealthBarOffset();
+}
+
+void ASlimeEnemyCharacter::ApplyHealthBarOffset()
+{
+	if (HealthBar)
+	{
+		HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
+	}
+}
+
+void ASlimeEnemyCharacter::RefreshWorldHealthBarVisibility()
+{
+	if (!HealthBar)
+	{
+		return;
+	}
+
+	const USlimeHealthComponent* Health = GetSlimeHealth();
+	bool bShow = Health && Health->IsAlive()
+		&& !USlimeLockOnComponent::IsLockedByLocalPlayer(this, this);
+
+	if (bShow)
+	{
+		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
+				<= FMath::Square(HealthBarVisibleRange);
+		}
+		else
+		{
+			bShow = false;
+		}
+	}
+
+	HealthBar->SetHiddenInGame(!bShow);
+	HealthBar->SetVisibility(bShow);
+}
+
+void ASlimeEnemyCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	RefreshWorldHealthBarVisibility();
 }
 
 void ASlimeEnemyCharacter::BeginPlay()

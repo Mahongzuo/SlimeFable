@@ -46,6 +46,18 @@ Thumbs.db
 *.swp
 *~
 
+# Per-day design notes (historically-today drafts; keep local)
+/Docs/Maps/Days/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Editor / user-local
+*.user
+*.user.ini
+
 # Crash / dumps
 *.dmp
 *.mdmp

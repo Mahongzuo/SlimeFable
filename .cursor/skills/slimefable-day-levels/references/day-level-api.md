@@ -14,6 +14,7 @@
 | `Month` | `int32` | 1–12 |
 | `Day` | `int32` | 月内日 |
 | `Level` | `FSoftObjectPath` | 指向日关卡 World |
+| `SubLevels` | `TMap<FName, TSoftObjectPtr<UWorld>>` | 可选年份/章节子图，键如 `1920` |
 
 辅助：
 
@@ -39,16 +40,20 @@
 | `MakeDayLevelPackagePath(Month, Day)` | `/Game/Maps/Days/MM/MMDD` |
 | `GetLevelForDayId` | 查 Soft World |
 | `GetTodayLevel` | 今天的关卡 |
-| `GetSaveSlotKeyForDayId` | 存档 slot 名 = DayId |
+| `GetSaveSlotKeyForDayId` | 日关卡约定 slot 名 = DayId |
+| `GetSubLevelForDayId` | 查 `SubLevels` 里某章的 Soft World |
+| `TravelToSubLevel` | 从当前日关卡 Travel 到某章子图 |
 
 ## 路径公式
 
 ```text
 PackagePath = /Game/Maps/Days/{MM:02d}/{MMDD}
 ObjectPath  = {PackagePath}.{MMDD}
+ContentRoot = /Game/_Slime/Days/{MM:02d}/{MMDD}
+QuestBook   = {ContentRoot}/Quests/DA_Quest_{MMDD}
 ```
 
-示例：8 月 12 日 → `/Game/Maps/Days/08/0812.0812`
+示例：8 月 12 日 → `/Game/Maps/Days/08/0812.0812`，内容 → `/Game/_Slime/Days/08/0812/`
 
 ## 批处理脚本字段
 

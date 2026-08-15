@@ -62,6 +62,23 @@ void AEnemyFighter::BeginPlay()
 	}
 }
 
+bool AEnemyFighter::IsInCombat() const
+{
+	if (const AEnemyFighterAIController* AI = Cast<AEnemyFighterAIController>(GetController()))
+	{
+		return AI->IsEngaged();
+	}
+	return Super::IsInCombat();
+}
+
+void AEnemyFighter::OnRestoredToSpawn()
+{
+	if (AEnemyFighterAIController* AI = Cast<AEnemyFighterAIController>(GetController()))
+	{
+		AI->ReturnToIdle();
+	}
+}
+
 void AEnemyFighter::SyncRangeVisuals()
 {
 	if (DetectRangeVisual)

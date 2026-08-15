@@ -23,7 +23,7 @@ description: >-
 | 任务 | 下一步 |
 |------|--------|
 | 编辑器操作、刷资产、查 Actor、跑 Python、MCP | 读并遵循 `slimefable-unreal-mcp` |
-| `/Game/Maps/Days`、DayId、Registry、探索 Tag、按日存档 | 读并遵循 `slimefable-day-levels` |
+| `/Game/Maps/Days`、`/Game/_Slime/Days`、DayId、Registry、探索 Tag、按日存档 | 读并遵循 `slimefable-day-levels` |
 | 主菜单 / 选关 / HUD / 字体与 UI 视觉 | 读并遵循 `slimefable-ui` |
 | 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
@@ -45,9 +45,10 @@ description: >-
 - **批量建关**：用 `Content/Python/create_day_levels.py`，禁止用 MCP 逐个创建 366 关。
 - **Live Coding**：编辑器开着时 UBT 可能失败；新 UCLASS/UFUNCTION 通常需关编辑器完整编译或重启。
 - **范围克制**：只改任务需要的文件；不主动写用户未要的 Markdown/计划文件；不改 Cursor 内置 `~/.cursor/skills-cursor/`。
+- **Details 分类**：关卡摆件的 `EditAnywhere` 用根类目 `0_Config`（`PrioritizeCategories` 置顶）；细则见 [references/coding-conventions.md](references/coding-conventions.md)。
 
 ## 当前阶段边界
 
 已做：空日关卡骨架、Registry、DayLevelSubsystem、Exploration Tag 命名预留、Main 主菜单与选关日历 UI（见 `slimefable-ui`）。
 
-未做（勿擅自铺开）：关卡美术内容、完整 SaveGame/探索度统计、Boss/收集物玩法实现。
+未做（勿擅自铺开）：关卡美术内容、完整探索度统计、Boss/收集物玩法实现。任务框架见 `Docs/Systems/QuestSystem.md`；每日内容资产在 `/Game/_Slime/Days`。

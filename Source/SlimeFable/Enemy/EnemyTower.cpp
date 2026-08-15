@@ -123,6 +123,18 @@ void AEnemyTower::SyncRangeSphere()
 	}
 }
 
+bool AEnemyTower::IsInCombat() const
+{
+	return CurrentTarget.IsValid() || bPlayerInRange;
+}
+
+void AEnemyTower::OnRestoredToSpawn()
+{
+	StopFiring();
+	bPlayerInRange = false;
+	CurrentTarget.Reset();
+}
+
 void AEnemyTower::SetEnemyPresence(EEnemyPresence NewPresence)
 {
 	Super::SetEnemyPresence(NewPresence);

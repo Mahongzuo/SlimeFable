@@ -175,3 +175,46 @@ void UDayLevelSubsystem::TravelToLevelSelect(const UObject* WorldContextObject)
 	const FString Options = FString::Printf(TEXT("%s=1"), OpenLevelSelectOption);
 	UGameplayStatics::OpenLevel(WorldContextObject, FName(DayLevelSubsystemPrivate::MainMenuMapName), true, Options);
 }
+
+bool UDayLevelSubsystem::GetSubLevelForDayId(FName DayId, FName ChapterId, TSoftObjectPtr<UWorld>& OutLevel) const
+{
+	OutLevel.Reset();
+	if (!Registry || ChapterId.IsNone())
+	{
+		return false;
+	}
+
+	FDayLevelEntry Entry;
+	if (!Registry->FindEntry(DayId, Entry))
+	{
+		return false;
+	}
+
+	if (const TSoftObjectPtr<UWorld>* Found = Entry.SubLevels.Find(ChapterId))
+	{
+		OutLevel = *Found;
+		return !OutLevel.IsNull();
+	}
+	return false;
+}
+
+bool UDayLevelSubsystem::TravelToSubLevel(const UObject* WorldContextObject, FName DayId, FName ChapterId)
+{
+	TSoftObjectPtr<UWorld> Level;
+	if (!GetSubLevelForDayId(DayId, ChapterId, Level))
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("DayLevelSubsystem: No sub-level for DayId %s chapter %s"),
+			*DayId.ToString(), *ChapterId.ToString());
+		return false;
+	}
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
+	{
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = false;
+	}
+
+	UGameplayStatics::OpenLevelBySoftObjectPtr(WorldContextObject, Level);
+	return true;
+}
