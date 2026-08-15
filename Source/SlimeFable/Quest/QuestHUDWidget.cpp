@@ -97,17 +97,26 @@ void UQuestHUDWidget::BuildLayoutIfNeeded()
 		BoxSlot->SetVerticalAlignment(VAlign_Fill);
 	}
 
-	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("TrackerTexts"));
-	if (UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Texts))
+	USizeBox* TextBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("TrackerTextBox"));
+	TextBox->SetWidthOverride(300.f);
+	TextBox->SetMaxDesiredWidth(300.f);
+	if (UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(TextBox))
 	{
 		TextSlot->SetSize(ESlateSizeRule::Fill);
 		TextSlot->SetVerticalAlignment(VAlign_Center);
 	}
 
+	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("TrackerTexts"));
+	TextBox->AddChild(Texts);
+
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
+	TitleText->SetAutoWrapText(true);
+	TitleText->SetWrapTextAt(300.f);
 	Texts->AddChildToVerticalBox(TitleText);
 
 	BranchText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BranchText"));
+	BranchText->SetAutoWrapText(true);
+	BranchText->SetWrapTextAt(300.f);
 	if (UVerticalBoxSlot* BranchSlot = Texts->AddChildToVerticalBox(BranchText))
 	{
 		BranchSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 6.f));
@@ -151,6 +160,10 @@ void UQuestHUDWidget::BuildLayoutIfNeeded()
 		ToastPanel->SetBrush(Brush);
 	}
 	ToastPanel->SetPadding(FMargin(36.f, 16.f, 36.f, 18.f));
+	USizeBox* ToastBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ToastBox"));
+	ToastBox->SetWidthOverride(560.f);
+	ToastBox->SetMinDesiredWidth(560.f);
+	ToastPanel->SetContent(ToastBox);
 	if (UCanvasPanelSlot* ToastSlot = Root->AddChildToCanvas(ToastPanel))
 	{
 		ToastSlot->SetAnchors(FAnchors(0.5f, 0.5f));
@@ -161,7 +174,7 @@ void UQuestHUDWidget::BuildLayoutIfNeeded()
 	}
 
 	UVerticalBox* BannerCol = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("BannerCol"));
-	ToastPanel->SetContent(BannerCol);
+	ToastBox->AddChild(BannerCol);
 
 	BannerKicker = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BannerKicker"));
 	BannerKicker->SetText(FText::FromString(TEXT("已完成")));
@@ -170,6 +183,8 @@ void UQuestHUDWidget::BuildLayoutIfNeeded()
 
 	ToastText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ToastText"));
 	ToastText->SetJustification(ETextJustify::Center);
+	ToastText->SetAutoWrapText(true);
+	ToastText->SetWrapTextAt(520.f);
 	if (UVerticalBoxSlot* TitleSlot = BannerCol->AddChildToVerticalBox(ToastText))
 	{
 		TitleSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
@@ -215,10 +230,13 @@ void UQuestHUDWidget::Refresh()
 		ToastPanel->SetVisibility(ESlateVisibility::HitTestInvisible);
 		if (BannerKicker)
 		{
-			BannerKicker->SetText(FText::FromString(TEXT("已完成")));
+			const FText Kicker = Quests->GetActiveToastKicker();
+			BannerKicker->SetText(Kicker.IsEmpty() ? FText::FromString(TEXT("已完成")) : Kicker);
 			FMenuUIStyle::ApplyBrushCJKFont(BannerKicker, 18.f, FMenuUIStyle::WarmTitleColor());
 		}
 		ToastText->SetText(Toast);
+		ToastText->SetAutoWrapText(true);
+		ToastText->SetWrapTextAt(520.f);
 		FMenuUIStyle::ApplyMixedMenuFont(ToastText, 38.f, FMenuUIStyle::TodayEdgeColor());
 	}
 	else if (ToastPanel)
@@ -251,6 +269,8 @@ void UQuestHUDWidget::Refresh()
 	if (TitleText)
 	{
 		TitleText->SetText(Title);
+		TitleText->SetAutoWrapText(true);
+		TitleText->SetWrapTextAt(300.f);
 		FMenuUIStyle::ApplyMixedMenuFont(TitleText, 20.f, FMenuUIStyle::WarmTitleColor());
 	}
 
@@ -263,6 +283,8 @@ void UQuestHUDWidget::Refresh()
 			*Quests->GetTrackedBranchTitle().ToString(),
 			Count,
 			Required)));
+		BranchText->SetAutoWrapText(true);
+		BranchText->SetWrapTextAt(300.f);
 		FMenuUIStyle::ApplyBrushCJKFont(BranchText, 16.f, FMenuUIStyle::WarmTextColor());
 	}
 	if (BranchProgress)

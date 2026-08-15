@@ -4,6 +4,8 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "AIController.h"
+#include "BrainComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -13,12 +15,20 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "Quest/QuestObjectiveComponent.h"
+#include "Quest/QuestSouvenirPickup.h"
+#include "Quest/QuestSubsystem.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeWorldHealthBar.h"
-#include "Quest/QuestObjectiveComponent.h"
+#include "Inventory/SlimeItemDefinition.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 AEnemyCharacter::AEnemyCharacter()
@@ -52,9 +62,15 @@ AEnemyCharacter::AEnemyCharacter()
 
 	Health = CreateDefaultSubobject<USlimeHealthComponent>(TEXT("Health"));
 	Health->Team = ESlimeTeam::Enemy;
-	Health->bDestroyOnDeath = true;
+	Health->bDestroyOnDeath = false;
 	Health->bRegenOnDeath = false;
 	Health->MaxHP = 200.f;
+	DeathDissolveNiagara = TSoftObjectPtr<UNiagaraSystem>(
+		FSoftObjectPath(TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact.NS_Dark_Solo_Impact")));
+	DeathDissolveMaterial = TSoftObjectPtr<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/_Slime/FX/M_EnemyDeathDissolve.M_EnemyDeathDissolve")));
+	SouvenirDropClass = TSoftClassPtr<AActor>(
+		FSoftObjectPath(TEXT("/Game/_Slime/Days/08/0815/Y1945/Actors/BP_0815_Souvenir_1945.BP_0815_Souvenir_1945_C")));
 
 	Combat = CreateDefaultSubobject<UEnemyCombatComponent>(TEXT("Combat"));
 
@@ -215,7 +231,7 @@ void AEnemyCharacter::BeginPlay()
 	if (Health)
 	{
 		Health->Team = ESlimeTeam::Enemy;
-		Health->bDestroyOnDeath = true;
+		Health->bDestroyOnDeath = false;
 		Health->bRegenOnDeath = false;
 		Health->MaxHP = MaxHP;
 		if (SavedHP > 0.f)
@@ -232,6 +248,16 @@ void AEnemyCharacter::BeginPlay()
 
 	Super::BeginPlay();
 	RebuildMeshParts();
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+			{
+				ApplyWeekDifficulty(Quests->GetWeekIndex());
+			}
+		}
+	}
 
 	if (HealthBar)
 	{
@@ -467,10 +493,18 @@ void AEnemyCharacter::NotifyDanger(const FVector& DangerLocation, AActor* Danger
 
 void AEnemyCharacter::HandleDied()
 {
+	if (bDeathSequence)
+	{
+		return;
+	}
+	bDeathSequence = true;
+
 	if (UQuestObjectiveComponent* Objective = FindComponentByClass<UQuestObjectiveComponent>())
 	{
 		Objective->TryContribute();
 	}
+	DropSouvenirReward();
+
 	if (HealthBar)
 	{
 		HealthBar->SetVisibility(false);
@@ -480,13 +514,229 @@ void AEnemyCharacter::HandleDied()
 	{
 		Combat->InterruptCombat();
 	}
-	if (UAnimMontage* Montage = DeathMontage.LoadSynchronous())
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
-		if (UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+	}
+	if (AController* AI = GetController())
+	{
+		AI->StopMovement();
+		if (AAIController* AIC = Cast<AAIController>(AI))
 		{
-			Anim->Montage_Play(Montage);
+			if (UBrainComponent* Brain = AIC->GetBrainComponent())
+			{
+				Brain->StopLogic(TEXT("Death"));
+			}
 		}
 	}
+
+	PlayDeathMontageThenDissolve();
+}
+
+void AEnemyCharacter::PlayDeathMontageThenDissolve()
+{
+	UAnimMontage* Montage = DeathMontage.LoadSynchronous();
+	USkeletalMeshComponent* Skel = GetMesh();
+	UAnimInstance* Anim = Skel ? Skel->GetAnimInstance() : nullptr;
+	if (Montage && Anim)
+	{
+		const float Played = Anim->Montage_Play(Montage);
+		FOnMontageBlendingOutStarted BlendOut;
+		BlendOut.BindUObject(this, &AEnemyCharacter::HandleDeathMontageEnded);
+		Anim->Montage_SetBlendingOutDelegate(BlendOut, Montage);
+		if (UWorld* World = GetWorld())
+		{
+			const float Wait = FMath::Max(Played, Montage->GetPlayLength()) + 0.05f;
+			World->GetTimerManager().SetTimer(
+				DeathMontageFallbackTimer,
+				this,
+				&AEnemyCharacter::StartDeathDissolve,
+				Wait,
+				false);
+		}
+		return;
+	}
+	StartDeathDissolve();
+}
+
+void AEnemyCharacter::HandleDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		if (Montage)
+		{
+			Anim->Montage_Pause(Montage);
+			Anim->Montage_SetPosition(Montage, Montage->GetPlayLength());
+		}
+	}
+	StartDeathDissolve();
+}
+
+void AEnemyCharacter::StartDeathDissolve()
+{
+	if (DeathDissolveElapsed > 0.f)
+	{
+		return;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DeathMontageFallbackTimer);
+	}
+
+	if (UNiagaraSystem* FX = DeathDissolveNiagara.LoadSynchronous())
+	{
+		const FVector Head = GetMesh()
+			? GetMesh()->GetSocketLocation(TEXT("head"))
+			: GetActorLocation() + FVector(0.f, 0.f, 90.f);
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, FX, Head, GetActorRotation());
+	}
+
+	if (UMaterialInterface* DissolveMat = DeathDissolveMaterial.LoadSynchronous())
+	{
+		if (USkeletalMeshComponent* Skel = GetMesh())
+		{
+			Skel->SetOverlayMaterial(DissolveMat);
+		}
+	}
+
+	DeathDissolveElapsed = 0.01f;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			DeathDissolveTimer,
+			this,
+			&AEnemyCharacter::TickDeathDissolve,
+			0.05f,
+			true);
+	}
+}
+
+void AEnemyCharacter::TickDeathDissolve()
+{
+	DeathDissolveElapsed += 0.05f;
+	const float Alpha = 1.f - FMath::Clamp(DeathDissolveElapsed / FMath::Max(DeathDissolveSeconds, 0.2f), 0.f, 1.f);
+	ApplyDeathDissolveVisual(Alpha);
+	if (DeathDissolveElapsed >= DeathDissolveSeconds)
+	{
+		FinishDeathSequence();
+	}
+}
+
+void AEnemyCharacter::ApplyDeathDissolveVisual(float Alpha)
+{
+	auto FadeMesh = [Alpha](UMeshComponent* Comp)
+	{
+		if (!Comp)
+		{
+			return;
+		}
+		const int32 Mats = Comp->GetNumMaterials();
+		for (int32 Index = 0; Index < Mats; ++Index)
+		{
+			UMaterialInterface* Base = Comp->GetMaterial(Index);
+			if (!Base)
+			{
+				continue;
+			}
+			UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Base);
+			if (!MID)
+			{
+				MID = Comp->CreateAndSetMaterialInstanceDynamic(Index);
+			}
+			if (MID)
+			{
+				MID->SetScalarParameterValue(TEXT("DissolveLine"), 1.f - Alpha);
+				MID->SetScalarParameterValue(TEXT("Opacity"), Alpha);
+			}
+		}
+		Comp->SetVisibility(Alpha > 0.05f);
+	};
+
+	FadeMesh(GetMesh());
+	FadeMesh(PlaceholderMesh);
+}
+
+void AEnemyCharacter::FinishDeathSequence()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DeathDissolveTimer);
+		World->GetTimerManager().ClearTimer(DeathMontageFallbackTimer);
+	}
+	Destroy();
+}
+
+void AEnemyCharacter::DropSouvenirReward()
+{
+	if (SouvenirReward.IsNull())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	UClass* DropClass = SouvenirDropClass.LoadSynchronous();
+	if (!DropClass)
+	{
+		DropClass = AQuestSouvenirPickup::StaticClass();
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	AActor* Drop = World->SpawnActor<AActor>(DropClass, GetActorLocation() + FVector(0.f, 0.f, 40.f), GetActorRotation(), Params);
+	if (AQuestSouvenirPickup* Souvenir = Cast<AQuestSouvenirPickup>(Drop))
+	{
+		Souvenir->SouvenirDefinition = SouvenirReward;
+	}
+}
+
+void AEnemyCharacter::CaptureDifficultyBases()
+{
+	if (bDifficultyBasesCaptured)
+	{
+		return;
+	}
+	DifficultyBaseMaxHP = MaxHP;
+	bDifficultyBasesCaptured = true;
+}
+
+void AEnemyCharacter::ApplyWeekDifficulty(int32 InWeekIndex)
+{
+	CaptureDifficultyBases();
+	float HpMul = 1.f;
+	float DmgMul = 1.f;
+	float IntervalMul = 1.f;
+	switch (InWeekIndex)
+	{
+	case 1:
+		HpMul = 0.85f;
+		DmgMul = 0.70f;
+		IntervalMul = 1.35f;
+		break;
+	case 3:
+		HpMul = 1.40f;
+		DmgMul = 1.35f;
+		IntervalMul = 0.75f;
+		break;
+	default:
+		break;
+	}
+
+	MaxHP = FMath::Max(DifficultyBaseMaxHP * HpMul, 1.f);
+	if (Health)
+	{
+		const float Ratio = Health->MaxHP > 0.f ? Health->CurrentHP / Health->MaxHP : 1.f;
+		Health->MaxHP = MaxHP;
+		Health->CurrentHP = FMath::Clamp(MaxHP * Ratio, 1.f, MaxHP);
+		Health->OnHealthChanged.Broadcast(Health->CurrentHP, Health->MaxHP);
+	}
+	ApplyDifficultyToCombat(DmgMul, IntervalMul);
+}
+
+void AEnemyCharacter::ApplyDifficultyToCombat(float DamageMul, float IntervalMul)
+{
 }
 
 bool AEnemyCharacter::WantsCombatBudget() const
@@ -536,6 +786,9 @@ void AEnemyCharacter::SetEnemyPresence(EEnemyPresence NewPresence)
 
 	RefreshWorldHealthBarVisibility();
 
-	SetActorHiddenInGame(Presence == EEnemyPresence::Despawned);
-	SetActorEnableCollision(Presence != EEnemyPresence::Despawned);
+	if (!bDeathSequence)
+	{
+		SetActorHiddenInGame(Presence == EEnemyPresence::Despawned);
+		SetActorEnableCollision(Presence != EEnemyPresence::Despawned);
+	}
 }

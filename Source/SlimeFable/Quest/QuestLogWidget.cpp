@@ -83,12 +83,13 @@ TSharedRef<SWidget> UQuestLogRowWidget::RebuildWidget()
 		if (UHorizontalBoxSlot* MarkSlot = Row->AddChildToHorizontalBox(MarkBox))
 		{
 			MarkSlot->SetPadding(FMargin(0.f, 2.f, 8.f, 2.f));
-			MarkSlot->SetVerticalAlignment(VAlign_Fill);
+			MarkSlot->SetVerticalAlignment(VAlign_Center);
 		}
 
 		RowButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RowButton"));
 		LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LabelText"));
 		LabelText->SetText(CachedLabel);
+		LabelText->SetAutoWrapText(false);
 		RowButton->AddChild(LabelText);
 		if (UHorizontalBoxSlot* BtnSlot = Row->AddChildToHorizontalBox(RowButton))
 		{
@@ -109,6 +110,7 @@ void UQuestLogRowWidget::NativeConstruct()
 	if (LabelText)
 	{
 		LabelText->SetText(CachedLabel);
+		LabelText->SetAutoWrapText(false);
 		FMenuUIStyle::ApplyBrushCJKFont(LabelText, 16.f, bLocked ? FMenuUIStyle::WarmMutedTextColor() : FMenuUIStyle::WarmTitleColor());
 	}
 	if (Bookmark)
@@ -261,8 +263,12 @@ void UQuestLogWidget::BuildLayoutIfNeeded()
 	Detail->SetContent(DetailCol);
 
 	DetailTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailTitle"));
+	DetailTitle->SetAutoWrapText(true);
+	DetailTitle->SetWrapTextAt(248.f);
 	DetailCol->AddChildToVerticalBox(DetailTitle);
 	DetailProgress = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailProgress"));
+	DetailProgress->SetAutoWrapText(true);
+	DetailProgress->SetWrapTextAt(248.f);
 	if (UVerticalBoxSlot* ProgSlot = DetailCol->AddChildToVerticalBox(DetailProgress))
 	{
 		ProgSlot->SetPadding(FMargin(0.f, 10.f, 0.f, 16.f));
@@ -285,7 +291,12 @@ void UQuestLogWidget::BuildLayoutIfNeeded()
 
 	FooterText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("FooterText"));
 	FooterText->SetText(FText::FromString(TEXT("J 史书 · 点击切换追踪 · 主线仍挡过关")));
-	RootCol->AddChildToVerticalBox(FooterText);
+	FooterText->SetAutoWrapText(true);
+	FooterText->SetWrapTextAt(600.f);
+	USizeBox* FooterBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FooterBox"));
+	FooterBox->SetWidthOverride(620.f);
+	FooterBox->AddChild(FooterText);
+	RootCol->AddChildToVerticalBox(FooterBox);
 }
 
 void UQuestLogWidget::Refresh()
@@ -304,7 +315,19 @@ void UQuestLogWidget::Refresh()
 	}
 	if (FooterText)
 	{
+		FooterText->SetAutoWrapText(true);
+		FooterText->SetWrapTextAt(600.f);
 		FMenuUIStyle::ApplyBrushCJKFont(FooterText, 14.f, FMenuUIStyle::WarmMutedTextColor());
+	}
+	if (DetailTitle)
+	{
+		DetailTitle->SetAutoWrapText(true);
+		DetailTitle->SetWrapTextAt(248.f);
+	}
+	if (DetailProgress)
+	{
+		DetailProgress->SetAutoWrapText(true);
+		DetailProgress->SetWrapTextAt(248.f);
 	}
 	if (UMaterialInterface* Ink = FMenuUIStyle::LoadButtonMaterial())
 	{

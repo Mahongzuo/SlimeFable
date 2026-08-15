@@ -72,4 +72,7 @@ protected:
 
 	UFUNCTION()
 	void HandlePauseMainMenu();
+
+	UFUNCTION()
+	void HandlePauseReturnToHub();
 };

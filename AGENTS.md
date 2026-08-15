@@ -8,6 +8,7 @@
 2. 按任务继续：
    - 编辑器 / MCP → [`.cursor/skills/slimefable-unreal-mcp/SKILL.md`](.cursor/skills/slimefable-unreal-mcp/SKILL.md)
    - 日关卡 / `_Slime/Days` 内容目录 / 探索 Tag / 按日存档 → [`.cursor/skills/slimefable-day-levels/SKILL.md`](.cursor/skills/slimefable-day-levels/SKILL.md)
+   - 大厅传送门 / 年份子图 / 周目 → [`.cursor/skills/slimefable-week-cycle/SKILL.md`](.cursor/skills/slimefable-week-cycle/SKILL.md)
    - 菜单 / HUD / UI 视觉 → [`.cursor/skills/slimefable-ui/SKILL.md`](.cursor/skills/slimefable-ui/SKILL.md)
 
 Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefable-agent-spec.mdc)（`alwaysApply`）会要求遵守上述流程。
@@ -23,10 +24,10 @@ Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefab
 | 每日内容 | `/Game/_Slime/Days/MM/MMDD`（Quests / Actors / NPCs / Enemies / Audio / FX） |
 | Registry | `/Game/Data/DayLevels/DA_DayLevelRegistry` |
 | MCP | `http://127.0.0.1:8010/mcp`（见 `.mcp.json`） |
-| 批量脚本 | `create_day_levels.py`（地图）/ `create_day_content_folders.py`（内容目录） |
+| 批量脚本 | `create_day_levels.py`（地图）/ `create_day_content_folders.py`（内容目录）/ `apply_operahouse_lobby.py`（共用剧院大厅；已套范围见 week-cycle） |
 
 ## Cursor 用法
 
-- 打开本仓库后，Customize → Skills 应可见四个 `slimefable-*` skill。
-- 聊天中可 `/slimefable-spec`、`/slimefable-ui` 等手动调用。
+- 打开本仓库后，Customize → Skills 应可见 `slimefable-*` skill。
+- 聊天中可 `/slimefable-spec`、`/slimefable-week-cycle`、`/slimefable-ui` 等手动调用。
 - 细节文档在各 skill 的 `references/` 下，按需再读。

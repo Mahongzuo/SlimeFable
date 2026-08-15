@@ -138,6 +138,9 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 	DetailName = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailName"));
 	Panel->AddChildToVerticalBox(DetailName);
 	DetailDesc = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailDesc"));
+	DetailDesc->SetAutoWrapText(true);
+	DetailDesc->SetWrapTextAt(420.f);
+	DetailDesc->SetMinDesiredWidth(360.f);
 	Panel->AddChildToVerticalBox(DetailDesc);
 
 	PrimaryActionButton = AddBtn(TEXT("PrimaryActionButton"), FText::FromString(TEXT("使用")));

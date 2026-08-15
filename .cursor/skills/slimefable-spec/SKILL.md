@@ -24,10 +24,11 @@ description: >-
 |------|--------|
 | 编辑器操作、刷资产、查 Actor、跑 Python、MCP | 读并遵循 `slimefable-unreal-mcp` |
 | `/Game/Maps/Days`、`/Game/_Slime/Days`、DayId、Registry、探索 Tag、按日存档 | 读并遵循 `slimefable-day-levels` |
+| 大厅传送门、OperaHouse 共用大厅、年份子图、1/2/3 周目解锁 | 读并遵循 `slimefable-week-cycle` |
 | 主菜单 / 选关 / HUD / 字体与 UI 视觉 | 读并遵循 `slimefable-ui` |
 | 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
-手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-ui`。
+手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`。
 
 ## 项目硬事实
 
@@ -45,7 +46,7 @@ description: >-
 - **批量建关**：用 `Content/Python/create_day_levels.py`，禁止用 MCP 逐个创建 366 关。
 - **Live Coding**：编辑器开着时 UBT 可能失败；新 UCLASS/UFUNCTION 通常需关编辑器完整编译或重启。
 - **范围克制**：只改任务需要的文件；不主动写用户未要的 Markdown/计划文件；不改 Cursor 内置 `~/.cursor/skills-cursor/`。
-- **Details 分类**：关卡摆件的 `EditAnywhere` 用根类目 `0_Config`（`PrioritizeCategories` 置顶）；细则见 [references/coding-conventions.md](references/coding-conventions.md)。
+- **Details 分类**：关卡摆件的 `EditAnywhere` 用根类目 `0_Config`（`PrioritizeCategories` 置顶）；可调字段必须有中文 `ToolTip`（怎么填、默认、联动）；细则见 [references/coding-conventions.md](references/coding-conventions.md)。
 
 ## 当前阶段边界
 

@@ -1,6 +1,7 @@
 #include "Quest/QuestSubsystem.h"
 #include "Quest/QuestHUDWidget.h"
 #include "Quest/QuestLogWidget.h"
+#include "Quest/WeekSelectWidget.h"
 #include "Quest/QuestInteractActor.h"
 #include "Quest/QuestReachVolume.h"
 #include "Quest/QuestObjectiveComponent.h"
@@ -112,6 +113,27 @@ FName UQuestSubsystem::InferDayIdFromWorld(UWorld* World)
 	return NAME_None;
 }
 
+FName UQuestSubsystem::InferChapterIdFromWorld(UWorld* World)
+{
+	if (!World)
+	{
+		return NAME_None;
+	}
+
+	FString Name = World->GetMapName();
+	const FString Prefix = World->StreamingLevelsPrefix;
+	if (!Prefix.IsEmpty() && Name.StartsWith(Prefix))
+	{
+		Name.RightChopInline(Prefix.Len());
+	}
+	Name = FPackageName::GetShortName(Name);
+	if (Name.StartsWith(TEXT("SL_")) && Name.Len() > 8)
+	{
+		return FName(*Name.Mid(8));
+	}
+	return NAME_None;
+}
+
 UDayQuestBook* UQuestSubsystem::ResolveBookForWorld(UWorld* World) const
 {
 	const FName DayId = InferDayIdFromWorld(World);
@@ -169,6 +191,8 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 	CompletedChapters.Reset();
 	CompletedSideQuestIds.Reset();
 	SideBranchCounts.Reset();
+	WeekIndex = 1;
+	HighestWeekByChapter.Reset();
 	ChapterIndex = INDEX_NONE;
 	MainIndex = INDEX_NONE;
 	BranchIndex = INDEX_NONE;
@@ -187,6 +211,11 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 	}
 
 	RestoreProgress();
+	const FName InferredChapter = InferChapterIdFromWorld(World);
+	if (!InferredChapter.IsNone() && Book->FindChapter(InferredChapter) && GetActiveChapterId() != InferredChapter)
+	{
+		ActivateChapter(InferredChapter);
+	}
 	if (ChapterIndex == INDEX_NONE)
 	{
 		if (!Book->GetFirstIncomplete(CompletedChapters, ChapterIndex, MainIndex, BranchIndex))
@@ -223,8 +252,16 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 	}
 
 	TryCreateHUD(World, 10);
-	UE_LOG(LogSlimeFable, Log, TEXT("QuestSubsystem: Started quests for %s (%s)"),
-		*World->GetMapName(), *ActiveDayId.ToString());
+	ApplyWeekDifficultyToEnemies(World);
+	if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(World, 0))
+	{
+		if (USlimeHealthComponent* Health = Pawn->FindComponentByClass<USlimeHealthComponent>())
+		{
+			Health->ResetHP();
+		}
+	}
+	UE_LOG(LogSlimeFable, Log, TEXT("QuestSubsystem: Started quests for %s (%s) week %d"),
+		*World->GetMapName(), *ActiveDayId.ToString(), WeekIndex);
 }
 
 void UQuestSubsystem::TryCreateHUD(UWorld* World, int32 AttemptsLeft)
@@ -269,6 +306,7 @@ void UQuestSubsystem::TeardownUI()
 		World->GetTimerManager().ClearTimer(PendingTravelHandle);
 	}
 	CloseQuestLog();
+	CloseWeekSelect();
 	if (HUDWidget)
 	{
 		HUDWidget->RemoveFromParent();
@@ -491,14 +529,34 @@ void UQuestSubsystem::PlayCompleteVoice() const
 	}
 }
 
-void UQuestSubsystem::ShowCompleteBanner(const FText& TaskName, float DurationSeconds)
+void UQuestSubsystem::ShowCenterBanner(const FText& Kicker, const FText& TaskName, float DurationSeconds)
 {
+	ToastKicker = Kicker;
 	ToastMessage = TaskName;
 	if (UWorld* World = ActiveWorld.Get())
 	{
 		ToastUntilSeconds = World->GetTimeSeconds() + DurationSeconds;
 	}
+}
+
+void UQuestSubsystem::ShowCompleteBanner(const FText& TaskName, float DurationSeconds)
+{
+	ShowCenterBanner(FText::FromString(TEXT("已完成")), TaskName, DurationSeconds);
 	PlayCompleteVoice();
+}
+
+void UQuestSubsystem::ShowLockedChapterBanner(FName ChapterId)
+{
+	if (ChapterId == FName(TEXT("Hub")))
+	{
+		ShowCenterBanner(FText::FromString(TEXT("未解锁")), FText::FromString(TEXT("先完成主线")), BannerBranchSeconds);
+		return;
+	}
+	const FName Prev = GetUnlockHintChapter(ChapterId);
+	const FText Body = Prev.IsNone()
+		? FText::FromString(TEXT("尚未解锁"))
+		: FText::FromString(FString::Printf(TEXT("先完成 %s"), *Prev.ToString()));
+	ShowCenterBanner(FText::FromString(TEXT("未解锁")), Body, BannerBranchSeconds);
 }
 
 FString UQuestSubsystem::MakeSideKey(FName ChapterId, FName QuestId) const
@@ -772,25 +830,36 @@ void UQuestSubsystem::CompleteChapter()
 	const FName Finished = Chapter->ChapterId;
 	const FName NextId = Chapter->NextChapterId;
 	CompletedChapters.Add(Finished);
+	AdvanceWeekForChapter(Finished);
+
+	ShowCompleteBanner(
+		FText::FromString(FString::Printf(TEXT("%s 完成"), *Finished.ToString())),
+		BannerChapterSeconds);
+
+	bool bReturnToHub = (ActiveDayId == FName(TEXT("0815")));
+	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+	{
+		TSoftObjectPtr<UWorld> SubLevel;
+		if (Days->GetSubLevelForDayId(ActiveDayId, Finished, SubLevel) && !SubLevel.IsNull())
+		{
+			bReturnToHub = true;
+		}
+	}
+
+	if (bReturnToHub)
+	{
+		ChapterIndex = INDEX_NONE;
+		MainIndex = INDEX_NONE;
+		BranchIndex = INDEX_NONE;
+		BranchCount = 0;
+		SyncTrackToMain();
+		PersistProgress();
+		return;
+	}
 
 	if (!NextId.IsNone() && Book && Book->FindChapter(NextId))
 	{
-		ShowCompleteBanner(
-			FText::FromString(FString::Printf(TEXT("%s 完成，前往 %s"), *Finished.ToString(), *NextId.ToString())),
-			BannerChapterSeconds);
-
-		for (int32 Index = 0; Index < Book->Chapters.Num(); ++Index)
-		{
-			if (Book->Chapters[Index].ChapterId == NextId)
-			{
-				ChapterIndex = Index;
-				MainIndex = 0;
-				BranchIndex = 0;
-				BranchCount = 0;
-				break;
-			}
-		}
-		SyncTrackToMain();
+		ActivateChapter(NextId);
 		PersistProgress();
 		PendingTravelChapterId = NextId;
 		if (UWorld* World = ActiveWorld.Get())
@@ -805,9 +874,6 @@ void UQuestSubsystem::CompleteChapter()
 		return;
 	}
 
-	ShowCompleteBanner(
-		FText::FromString(FString::Printf(TEXT("%s 完成"), *Finished.ToString())),
-		BannerChapterSeconds);
 	ChapterIndex = INDEX_NONE;
 	MainIndex = INDEX_NONE;
 	BranchIndex = INDEX_NONE;
@@ -836,14 +902,13 @@ void UQuestSubsystem::FinishPendingTravel()
 		return;
 	}
 
-	if (ActiveDayId == FName(TEXT("0815")))
-	{
-		Enter0815Chapter(NextId);
-		return;
-	}
-
 	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
 	{
+		if (NextId == FName(TEXT("Hub")))
+		{
+			Days->TravelToDayId(World, ActiveDayId);
+			return;
+		}
 		TSoftObjectPtr<UWorld> SubLevel;
 		if (Days->GetSubLevelForDayId(ActiveDayId, NextId, SubLevel) && !SubLevel.IsNull())
 		{
@@ -999,7 +1064,351 @@ void UQuestSubsystem::SpawnSlimeLabTestActors(UWorld* World)
 
 FString UQuestSubsystem::MakeSaveSlot() const
 {
-	return FString::Printf(TEXT("Quest_%s"), *ActiveDayId.ToString());
+	return UDayLevelSubsystem::GetSaveSlotKeyForDayId(ActiveDayId);
+}
+
+int32 UQuestSubsystem::GetHighestWeek(FName ChapterId) const
+{
+	if (const int32* Found = HighestWeekByChapter.Find(ChapterId))
+	{
+		return FMath::Clamp(*Found, 1, 3);
+	}
+	return 1;
+}
+
+bool UQuestSubsystem::CanSelectWeek(FName ChapterId, int32 Week) const
+{
+	return Week >= 1 && Week <= GetHighestWeek(ChapterId);
+}
+
+bool UQuestSubsystem::HasAnyChapterReachedWeek2() const
+{
+	for (const TPair<FName, int32>& Pair : HighestWeekByChapter)
+	{
+		if (Pair.Value >= 2)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UQuestSubsystem::IsChapterUnlocked(FName ChapterId) const
+{
+	if (!Book || ChapterId.IsNone())
+	{
+		return false;
+	}
+	if (IsChapterComplete(ChapterId) || HasAnyChapterReachedWeek2())
+	{
+		return true;
+	}
+	for (int32 Index = 0; Index < Book->Chapters.Num(); ++Index)
+	{
+		if (Book->Chapters[Index].ChapterId != ChapterId)
+		{
+			continue;
+		}
+		if (Index == 0)
+		{
+			return true;
+		}
+		return IsChapterComplete(Book->Chapters[Index - 1].ChapterId);
+	}
+	return false;
+}
+
+FName UQuestSubsystem::GetUnlockHintChapter(FName ChapterId) const
+{
+	if (!Book)
+	{
+		return NAME_None;
+	}
+	for (int32 Index = 0; Index < Book->Chapters.Num(); ++Index)
+	{
+		if (Book->Chapters[Index].ChapterId != ChapterId)
+		{
+			continue;
+		}
+		if (Index <= 0)
+		{
+			return NAME_None;
+		}
+		return Book->Chapters[Index - 1].ChapterId;
+	}
+	return NAME_None;
+}
+
+void UQuestSubsystem::SetActiveWeekIndex(int32 Week)
+{
+	WeekIndex = FMath::Clamp(Week, 1, 3);
+}
+
+void UQuestSubsystem::ActivateChapter(FName ChapterId)
+{
+	if (!Book || ChapterId.IsNone())
+	{
+		return;
+	}
+	for (int32 Index = 0; Index < Book->Chapters.Num(); ++Index)
+	{
+		if (Book->Chapters[Index].ChapterId != ChapterId)
+		{
+			continue;
+		}
+		ChapterIndex = Index;
+		MainIndex = 0;
+		BranchIndex = 0;
+		BranchCount = 0;
+		SyncTrackToMain();
+		return;
+	}
+}
+
+void UQuestSubsystem::ResetChapterProgress(FName ChapterId)
+{
+	if (!Book)
+	{
+		return;
+	}
+	const FQuestChapter* Chapter = Book->FindChapter(ChapterId);
+	if (!Chapter)
+	{
+		return;
+	}
+	CompletedChapters.Remove(ChapterId);
+	for (const FQuestMain& Side : Chapter->SideQuests)
+	{
+		CompletedSideQuestIds.Remove(FName(*MakeSideKey(ChapterId, Side.QuestId)));
+		for (const FQuestBranch& Branch : Side.Branches)
+		{
+			SideBranchCounts.Remove(MakeSideCountKey(ChapterId, Side.QuestId, Branch.BranchId));
+		}
+	}
+	if (GetActiveChapterId() == ChapterId)
+	{
+		MainIndex = 0;
+		BranchIndex = 0;
+		BranchCount = 0;
+		SyncTrackToMain();
+	}
+}
+
+void UQuestSubsystem::AdvanceWeekForChapter(FName ChapterId)
+{
+	if (ChapterId.IsNone())
+	{
+		return;
+	}
+	int32& Highest = HighestWeekByChapter.FindOrAdd(ChapterId);
+	if (Highest < 1)
+	{
+		Highest = 1;
+	}
+	Highest = FMath::Clamp(Highest, 1, 3);
+	if (WeekIndex == Highest && Highest < 3)
+	{
+		++Highest;
+	}
+}
+
+bool UQuestSubsystem::IsCurrentChapterComplete() const
+{
+	FName ChapterId = GetActiveChapterId();
+	if (ChapterId.IsNone())
+	{
+		ChapterId = InferChapterIdFromWorld(ActiveWorld.Get());
+	}
+	return !ChapterId.IsNone() && IsChapterComplete(ChapterId);
+}
+
+FName UQuestSubsystem::GetHostDayId() const
+{
+	if (!ActiveDayId.IsNone())
+	{
+		return ActiveDayId;
+	}
+
+	UWorld* World = ActiveWorld.Get();
+	if (!World)
+	{
+		if (const UGameInstance* GI = GetGameInstance())
+		{
+			World = GI->GetWorld();
+		}
+	}
+	return InferDayIdFromWorld(World);
+}
+
+bool UQuestSubsystem::IsInStorySubLevel() const
+{
+	UWorld* World = ActiveWorld.Get();
+	if (!World)
+	{
+		if (const UGameInstance* GI = GetGameInstance())
+		{
+			World = GI->GetWorld();
+		}
+	}
+	return World && !InferChapterIdFromWorld(World).IsNone();
+}
+
+bool UQuestSubsystem::TravelToHub(FName DayId)
+{
+	UWorld* World = ActiveWorld.Get();
+	if (!World || DayId.IsNone())
+	{
+		return false;
+	}
+
+	CloseWeekSelect();
+	PersistProgress();
+	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+	{
+		return Days->TravelToDayId(World, DayId);
+	}
+	return false;
+}
+
+bool UQuestSubsystem::TravelToChapter(FName DayId, FName ChapterId, int32 Week)
+{
+	UWorld* World = ActiveWorld.Get();
+	if (!World || ChapterId.IsNone() || DayId.IsNone())
+	{
+		return false;
+	}
+
+	CloseWeekSelect();
+	WeekIndex = FMath::Clamp(Week, 1, 3);
+	ResetChapterProgress(ChapterId);
+	ActivateChapter(ChapterId);
+	PersistProgress();
+
+	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+	{
+		TSoftObjectPtr<UWorld> SubLevel;
+		if (Days->GetSubLevelForDayId(DayId, ChapterId, SubLevel) && !SubLevel.IsNull())
+		{
+			return Days->TravelToSubLevel(World, DayId, ChapterId);
+		}
+		return Days->TravelToDayId(World, DayId);
+	}
+	return false;
+}
+
+void UQuestSubsystem::OpenWeekSelect(FName DayId, FName ChapterId)
+{
+	if (WeekSelectWidget)
+	{
+		return;
+	}
+
+	UWorld* World = ActiveWorld.Get();
+	APlayerController* PC = World ? UGameplayStatics::GetPlayerController(World, 0) : nullptr;
+	if (!PC)
+	{
+		return;
+	}
+
+	WeekSelectWidget = CreateWidget<UWeekSelectWidget>(PC, UWeekSelectWidget::StaticClass());
+	if (!WeekSelectWidget)
+	{
+		return;
+	}
+	WeekSelectWidget->Setup(DayId, ChapterId);
+	WeekSelectWidget->AddToViewport(30);
+	FInputModeGameAndUI Mode;
+	Mode.SetWidgetToFocus(WeekSelectWidget->TakeWidget());
+	Mode.SetHideCursorDuringCapture(false);
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	PC->SetInputMode(Mode);
+	PC->bShowMouseCursor = true;
+}
+
+void UQuestSubsystem::CloseWeekSelect()
+{
+	APlayerController* PC = nullptr;
+	if (UWorld* World = ActiveWorld.Get())
+	{
+		PC = UGameplayStatics::GetPlayerController(World, 0);
+	}
+	if (WeekSelectWidget)
+	{
+		WeekSelectWidget->RemoveFromParent();
+		WeekSelectWidget = nullptr;
+	}
+	if (PC)
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->bShowMouseCursor = false;
+	}
+}
+
+void UQuestSubsystem::ResetActiveChapterProgress()
+{
+	const FQuestChapter* Chapter = GetActiveChapter();
+	if (!Chapter || !Book)
+	{
+		return;
+	}
+
+	BranchCount = 0;
+	MainIndex = 0;
+	BranchIndex = 0;
+	for (const FQuestMain& Side : Chapter->SideQuests)
+	{
+		CompletedSideQuestIds.Remove(FName(*MakeSideKey(Chapter->ChapterId, Side.QuestId)));
+		for (const FQuestBranch& Branch : Side.Branches)
+		{
+			SideBranchCounts.Remove(MakeSideCountKey(Chapter->ChapterId, Side.QuestId, Branch.BranchId));
+		}
+	}
+	SyncTrackToMain();
+	PersistProgress();
+}
+
+void UQuestSubsystem::ReloadActiveChapterAfterDeath()
+{
+	UWorld* World = ActiveWorld.Get();
+	if (!World)
+	{
+		return;
+	}
+	ResetActiveChapterProgress();
+	const FName ChapterId = GetActiveChapterId();
+	if (ActiveDayId == FName(TEXT("0815")) && !ChapterId.IsNone())
+	{
+		if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+		{
+			TSoftObjectPtr<UWorld> SubLevel;
+			if (Days->GetSubLevelForDayId(ActiveDayId, ChapterId, SubLevel) && !SubLevel.IsNull())
+			{
+				Days->TravelToSubLevel(World, ActiveDayId, ChapterId);
+				return;
+			}
+		}
+		FQuest0815Content::EnterChapter(World, ChapterId);
+		return;
+	}
+	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+	{
+		Days->TravelToDayId(World, ActiveDayId);
+	}
+}
+
+void UQuestSubsystem::ApplyWeekDifficultyToEnemies(UWorld* World) const
+{
+	if (!World)
+	{
+		return;
+	}
+	for (TActorIterator<AEnemyCharacter> It(World); It; ++It)
+	{
+		if (IsValid(*It))
+		{
+			It->ApplyWeekDifficulty(WeekIndex);
+		}
+	}
 }
 
 void UQuestSubsystem::PersistProgress() const
@@ -1035,6 +1444,8 @@ void UQuestSubsystem::PersistProgress() const
 		Save->ActiveBranchId = Branch->BranchId;
 	}
 	Save->BranchCount = BranchCount;
+	Save->WeekIndex = WeekIndex;
+	Save->HighestWeekByChapter = HighestWeekByChapter;
 	UGameplayStatics::SaveGameToSlot(Save, MakeSaveSlot(), 0);
 }
 
@@ -1044,12 +1455,18 @@ void UQuestSubsystem::RestoreProgress()
 	{
 		return;
 	}
-	if (!UGameplayStatics::DoesSaveGameExist(MakeSaveSlot(), 0))
+	FString Slot = MakeSaveSlot();
+	if (!UGameplayStatics::DoesSaveGameExist(Slot, 0))
 	{
-		return;
+		const FString Legacy = FString::Printf(TEXT("Quest_%s"), *ActiveDayId.ToString());
+		if (!UGameplayStatics::DoesSaveGameExist(Legacy, 0))
+		{
+			return;
+		}
+		Slot = Legacy;
 	}
 
-	UDayQuestSaveGame* Save = Cast<UDayQuestSaveGame>(UGameplayStatics::LoadGameFromSlot(MakeSaveSlot(), 0));
+	UDayQuestSaveGame* Save = Cast<UDayQuestSaveGame>(UGameplayStatics::LoadGameFromSlot(Slot, 0));
 	if (!Save)
 	{
 		return;
@@ -1066,6 +1483,15 @@ void UQuestSubsystem::RestoreProgress()
 		CompletedSideQuestIds.Add(SideId);
 	}
 	SideBranchCounts = Save->SideBranchCounts;
+	WeekIndex = FMath::Clamp(Save->WeekIndex > 0 ? Save->WeekIndex : 1, 1, 3);
+	HighestWeekByChapter = Save->HighestWeekByChapter;
+	if (HighestWeekByChapter.Num() == 0 && Book)
+	{
+		for (const FQuestChapter& Chapter : Book->Chapters)
+		{
+			HighestWeekByChapter.Add(Chapter.ChapterId, WeekIndex);
+		}
+	}
 
 	for (int32 C = 0; C < Book->Chapters.Num(); ++C)
 	{

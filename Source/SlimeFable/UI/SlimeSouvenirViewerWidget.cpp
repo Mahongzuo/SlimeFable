@@ -4,6 +4,10 @@
 
 #include "UI/MenuUIStyle.h"
 #include "Inventory/SlimeItemDefinition.h"
+#include "Inventory/SlimeSouvenirPreviewActor.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -66,6 +70,7 @@ void USlimeSouvenirViewerWidget::NativeDestruct()
 		MediaPlayer->OnMediaOpened.RemoveDynamic(this, &USlimeSouvenirViewerWidget::OnMediaOpened);
 	}
 	StopVideo();
+	EndMeshPreview();
 	Super::NativeDestruct();
 }
 
@@ -91,6 +96,37 @@ FReply USlimeSouvenirViewerWidget::NativeOnKeyDown(const FGeometry& InGeometry, 
 		return FReply::Handled();
 	}
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+FReply USlimeSouvenirViewerWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bShowingMesh && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bDraggingPreview = true;
+		return FReply::Handled().CaptureMouse(TakeWidget());
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply USlimeSouvenirViewerWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bDraggingPreview)
+	{
+		bDraggingPreview = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+}
+
+FReply USlimeSouvenirViewerWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bDraggingPreview && PreviewActor)
+	{
+		const FVector2D Delta = InMouseEvent.GetCursorDelta();
+		PreviewActor->AddOrbit(Delta.X * 0.45f, -Delta.Y * 0.35f);
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
 }
 
 void USlimeSouvenirViewerWidget::BuildLayoutIfNeeded()
@@ -143,6 +179,9 @@ void USlimeSouvenirViewerWidget::BuildLayoutIfNeeded()
 	VideoImageBox->SetVisibility(ESlateVisibility::Collapsed);
 
 	StoryText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StoryText"));
+	StoryText->SetAutoWrapText(true);
+	StoryText->SetWrapTextAt(520.f);
+	StoryText->SetMinDesiredWidth(400.f);
 	Panel->AddChildToVerticalBox(StoryText);
 
 	PlayButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("PlayButton"));
@@ -266,7 +305,13 @@ void USlimeSouvenirViewerWidget::SetSouvenir(USlimeSouvenirDefinition* InSouveni
 	{
 		StoryText->SetText(Souvenir->StoryText);
 	}
-	if (StoryImage && StoryImageBox)
+	EndMeshPreview();
+	bShowingMesh = Souvenir && !Souvenir->StoryMesh.IsNull();
+	if (bShowingMesh)
+	{
+		BeginMeshPreview();
+	}
+	else if (StoryImage && StoryImageBox)
 	{
 		if (UTexture2D* Tex = ResolveStoryTexture())
 		{
@@ -341,6 +386,7 @@ void USlimeSouvenirViewerWidget::OnPlayClicked()
 	{
 		StoryImageBox->SetVisibility(ESlateVisibility::Collapsed);
 	}
+	EndMeshPreview();
 	bAwaitingVideoAspect = true;
 	VideoAspectRetrySeconds = 2.5f;
 	TryApplyVideoAspect();
@@ -393,9 +439,66 @@ void USlimeSouvenirViewerWidget::StopVideo()
 	}
 }
 
+void USlimeSouvenirViewerWidget::BeginMeshPreview()
+{
+	if (!Souvenir || !StoryImage || !StoryImageBox)
+	{
+		return;
+	}
+	UStaticMesh* Mesh = Souvenir->StoryMesh.LoadSynchronous();
+	UWorld* World = GetWorld();
+	if (!Mesh || !World)
+	{
+		bShowingMesh = false;
+		return;
+	}
+
+	if (!PreviewRT)
+	{
+		PreviewRT = NewObject<UTextureRenderTarget2D>(this);
+		PreviewRT->RenderTargetFormat = RTF_RGBA8;
+		PreviewRT->ClearColor = FLinearColor(0.12f, 0.1f, 0.07f, 1.f);
+		PreviewRT->InitAutoFormat(720, 480);
+		PreviewRT->UpdateResource();
+	}
+
+	FActorSpawnParameters Params;
+	Params.ObjectFlags |= RF_Transient;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	PreviewActor = World->SpawnActor<ASlimeSouvenirPreviewActor>(
+		ASlimeSouvenirPreviewActor::StaticClass(),
+		FVector(0.f, 0.f, -50000.f),
+		FRotator::ZeroRotator,
+		Params);
+	if (PreviewActor)
+	{
+		PreviewActor->SetupPreview(Mesh, PreviewRT);
+	}
+
+	FSlateBrush Brush;
+	Brush.SetResourceObject(PreviewRT);
+	Brush.DrawAs = ESlateBrushDrawType::Image;
+	StoryImage->SetBrush(Brush);
+	FitMediaToBoxes(StoryImage, StoryImageBox, 720.f / 480.f);
+	StoryImageBox->SetVisibility(ESlateVisibility::Visible);
+	StoryImage->SetVisibility(ESlateVisibility::Visible);
+}
+
+void USlimeSouvenirViewerWidget::EndMeshPreview()
+{
+	bDraggingPreview = false;
+	bShowingMesh = false;
+	if (PreviewActor)
+	{
+		PreviewActor->Destroy();
+		PreviewActor = nullptr;
+	}
+}
+
 void USlimeSouvenirViewerWidget::OnCloseClicked()
 {
 	StopVideo();
+	EndMeshPreview();
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		UGameplayStatics::SetGamePaused(PC, false);

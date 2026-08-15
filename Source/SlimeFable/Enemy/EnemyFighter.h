@@ -43,6 +43,7 @@ public:
 	virtual bool IsInCombat() const override;
 
 	virtual void OnRestoredToSpawn() override;
+	virtual void ApplyDifficultyToCombat(float DamageMul, float IntervalMul) override;
 
 
 
@@ -77,6 +78,11 @@ public:
 
 
 	const TArray<FEnemyMoveDef>& GetMoves() const { return Moves; }
+
+	TArray<float> DifficultyBaseDamages;
+	TArray<float> DifficultyBaseRecoveries;
+	TArray<float> DifficultyBaseCooldowns;
+	bool bCombatBasesCaptured = false;
 
 
 

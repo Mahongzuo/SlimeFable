@@ -136,6 +136,7 @@ void ASlimeFablePlayerController::OpenPauseMenu()
 		PauseMenuWidget->OnContinueRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseContinue);
 		PauseMenuWidget->OnLevelSelectRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseLevelSelect);
 		PauseMenuWidget->OnMainMenuRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseMainMenu);
+		PauseMenuWidget->OnReturnToHubRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseReturnToHub);
 	}
 
 	if (!PauseMenuWidget->IsInViewport())
@@ -143,6 +144,7 @@ void ASlimeFablePlayerController::OpenPauseMenu()
 		PauseMenuWidget->AddToViewport(10);
 	}
 	PauseMenuWidget->SetVisibility(ESlateVisibility::Visible);
+	PauseMenuWidget->RefreshHubButtonVisibility();
 
 	UGameplayStatics::SetGamePaused(this, true);
 
@@ -197,6 +199,18 @@ void ASlimeFablePlayerController::HandlePauseMainMenu()
 		}
 	}
 	ClosePauseMenu();
+}
+
+void ASlimeFablePlayerController::HandlePauseReturnToHub()
+{
+	UGameInstance* GI = GetGameInstance();
+	UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
+	const FName HubDayId = Quests ? Quests->GetHostDayId() : NAME_None;
+	ClosePauseMenu();
+	if (Quests && !HubDayId.IsNone())
+	{
+		Quests->TravelToHub(HubDayId);
+	}
 }
 
 void ASlimeFablePlayerController::UpdateAltCursor()

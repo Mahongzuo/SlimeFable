@@ -30,6 +30,7 @@ public:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	void SetCombat(USlimeCombatComponent* InCombat);
+	void SetDeathVisible(bool bVisible);
 
 protected:
 	void BuildLayoutIfNeeded();
@@ -53,6 +54,21 @@ protected:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UProgressBar>> SlotCds;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> SlotCdTexts;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> PlayerHealthBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> PlayerHealthBarMID;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DeathText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> WeekText;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UImage>> SlotBackgrounds;

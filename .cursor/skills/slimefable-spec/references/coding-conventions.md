@@ -28,6 +28,26 @@ FText DisplayName;
 - `DisplayName` 等 Actor 字段在 **Actor 根** 上改（World Outliner 点角色本身），不要点 Mesh / Camera 组件。
 - 敌人锁定顶栏名字：`0_Config|HUD` → `DisplayName`；空则回退「敌人」，不显示 `BP_` 内部名。头顶小条只有血量，没有名字文字。
 
+## 悬停说明（必做）
+
+新的 `EditAnywhere` / `0_Config` 字段必须加中文 `ToolTip`：怎么填、默认值、和谁联动。不要只靠英文字段名。案例：传送门。
+
+```cpp
+UPROPERTY(EditAnywhere, Category = "0_Config|Gate",
+	meta = (GetOptions = "GetTargetChapterIdOptions",
+		ToolTip = "大厅：下拉选当天 Registry 里的年份/故事。关末回大厅：选 Hub。"))
+FName TargetChapterId;
+
+UPROPERTY(EditAnywhere, Category = "0_Config|Portal",
+	meta = (ClampMin = "1", ClampMax = "10",
+		ToolTip = "1–10 对应 BP_Portal_1…10 的外观。只换皮，不换进哪一年。"))
+int32 PortalStyle = 1;
+```
+
+- `ToolTip` 用中文，写给摆关的人看。
+- 有固定选项时优先 `GetOptions` 下拉，不要让人猜该填 `1920` 还是 `Hub`。
+- 旧字段改到时顺手补；新字段不能缺。
+
 ## 资产
 
 - 日关卡包路径：`/Game/Maps/Days/{MM}/{MMDD}`，资产名即 DayId（如 `0812`）。

@@ -79,6 +79,32 @@ void AEnemyFighter::OnRestoredToSpawn()
 	}
 }
 
+void AEnemyFighter::ApplyDifficultyToCombat(float DamageMul, float IntervalMul)
+{
+	if (!bCombatBasesCaptured)
+	{
+		DifficultyBaseDamages.Reset();
+		DifficultyBaseRecoveries.Reset();
+		DifficultyBaseCooldowns.Reset();
+		for (const FEnemyMoveDef& Move : Moves)
+		{
+			DifficultyBaseDamages.Add(Move.Skill.Damage);
+			DifficultyBaseRecoveries.Add(Move.Skill.Recovery);
+			DifficultyBaseCooldowns.Add(Move.Cooldown);
+		}
+		bCombatBasesCaptured = true;
+	}
+	for (int32 Index = 0; Index < Moves.Num(); ++Index)
+	{
+		if (DifficultyBaseDamages.IsValidIndex(Index))
+		{
+			Moves[Index].Skill.Damage = DifficultyBaseDamages[Index] * DamageMul;
+			Moves[Index].Skill.Recovery = DifficultyBaseRecoveries[Index] * IntervalMul;
+			Moves[Index].Cooldown = DifficultyBaseCooldowns[Index] * IntervalMul;
+		}
+	}
+}
+
 void AEnemyFighter::SyncRangeVisuals()
 {
 	if (DetectRangeVisual)

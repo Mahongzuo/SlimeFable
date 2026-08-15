@@ -15,6 +15,8 @@
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeCombatHUDWidget.h"
+#include "Quest/QuestSubsystem.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeStatusComponent.h"
@@ -28,7 +30,9 @@
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 
 ASlimeCharacter::ASlimeCharacter()
 {
@@ -169,7 +173,7 @@ ASlimeCharacter::ASlimeCharacter()
 	{
 		SlimeHealth->Team = ESlimeTeam::Player;
 		SlimeHealth->bDestroyOnDeath = false;
-		SlimeHealth->bRegenOnDeath = true;
+		SlimeHealth->bRegenOnDeath = false;
 	}
 }
 
@@ -206,6 +210,11 @@ void ASlimeCharacter::BeginPlay()
 	Super::BeginPlay();
 	PrimaryActorTick.bCanEverTick = true;
 	SpawnTransform = GetActorTransform();
+	bPlayerDead = false;
+	if (SlimeHealth)
+	{
+		SlimeHealth->OnDied.AddDynamic(this, &ASlimeCharacter::HandleDeath);
+	}
 }
 
 void ASlimeCharacter::Tick(float DeltaSeconds)
@@ -453,6 +462,51 @@ void ASlimeCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVec
 
 void ASlimeCharacter::HandleDeath()
 {
+	if (bPlayerDead)
+	{
+		return;
+	}
+	bPlayerDead = true;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		DisableInput(PC);
+	}
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+	}
+	if (SlimeCombat)
+	{
+		if (USlimeCombatHUDWidget* HUD = SlimeCombat->GetCombatHUD())
+		{
+			HUD->SetDeathVisible(true);
+		}
+	}
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			PlayerDeathReloadTimer,
+			this,
+			&ASlimeCharacter::FinishPlayerDeathReload,
+			1.5f,
+			false);
+	}
+}
+
+void ASlimeCharacter::FinishPlayerDeathReload()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+			{
+				Quests->ReloadActiveChapterAfterDeath();
+			}
+		}
+	}
 }
 
 void ASlimeCharacter::ApplyHealing(float Healing, AActor* Healer)

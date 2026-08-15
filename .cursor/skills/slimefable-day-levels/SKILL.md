@@ -9,7 +9,10 @@ description: >-
 # SlimeFable 日关卡框架
 
 API 与路径细节见 [references/day-level-api.md](references/day-level-api.md)。  
-每日故事资产目录见 [references/day-content-folders.md](references/day-content-folders.md)。
+每日故事资产目录见 [references/day-content-folders.md](references/day-content-folders.md)。  
+大厅传送门、共用 OperaHouse、按年周目见 `slimefable-week-cycle`。
+
+**新日期 = 登记 Registry 子图 + 该日大厅摆 N 扇门 + 做 `SL_{DayId}_{Chapter}`。** 禁止再做一套大厅，禁止 MCP 逐关摆 366 扇门。365 张空日关卡（跳过 `0812`）流送同一份 `/Game/OperaHouse/Maps/Demonstration`，脚本：`Content/Python/apply_operahouse_lobby.py`。
 
 ## 命名与路径
 
@@ -37,6 +40,7 @@ API 与路径细节见 [references/day-level-api.md](references/day-level-api.md
 | 每日内容 | `/Game/_Slime/Days/MM/MMDD`（Quests / Actors / NPCs / Enemies / Audio / FX） |
 | 批建内容目录 | `Content/Python/create_day_content_folders.py`（366 天；0815 另有 Hub + Y{Year}） |
 | 0815 子图 | `Content/Python/create_0815_sublevels.py`（`SL_0815_YYYY` + Registry.SubLevels） |
+| 共用大厅 | `Content/Python/apply_operahouse_lobby.py`（跳过 0812；AlwaysLoaded 流送 OperaHouse/Demonstration） |
 
 ## 工作流
 
@@ -55,6 +59,16 @@ py E:/UE/SlimeFable/Content/Python/create_day_content_folders.py
 ```
 
 已存在的日目录跳过；不创建空 `DA_Quest_*`。分类与 0815 例外见 [day-content-folders.md](references/day-content-folders.md)。
+
+**给空日关卡套共用剧院大厅（跳过 0812，可重跑）：**
+
+```text
+UnrealEditor-Cmd.exe "E:/UE/SlimeFable/SlimeFable.uproject" -ExecutePythonScript="E:/UE/SlimeFable/Content/Python/apply_operahouse_lobby.py" -unattended -nop4 -nullrhi -nosound
+```
+
+新日期内容流程（大厅 + N 门 + 子图）见 `slimefable-week-cycle`。不要打开 `OperaHouse/Maps/Demonstration` 去摆门。
+
+**已套 OperaHouse 大厅：** `0101`–`0209`、`0815`–`0831`。`0812` 永不套。`0210` 及 `0211`–`0811`、`0813`–`0814`、`0901`–`1231` 未做。下次批处理先读 `slimefable-week-cycle` 的「已套大厅」表，勿当 366 张都还没做。
 
 **运行时查询（设计意图）：**
 
@@ -84,6 +98,8 @@ py E:/UE/SlimeFable/Content/Python/create_day_content_folders.py
 ## 不要做
 
 - 用 MCP 循环创建 366 个关卡或 366 个内容目录（用上面两条 Python）
+- 用 MCP 逐关套大厅或逐关摆 366 扇门（用 `apply_operahouse_lobby.py`；门只摆在当天日关卡）
+- 再做一套大厅或复制 `OperaHouse/Maps/Demonstration`
 - 把日关卡 / 每日内容改回单目录平铺或改名脱离 `MMDD`
 - 擅自铺开完整 SaveGame / 探索度统计（除非用户明确要求）
 - 往空日关卡里塞大量占位美术（用户自行制作场景）

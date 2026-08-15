@@ -16,6 +16,9 @@ class UStaticMeshComponent;
 class USkeletalMeshComponent;
 class UAnimMontage;
 class USkeletalMesh;
+class UNiagaraSystem;
+class UMaterialInterface;
+class USlimeSouvenirDefinition;
 
 UCLASS(meta = (PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API AEnemyCharacter : public ACharacter, public ISlimeLockTarget, public ICombatDamageable
@@ -98,6 +101,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats")
 	TSoftObjectPtr<UAnimMontage> DeathMontage;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death", meta = (ClampMin = "0.2", Units = "s"))
+	float DeathDissolveSeconds = 1.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death")
+	TSoftObjectPtr<UNiagaraSystem> DeathDissolveNiagara;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death")
+	TSoftObjectPtr<UMaterialInterface> DeathDissolveMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Souvenir")
+	TSoftObjectPtr<USlimeSouvenirDefinition> SouvenirReward;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Souvenir")
+	TSoftClassPtr<AActor> SouvenirDropClass;
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void ApplyWeekDifficulty(int32 InWeekIndex);
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Presence")
 	virtual void SetEnemyPresence(EEnemyPresence NewPresence);
 
@@ -131,8 +152,20 @@ protected:
 	USceneComponent* ResolveAttachParent(const FEnemyMeshPart& Part) const;
 	void ApplyPlaceholderVisual();
 
+	virtual void ApplyDifficultyToCombat(float DamageMul, float IntervalMul);
+	void CaptureDifficultyBases();
+	void DropSouvenirReward();
+	void PlayDeathMontageThenDissolve();
+	void StartDeathDissolve();
+	void TickDeathDissolve();
+	void FinishDeathSequence();
+	void ApplyDeathDissolveVisual(float Alpha);
+
 	UFUNCTION()
 	void HandleDied();
+
+	UFUNCTION()
+	void HandleDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<USlimeHealthComponent> Health;
@@ -156,4 +189,10 @@ protected:
 	float SavedHP = -1.f;
 	bool bPresenceRegistered = false;
 	float OutOfCombatSeconds = 0.f;
+	bool bDeathSequence = false;
+	bool bDifficultyBasesCaptured = false;
+	float DifficultyBaseMaxHP = 200.f;
+	float DeathDissolveElapsed = 0.f;
+	FTimerHandle DeathDissolveTimer;
+	FTimerHandle DeathMontageFallbackTimer;
 };

@@ -14,6 +14,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "ShaderCompiler.h"
+#include "ContentStreaming.h"
+#include "UObject/UObjectGlobals.h"
 #include "Styling/SlateTypes.h"
 #include "TimerManager.h"
 #include "Misc/App.h"
@@ -164,6 +166,18 @@ int32 USlimeLoadingGateWidget::GetShaderJobsRemaining() const
 	return 0;
 }
 
+int32 USlimeLoadingGateWidget::GetStreamingJobsRemaining() const
+{
+	int32 Count = IsAsyncLoading() ? 1 : 0;
+	Count += IStreamingManager::Get().GetNumWantingResources();
+	return Count;
+}
+
+bool USlimeLoadingGateWidget::IsRenderReady() const
+{
+	return GetShaderJobsRemaining() <= 0 && GetStreamingJobsRemaining() <= 0;
+}
+
 void USlimeLoadingGateWidget::PollGate()
 {
 	if (bFinished)
@@ -175,10 +189,11 @@ void USlimeLoadingGateWidget::PollGate()
 	const float InDeltaTime = FMath::Clamp(static_cast<float>(Now - LastPollTimeSeconds), 0.01f, 0.25f);
 	LastPollTimeSeconds = Now;
 
-	const int32 Jobs = GetShaderJobsRemaining();
-	const bool bShadersIdle = (Jobs <= 0);
+	const int32 ShaderJobs = GetShaderJobsRemaining();
+	const int32 StreamJobs = GetStreamingJobsRemaining();
+	const bool bJobsIdle = IsRenderReady();
 
-	if (bShadersIdle)
+	if (bJobsIdle)
 	{
 		ZeroJobStableSeconds += InDeltaTime;
 	}
@@ -188,7 +203,7 @@ void USlimeLoadingGateWidget::PollGate()
 		ExtraFramesAfterReady = 0;
 	}
 
-	const bool bReady = bShadersIdle && ZeroJobStableSeconds >= 0.3f;
+	const bool bReady = bJobsIdle && ZeroJobStableSeconds >= 0.3f;
 
 	float Target = DisplayedProgress;
 	if (bReady || bFinishing)
@@ -216,9 +231,13 @@ void USlimeLoadingGateWidget::PollGate()
 	if (StatusText)
 	{
 		const int32 Pct = FMath::RoundToInt(DisplayedProgress * 100.f);
-		if (Jobs > 0)
+		if (ShaderJobs > 0)
 		{
-			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（着色器 %d）"), Pct, Jobs)));
+			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（着色器 %d）"), Pct, ShaderJobs)));
+		}
+		else if (StreamJobs > 0)
+		{
+			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（资源 %d）"), Pct, StreamJobs)));
 		}
 		else
 		{

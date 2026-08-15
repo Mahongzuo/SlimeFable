@@ -24,7 +24,8 @@ public class SlimeFable : ModuleRules
 			"ProceduralMeshComponent",
 			"Niagara",
 			"MoviePlayer",
-			"MediaAssets"
+			"MediaAssets",
+			"AssetRegistry"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

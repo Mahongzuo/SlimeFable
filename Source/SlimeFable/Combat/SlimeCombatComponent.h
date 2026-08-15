@@ -96,6 +96,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	TSubclassOf<USlimeCombatHUDWidget> HUDWidgetClass;
 
+	USlimeCombatHUDWidget* GetCombatHUD() const { return HUDWidget; }
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> AttackAction;
 

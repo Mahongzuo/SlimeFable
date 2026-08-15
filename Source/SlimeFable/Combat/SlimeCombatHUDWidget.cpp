@@ -33,11 +33,13 @@
 #include "Inventory/SlimeInteractComponent.h"
 #include "Inventory/SlimeWorldPickup.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Styling/SlateTypes.h"
 #include "Types/SlateEnums.h"
 #include "UI/MenuUIStyle.h"
+#include "Quest/QuestSubsystem.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "Engine/GameInstance.h"
@@ -89,7 +91,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar)
+	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && SlotCdTexts.Num() == 3 && PlayerHealthBar)
 	{
 		return;
 	}
@@ -119,6 +121,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	SlotKeys.Reset();
 	SlotNames.Reset();
 	SlotCds.Reset();
+	SlotCdTexts.Reset();
 	SlotBackgrounds.Reset();
 
 	UMaterialInterface* ButtonMat = FMenuUIStyle::LoadButtonMaterial();
@@ -190,9 +193,19 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		UTextBlock* Name = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *FString::Printf(TEXT("Name%d"), Index));
 		Labels->AddChildToVerticalBox(Name);
 
+		UTextBlock* CdText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *FString::Printf(TEXT("CdText%d"), Index));
+		CdText->SetJustification(ETextJustify::Center);
+		if (UOverlaySlot* CdTextSlot = Cell->AddChildToOverlay(CdText))
+		{
+			CdTextSlot->SetHorizontalAlignment(HAlign_Right);
+			CdTextSlot->SetVerticalAlignment(VAlign_Top);
+			CdTextSlot->SetPadding(FMargin(0.f, 4.f, 8.f, 0.f));
+		}
+
 		SlotKeys.Add(Key);
 		SlotNames.Add(Name);
 		SlotCds.Add(Cd);
+		SlotCdTexts.Add(CdText);
 	}
 
 	// Keep bars for early-out guard; hide permanently (resources unused).
@@ -385,6 +398,40 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	FMenuUIStyle::ApplyHealthBarImage(LockOnBar, LockOnBarMID, FVector2D(520.f, 20.f));
 	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, 1.f, 1.f, 0.f, 26.f);
 	BarBox->AddChild(LockOnBar);
+
+	PlayerHealthBar = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("PlayerHealthBar"));
+	PlayerHealthBarMID = FMenuUIStyle::CreateHealthBarMID(this);
+	FMenuUIStyle::ApplyHealthBarImage(PlayerHealthBar, PlayerHealthBarMID, FVector2D(280.f, 18.f));
+	FMenuUIStyle::SetHealthBarValues(PlayerHealthBarMID, 1.f, 1.f, 0.f, 15.5f);
+	if (UCanvasPanelSlot* HpSlot = Root->AddChildToCanvas(PlayerHealthBar))
+	{
+		HpSlot->SetAnchors(FAnchors(0.f, 1.f));
+		HpSlot->SetAlignment(FVector2D(0.f, 1.f));
+		HpSlot->SetPosition(FVector2D(28.f, -28.f));
+		HpSlot->SetSize(FVector2D(280.f, 18.f));
+		HpSlot->SetZOrder(16);
+	}
+
+	WeekText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("WeekText"));
+	if (UCanvasPanelSlot* WeekSlot = Root->AddChildToCanvas(WeekText))
+	{
+		WeekSlot->SetAnchors(FAnchors(0.f, 1.f));
+		WeekSlot->SetAlignment(FVector2D(0.f, 1.f));
+		WeekSlot->SetPosition(FVector2D(28.f, -52.f));
+		WeekSlot->SetAutoSize(true);
+		WeekSlot->SetZOrder(16);
+	}
+
+	DeathText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DeathText"));
+	DeathText->SetText(FText::FromString(TEXT("被击倒")));
+	DeathText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* DeathSlot = Root->AddChildToCanvas(DeathText))
+	{
+		DeathSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		DeathSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		DeathSlot->SetAutoSize(true);
+		DeathSlot->SetZOrder(30);
+	}
 }
 
 void USlimeCombatHUDWidget::Refresh()
@@ -428,6 +475,19 @@ void USlimeCombatHUDWidget::Refresh()
 			const float Remaining = Combat->GetSkillCooldownRemaining(Slots[Index]);
 			const float MaxCd = FMath::Max(Defs[Index]->Cooldown, 0.01f);
 			SlotCds[Index]->SetPercent(Remaining <= 0.f ? 1.f : 1.f - Remaining / MaxCd);
+		}
+		if (SlotCdTexts.IsValidIndex(Index) && SlotCdTexts[Index])
+		{
+			const float Remaining = Combat->GetSkillCooldownRemaining(Slots[Index]);
+			if (Remaining > 0.f)
+			{
+				SlotCdTexts[Index]->SetText(FText::FromString(FString::Printf(TEXT("%.1f"), Remaining)));
+				FMenuUIStyle::ApplyMarkerFont(SlotCdTexts[Index], 16.f, FMenuUIStyle::WarmTitleColor());
+			}
+			else
+			{
+				SlotCdTexts[Index]->SetText(FText::GetEmpty());
+			}
 		}
 	}
 
@@ -549,6 +609,33 @@ void USlimeCombatHUDWidget::Refresh()
 		ChargeFill.TintColor = FSlateColor(Fill);
 		ChargeStyle.SetFillImage(ChargeFill);
 		LaunchChargeBar->SetWidgetStyle(ChargeStyle);
+	}
+
+	if (PlayerHealthBar && PlayerHealthBarMID)
+	{
+		float Percent = 1.f;
+		if (APawn* Pawn = GetOwningPlayerPawn())
+		{
+			if (const USlimeHealthComponent* Health = Pawn->FindComponentByClass<USlimeHealthComponent>())
+			{
+				Percent = Health->GetHealthPercent();
+			}
+		}
+		FMenuUIStyle::SetHealthBarValues(PlayerHealthBarMID, Percent, Percent, 0.f, 15.5f);
+	}
+
+	if (WeekText)
+	{
+		int32 Week = 1;
+		if (const UGameInstance* WeekGI = GetGameInstance())
+		{
+			if (const UQuestSubsystem* Quests = WeekGI->GetSubsystem<UQuestSubsystem>())
+			{
+				Week = Quests->GetWeekIndex();
+			}
+		}
+		WeekText->SetText(FText::FromString(FString::Printf(TEXT("第 %d 周目"), Week)));
+		FMenuUIStyle::ApplyMixedMenuFont(WeekText, 16.f, FMenuUIStyle::WarmMutedTextColor());
 	}
 }
 
@@ -700,6 +787,15 @@ void USlimeCombatHUDWidget::RefreshLockOnBar(float DeltaTime)
 
 	LockOnFlash = FMath::FInterpTo(LockOnFlash, 0.f, DeltaTime, 12.f);
 	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, Percent, LockOnGhostPercent, LockOnFlash, 26.f);
+}
+
+void USlimeCombatHUDWidget::SetDeathVisible(bool bVisible)
+{
+	if (DeathText)
+	{
+		DeathText->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		FMenuUIStyle::ApplyBrushCJKFont(DeathText, 42.f, FMenuUIStyle::WarmTitleColor());
+	}
 }
 
 void USlimeCombatHUDWidget::HandleUnstuckClicked()

@@ -35,6 +35,8 @@ protected:
 	void ApplyLook();
 	void FinishGate();
 	int32 GetShaderJobsRemaining() const;
+	int32 GetStreamingJobsRemaining() const;
+	bool IsRenderReady() const;
 
 	UFUNCTION()
 	void PollGate();

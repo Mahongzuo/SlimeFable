@@ -114,4 +114,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Souvenir")
 	TSoftObjectPtr<UFileMediaSource> StoryVideo;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Souvenir")
+	TSoftObjectPtr<UStaticMesh> StoryMesh;
 };

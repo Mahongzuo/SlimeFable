@@ -7,6 +7,7 @@
 
 class UQuestHUDWidget;
 class UQuestLogWidget;
+class UWeekSelectWidget;
 class AQuestInteractActor;
 class AQuestReachVolume;
 
@@ -62,6 +63,9 @@ public:
 	bool GetActiveToast(FText& OutToast) const;
 
 	UFUNCTION(BlueprintPure, Category = "Quest")
+	FText GetActiveToastKicker() const { return ToastKicker; }
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
 	bool CanContribute(FName ChapterId, FName QuestId, FName BranchId) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Quest")
@@ -87,6 +91,63 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Quest")
 	bool IsChapterComplete(FName ChapterId) const { return CompletedChapters.Contains(ChapterId); }
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	int32 GetWeekIndex() const { return WeekIndex; }
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	int32 GetHighestWeek(FName ChapterId) const;
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	bool CanSelectWeek(FName ChapterId, int32 Week) const;
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	bool HasAnyChapterReachedWeek2() const;
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	bool IsChapterUnlocked(FName ChapterId) const;
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	FName GetUnlockHintChapter(FName ChapterId) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void SetActiveWeekIndex(int32 Week);
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	bool TravelToChapter(FName DayId, FName ChapterId, int32 Week);
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	bool TravelToHub(FName DayId);
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	bool IsCurrentChapterComplete() const;
+
+	/** DayId of the open calendar map (0815), including when playing SL_* chapters. */
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	FName GetHostDayId() const;
+
+	/** True on year/story sublevels (SL_*), false in the day hub. */
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	bool IsInStorySubLevel() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void ShowCenterBanner(const FText& Kicker, const FText& TaskName, float DurationSeconds);
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void ShowLockedChapterBanner(FName ChapterId);
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void OpenWeekSelect(FName DayId, FName ChapterId);
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void CloseWeekSelect();
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	bool IsWeekSelectOpen() const { return WeekSelectWidget != nullptr; }
+
+	/** Death: wipe current chapter progress, keep week + finished chapters, reload sublevel. */
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void ReloadActiveChapterAfterDeath();
 
 	UFUNCTION(BlueprintPure, Category = "Quest")
 	bool IsSideComplete(FName ChapterId, FName QuestId) const;
@@ -117,6 +178,10 @@ protected:
 	void FinishPendingTravel();
 	void PersistProgress() const;
 	void RestoreProgress();
+	void ActivateChapter(FName ChapterId);
+	void ResetChapterProgress(FName ChapterId);
+	void AdvanceWeekForChapter(FName ChapterId);
+	static FName InferChapterIdFromWorld(UWorld* World);
 	void SyncTrackToMain();
 	void TryCatchUpDefeatObjectives();
 	FString MakeSideKey(FName ChapterId, FName QuestId) const;
@@ -141,7 +206,15 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UQuestLogWidget> LogWidget;
 
+	UPROPERTY()
+	TObjectPtr<UWeekSelectWidget> WeekSelectWidget;
+
+	void ResetActiveChapterProgress();
+	void ApplyWeekDifficultyToEnemies(UWorld* World) const;
+
 	TSet<FName> CompletedChapters;
+	int32 WeekIndex = 1;
+	TMap<FName, int32> HighestWeekByChapter;
 	TSet<FName> CompletedSideQuestIds;
 	TMap<FString, int32> SideBranchCounts;
 	FName ActiveDayId;
@@ -156,6 +229,7 @@ protected:
 	bool bTrackingSide = false;
 
 	FText ToastMessage;
+	FText ToastKicker;
 	double ToastUntilSeconds = 0.0;
 
 	FName PendingTravelChapterId;

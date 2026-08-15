@@ -135,6 +135,20 @@ void AEnemyTower::OnRestoredToSpawn()
 	CurrentTarget.Reset();
 }
 
+void AEnemyTower::ApplyDifficultyToCombat(float DamageMul, float IntervalMul)
+{
+	if (!bCombatBasesCaptured)
+	{
+		DifficultyBaseFireInterval = FireInterval;
+		DifficultyBaseBeamDamage = BeamDamage;
+		DifficultyBaseMissileDamage = MissileSkill.Damage;
+		bCombatBasesCaptured = true;
+	}
+	FireInterval = FMath::Max(DifficultyBaseFireInterval * IntervalMul, 0.1f);
+	BeamDamage = DifficultyBaseBeamDamage * DamageMul;
+	MissileSkill.Damage = DifficultyBaseMissileDamage * DamageMul;
+}
+
 void AEnemyTower::SetEnemyPresence(EEnemyPresence NewPresence)
 {
 	Super::SetEnemyPresence(NewPresence);

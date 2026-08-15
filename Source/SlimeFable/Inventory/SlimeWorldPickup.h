@@ -73,6 +73,7 @@ protected:
 	 * register per-instance definitions (e.g. souvenir with a custom image).
 	 */
 	virtual void PrepareDefinition(USlimeInventorySubsystem& Inventory) {}
+	virtual void OnPickedUp(APawn* Picker) {}
 
 	void RefreshHighlightFromNearbyPlayers();
 	UMaterialInterface* ResolveOutlineMaterial();

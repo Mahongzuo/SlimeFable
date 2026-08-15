@@ -12,16 +12,16 @@ class SLIMEFABLE_API UQuestObjectiveComponent : public UActorComponent
 public:
 	UQuestObjectiveComponent();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Quest")
 	FName ChapterId;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Quest")
 	FName QuestId;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Quest")
 	FName BranchId;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Quest")
 	FText PromptVerb;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")

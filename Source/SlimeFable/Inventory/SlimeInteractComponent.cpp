@@ -49,7 +49,7 @@ bool USlimeInteractComponent::CanInteractNow() const
 	{
 		if (const UQuestSubsystem* Quests = Game->GetSubsystem<UQuestSubsystem>())
 		{
-			if (Quests->IsQuestLogOpen())
+			if (Quests->IsQuestLogOpen() || Quests->IsWeekSelectOpen())
 			{
 				return false;
 			}

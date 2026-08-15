@@ -8,13 +8,16 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/PanelWidget.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
+#include "Engine/GameInstance.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
+#include "Quest/QuestSubsystem.h"
 
 UPauseMenuWidget::UPauseMenuWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -58,6 +61,11 @@ void UPauseMenuWidget::NativeConstruct()
 	{
 		MainMenuButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnMainMenuClicked);
 	}
+	if (ReturnToHubButton)
+	{
+		ReturnToHubButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnReturnToHubClicked);
+	}
+	RefreshHubButtonVisibility();
 }
 
 void UPauseMenuWidget::ResolveSettingsClasses()
@@ -110,6 +118,7 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	if (TitleText && ContinueButton && LevelSelectButton && KeybindButton && GraphicsButton && MainMenuButton)
 	{
 		bBuiltInCode = false;
+		EnsureReturnToHubButton();
 		return;
 	}
 
@@ -166,10 +175,89 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 
 	TitleText = AddText(TEXT("TitleText"), FText::FromString(TEXT("暂停")));
 	ContinueButton = AddButton(TEXT("ContinueButton"), FText::FromString(TEXT("继续游戏")));
+	ReturnToHubButton = AddButton(TEXT("ReturnToHubButton"), FText::FromString(TEXT("回到大厅")));
 	LevelSelectButton = AddButton(TEXT("LevelSelectButton"), FText::FromString(TEXT("返回选关")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
 	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
 	MainMenuButton = AddButton(TEXT("MainMenuButton"), FText::FromString(TEXT("返回主菜单")));
+}
+
+void UPauseMenuWidget::EnsureReturnToHubButton()
+{
+	if (ReturnToHubButton || !WidgetTree)
+	{
+		return;
+	}
+
+	UPanelWidget* InsertParent = nullptr;
+	int32 InsertIndex = 1;
+	if (ContinueButton)
+	{
+		if (USizeBox* ContinueSize = Cast<USizeBox>(ContinueButton->GetParent()))
+		{
+			InsertParent = Cast<UPanelWidget>(ContinueSize->GetParent());
+			if (InsertParent)
+			{
+				InsertIndex = InsertParent->GetChildIndex(ContinueSize) + 1;
+			}
+		}
+		else if (UPanelWidget* Direct = Cast<UPanelWidget>(ContinueButton->GetParent()))
+		{
+			InsertParent = Direct;
+			InsertIndex = Direct->GetChildIndex(ContinueButton) + 1;
+		}
+	}
+	if (!InsertParent)
+	{
+		return;
+	}
+
+	USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(), TEXT("ReturnToHubButton_Size"));
+	SizeBox->SetWidthOverride(320.f);
+	SizeBox->SetHeightOverride(60.f);
+
+	ReturnToHubButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ReturnToHubButton"));
+	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(
+		UTextBlock::StaticClass(), TEXT("ReturnToHubButton_Label"));
+	Label->SetText(FText::FromString(TEXT("回到大厅")));
+	Label->SetJustification(ETextJustify::Center);
+	ReturnToHubButton->AddChild(Label);
+	SizeBox->AddChild(ReturnToHubButton);
+
+	if (UPanelSlot* InsertedSlot = InsertParent->InsertChildAt(InsertIndex, SizeBox))
+	{
+		if (UVerticalBoxSlot* VSlot = Cast<UVerticalBoxSlot>(InsertedSlot))
+		{
+			VSlot->SetPadding(FMargin(0.f, 8.f));
+			VSlot->SetHorizontalAlignment(HAlign_Center);
+		}
+	}
+}
+
+void UPauseMenuWidget::RefreshHubButtonVisibility()
+{
+	bool bShow = false;
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+			{
+				bShow = Quests->IsInStorySubLevel();
+			}
+		}
+	}
+
+	const ESlateVisibility Vis = bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed;
+	if (ReturnToHubButton)
+	{
+		ReturnToHubButton->SetVisibility(Vis);
+		if (UWidget* Parent = ReturnToHubButton->GetParent())
+		{
+			Parent->SetVisibility(Vis);
+		}
+	}
 }
 
 void UPauseMenuWidget::ApplyLook()
@@ -190,6 +278,7 @@ void UPauseMenuWidget::ApplyLook()
 	UMaterialInterface* BrushBtn = FMenuUIStyle::LoadButtonMaterial();
 	const FVector2D Size(320.f, 60.f);
 	FMenuUIStyle::ApplyMaterialButtonStyle(ContinueButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(ReturnToHubButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(LevelSelectButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(GraphicsButton, BrushBtn, Size);
@@ -207,6 +296,7 @@ void UPauseMenuWidget::ApplyLook()
 		}
 	};
 	StyleLabel(ContinueButton);
+	StyleLabel(ReturnToHubButton);
 	StyleLabel(LevelSelectButton);
 	StyleLabel(KeybindButton);
 	StyleLabel(GraphicsButton);
@@ -218,6 +308,7 @@ void UPauseMenuWidget::ApplyLook()
 		FMenuUIStyle::BindInkButtonHover(Button, Label);
 	};
 	BindHover(ContinueButton);
+	BindHover(ReturnToHubButton);
 	BindHover(LevelSelectButton);
 	BindHover(KeybindButton);
 	BindHover(GraphicsButton);
@@ -305,4 +396,9 @@ void UPauseMenuWidget::OnGraphicsClicked()
 void UPauseMenuWidget::OnMainMenuClicked()
 {
 	OnMainMenuRequested.Broadcast();
+}
+
+void UPauseMenuWidget::OnReturnToHubClicked()
+{
+	OnReturnToHubRequested.Broadcast();
 }

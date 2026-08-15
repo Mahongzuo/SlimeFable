@@ -8,6 +8,7 @@
 
 class UTexture2D;
 class UFileMediaSource;
+class UStaticMesh;
 
 /** Drop into a level to test consumable pickup (HealJelly). */
 UCLASS(Blueprintable)
@@ -53,9 +54,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir", meta = (MultiLine = "true"))
 	FText SouvenirStoryText;
 
-	/** 故事视频（FileMediaSource）；留空则查看页不显示播放按钮。仅在设置了 SouvenirImage 时生效。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Souvenir")
+	/** 故事视频（FileMediaSource）；留空则查看页不显示播放按钮。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Souvenir")
 	TSoftObjectPtr<UFileMediaSource> SouvenirVideo;
+
+	/** 3D 纪念品网格；有值时查看器走 SceneCapture，世界拾取也显示该网格。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Souvenir")
+	TSoftObjectPtr<UStaticMesh> SouvenirMesh;
 
 protected:
 	virtual void PrepareDefinition(USlimeInventorySubsystem& Inventory) override;

@@ -1,8 +1,9 @@
 #include "Quest/QuestChapterGate.h"
 #include "Quest/QuestSubsystem.h"
-#include "DayLevel/DayLevelSubsystem.h"
+#include "DayLevel/DayLevelTypes.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
+#include "Misc/PackageName.h"
 
 AQuestChapterGate::AQuestChapterGate()
 {
@@ -12,34 +13,25 @@ AQuestChapterGate::AQuestChapterGate()
 	}
 }
 
+bool AQuestChapterGate::CanBeFocused() const
+{
+	return true;
+}
+
 bool AQuestChapterGate::IsUnlocked() const
 {
 	const UWorld* World = GetWorld();
 	const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
 	const UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
-	const UDayQuestBook* Book = Quests ? Quests->GetBook() : nullptr;
-	if (!Quests || !Book || TargetChapterId.IsNone())
+	if (!Quests)
 	{
 		return false;
 	}
-	if (Quests->IsChapterComplete(TargetChapterId))
+	if (TargetChapterId == FName(TEXT("Hub")))
 	{
-		return true;
+		return Quests->IsCurrentChapterComplete();
 	}
-
-	for (int32 Index = 0; Index < Book->Chapters.Num(); ++Index)
-	{
-		if (Book->Chapters[Index].ChapterId != TargetChapterId)
-		{
-			continue;
-		}
-		if (Index == 0)
-		{
-			return true;
-		}
-		return Quests->IsChapterComplete(Book->Chapters[Index - 1].ChapterId);
-	}
-	return false;
+	return Quests->IsChapterUnlocked(TargetChapterId);
 }
 
 FText AQuestChapterGate::GetInteractPromptVerb() const
@@ -48,12 +40,95 @@ FText AQuestChapterGate::GetInteractPromptVerb() const
 	{
 		return FText::FromString(TEXT("未解锁"));
 	}
+	if (TargetChapterId == FName(TEXT("Hub")))
+	{
+		return FText::FromString(TEXT("回大厅"));
+	}
 	return FText::FromString(FString::Printf(TEXT("进入 %s"), *TargetChapterId.ToString()));
+}
+
+FName AQuestChapterGate::ResolveTravelDayId() const
+{
+	if (bUseHostDayId)
+	{
+		const UWorld* World = GetWorld();
+		const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+		const UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
+		if (Quests)
+		{
+			const FName Host = Quests->GetHostDayId();
+			if (!Host.IsNone())
+			{
+				return Host;
+			}
+		}
+	}
+	return DayId;
+}
+
+FName AQuestChapterGate::ResolveOptionsDayId() const
+{
+	if (const UWorld* World = GetWorld())
+	{
+		FString Name = World->GetMapName();
+		const FString Prefix = World->StreamingLevelsPrefix;
+		if (!Prefix.IsEmpty() && Name.StartsWith(Prefix))
+		{
+			Name.RightChopInline(Prefix.Len());
+		}
+		Name = FPackageName::GetShortName(Name);
+		if (Name.StartsWith(TEXT("SL_")) && Name.Len() >= 7)
+		{
+			return FName(*Name.Mid(3, 4));
+		}
+		if (Name.Len() == 4 && Name.IsNumeric())
+		{
+			return FName(*Name);
+		}
+	}
+	return DayId;
+}
+
+TArray<FString> AQuestChapterGate::GetTargetChapterIdOptions() const
+{
+	TArray<FString> Options;
+	const FName OptionsDayId = ResolveOptionsDayId();
+	if (!OptionsDayId.IsNone())
+	{
+		if (const UDayLevelRegistry* Registry = LoadObject<UDayLevelRegistry>(
+				nullptr, TEXT("/Game/Data/DayLevels/DA_DayLevelRegistry.DA_DayLevelRegistry")))
+		{
+			FDayLevelEntry Entry;
+			if (Registry->FindEntry(OptionsDayId, Entry))
+			{
+				TArray<FName> Keys;
+				Entry.SubLevels.GetKeys(Keys);
+				Keys.Sort([](const FName& A, const FName& B)
+				{
+					return A.LexicalLess(B);
+				});
+				for (const FName& Key : Keys)
+				{
+					if (!Key.IsNone())
+					{
+						Options.AddUnique(Key.ToString());
+					}
+				}
+			}
+		}
+	}
+	Options.AddUnique(TEXT("Hub"));
+	return Options;
 }
 
 bool AQuestChapterGate::TryInteract(APawn* Interactor)
 {
-	if (!Interactor || !IsUnlocked())
+	return RequestEnter(Interactor);
+}
+
+bool AQuestChapterGate::RequestEnter(APawn* Interactor)
+{
+	if (!Interactor || TargetChapterId.IsNone())
 	{
 		return false;
 	}
@@ -61,22 +136,37 @@ bool AQuestChapterGate::TryInteract(APawn* Interactor)
 	UWorld* World = GetWorld();
 	UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
 	UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
-	if (Quests && DayId == FName(TEXT("0815")))
+	if (!Quests)
 	{
-		Quests->Enter0815Chapter(TargetChapterId);
-		return true;
+		return false;
 	}
-
-	UDayLevelSubsystem* Days = GI ? GI->GetSubsystem<UDayLevelSubsystem>() : nullptr;
-	if (!Days)
+	if (Quests->IsWeekSelectOpen())
 	{
 		return false;
 	}
 
-	TSoftObjectPtr<UWorld> SubLevel;
-	if (Days->GetSubLevelForDayId(DayId, TargetChapterId, SubLevel) && !SubLevel.IsNull())
+	const FName TravelDayId = ResolveTravelDayId();
+	if (TargetChapterId == FName(TEXT("Hub")))
 	{
-		return Days->TravelToSubLevel(World, DayId, TargetChapterId);
+		if (!Quests->IsCurrentChapterComplete())
+		{
+			Quests->ShowLockedChapterBanner(TargetChapterId);
+			return false;
+		}
+		return Quests->TravelToHub(TravelDayId);
 	}
-	return Days->TravelToDayId(World, DayId);
+
+	if (!Quests->IsChapterUnlocked(TargetChapterId))
+	{
+		Quests->ShowLockedChapterBanner(TargetChapterId);
+		return false;
+	}
+
+	if (Quests->GetHighestWeek(TargetChapterId) <= 1)
+	{
+		return Quests->TravelToChapter(TravelDayId, TargetChapterId, 1);
+	}
+
+	Quests->OpenWeekSelect(TravelDayId, TargetChapterId);
+	return true;
 }

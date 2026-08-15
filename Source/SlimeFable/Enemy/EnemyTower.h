@@ -25,6 +25,7 @@ public:
 	virtual void SetEnemyPresence(EEnemyPresence NewPresence) override;
 	virtual bool IsInCombat() const override;
 	virtual void OnRestoredToSpawn() override;
+	virtual void ApplyDifficultyToCombat(float DamageMul, float IntervalMul) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Tower", meta = (ClampMin = "100.0", Units = "cm"))
 	float AttackRange = 1000.f;
@@ -99,4 +100,8 @@ protected:
 	FTimerHandle BeamHideTimerHandle;
 	TWeakObjectPtr<APawn> CurrentTarget;
 	bool bPlayerInRange = false;
+	float DifficultyBaseFireInterval = 1.2f;
+	float DifficultyBaseBeamDamage = 12.f;
+	float DifficultyBaseMissileDamage = 16.f;
+	bool bCombatBasesCaptured = false;
 };

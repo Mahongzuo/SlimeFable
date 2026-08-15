@@ -170,7 +170,7 @@ UDayQuestBook* UDayQuestBook::Make0815Book(UObject* Outer)
 {
 	UDayQuestBook* Book = NewObject<UDayQuestBook>(Outer, TEXT("DA_Quest_0815"));
 	Book->DayId = FName(TEXT("0815"));
-	Book->bDoNotSave = true;
+	Book->bDoNotSave = false;
 
 	Book->Chapters.Add(MakeYearChapter(TEXT("1920"), TEXT("油墨与呐喊"), TEXT("Print"), TEXT("把创刊号送到工友手里"),
 		{ MakeBranch(TEXT("Manuscripts"), TEXT("收集手稿"), EQuestObjectiveType::Collect, 3),

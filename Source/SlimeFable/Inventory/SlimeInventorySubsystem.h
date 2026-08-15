@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "GameFramework/SaveGame.h"
 #include "SlimeItemTypes.h"
 #include "SlimeInventorySubsystem.generated.h"
 
@@ -15,6 +16,49 @@ class APawn;
 class APlayerController;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSlimeInventoryChanged);
+
+USTRUCT()
+struct FSlimeSavedSouvenirDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FName ItemId = NAME_None;
+
+	UPROPERTY()
+	FString DisplayName;
+
+	UPROPERTY()
+	FString StoryText;
+
+	UPROPERTY()
+	FSoftObjectPath Icon;
+
+	UPROPERTY()
+	FSoftObjectPath StoryImage;
+
+	UPROPERTY()
+	FSoftObjectPath StoryMesh;
+
+	UPROPERTY()
+	FSoftObjectPath StoryVideo;
+};
+
+UCLASS()
+class SLIMEFABLE_API USlimeInventorySaveGame : public USaveGame
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY()
+	TArray<FSlimeInventoryEntry> Entries;
+
+	UPROPERTY()
+	TArray<FName> Hotbar;
+
+	UPROPERTY()
+	TArray<FSlimeSavedSouvenirDef> Souvenirs;
+};
 
 UCLASS()
 class SLIMEFABLE_API USlimeInventorySubsystem : public UGameInstanceSubsystem
@@ -84,4 +128,8 @@ protected:
 
 	void NotifyChanged();
 	bool IsHotbarSlotValidForItem(int32 SlotIndex, const USlimeItemDefinition* Def) const;
+	void PersistInventory() const;
+	void RestoreInventory();
+	void ScanSouvenirAssets();
+	static const TCHAR* InventorySaveSlot;
 };

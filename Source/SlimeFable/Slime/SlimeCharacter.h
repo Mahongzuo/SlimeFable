@@ -136,6 +136,8 @@ public:
 	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void HandleDeath() override;
+
+	void FinishPlayerDeathReload();
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyHealing(float Healing, AActor* Healer) override;
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -218,4 +220,7 @@ protected:
 
 	/** World transform at BeginPlay; Unstuck returns here. */
 	FTransform SpawnTransform = FTransform::Identity;
+
+	bool bPlayerDead = false;
+	FTimerHandle PlayerDeathReloadTimer;
 };

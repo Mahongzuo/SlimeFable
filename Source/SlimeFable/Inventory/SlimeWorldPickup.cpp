@@ -195,6 +195,7 @@ bool ASlimeWorldPickup::TryPickup(APawn* Picker)
 		return false;
 	}
 
+	OnPickedUp(Picker);
 	Destroy();
 	return true;
 }

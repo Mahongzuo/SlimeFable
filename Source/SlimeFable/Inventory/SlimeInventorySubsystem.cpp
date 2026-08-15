@@ -16,7 +16,10 @@
 #include "Engine/Texture2D.h"
 #include "FileMediaSource.h"
 #include "Kismet/GameplayStatics.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "SlimeFable.h"
+
+const TCHAR* USlimeInventorySubsystem::InventorySaveSlot = TEXT("Inventory");
 
 void USlimeInventorySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -27,6 +30,8 @@ void USlimeInventorySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Hotbar[Index] = NAME_None;
 	}
 	EnsureBuiltinDefinitions();
+	ScanSouvenirAssets();
+	RestoreInventory();
 }
 
 void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
@@ -124,6 +129,86 @@ USlimeItemDefinition* USlimeInventorySubsystem::FindDefinition(FName ItemId) con
 void USlimeInventorySubsystem::NotifyChanged()
 {
 	OnInventoryChanged.Broadcast();
+	PersistInventory();
+}
+
+void USlimeInventorySubsystem::ScanSouvenirAssets()
+{
+	FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+	TArray<FAssetData> Assets;
+	ARM.Get().GetAssetsByClass(USlimeSouvenirDefinition::StaticClass()->GetClassPathName(), Assets, true);
+	for (const FAssetData& Data : Assets)
+	{
+		if (USlimeSouvenirDefinition* Def = Cast<USlimeSouvenirDefinition>(Data.GetAsset()))
+		{
+			RegisterItemDefinition(Def);
+		}
+	}
+}
+
+void USlimeInventorySubsystem::PersistInventory() const
+{
+	USlimeInventorySaveGame* Save = Cast<USlimeInventorySaveGame>(
+		UGameplayStatics::CreateSaveGameObject(USlimeInventorySaveGame::StaticClass()));
+	if (!Save)
+	{
+		return;
+	}
+	Save->Entries = Entries;
+	Save->Hotbar = Hotbar;
+	for (const TPair<FName, TObjectPtr<USlimeItemDefinition>>& Pair : Definitions)
+	{
+		const USlimeSouvenirDefinition* Souvenir = Cast<USlimeSouvenirDefinition>(Pair.Value);
+		if (!Souvenir)
+		{
+			continue;
+		}
+		FSlimeSavedSouvenirDef Packed;
+		Packed.ItemId = Souvenir->ItemId;
+		Packed.DisplayName = Souvenir->DisplayName.ToString();
+		Packed.StoryText = Souvenir->StoryText.ToString();
+		Packed.Icon = Souvenir->Icon.ToSoftObjectPath();
+		Packed.StoryImage = Souvenir->StoryImage.ToSoftObjectPath();
+		Packed.StoryMesh = Souvenir->StoryMesh.ToSoftObjectPath();
+		Packed.StoryVideo = Souvenir->StoryVideo.ToSoftObjectPath();
+		Save->Souvenirs.Add(Packed);
+	}
+	UGameplayStatics::SaveGameToSlot(Save, InventorySaveSlot, 0);
+}
+
+void USlimeInventorySubsystem::RestoreInventory()
+{
+	if (!UGameplayStatics::DoesSaveGameExist(InventorySaveSlot, 0))
+	{
+		return;
+	}
+	USlimeInventorySaveGame* Save = Cast<USlimeInventorySaveGame>(
+		UGameplayStatics::LoadGameFromSlot(InventorySaveSlot, 0));
+	if (!Save)
+	{
+		return;
+	}
+	for (const FSlimeSavedSouvenirDef& Packed : Save->Souvenirs)
+	{
+		if (Packed.ItemId.IsNone() || FindDefinition(Packed.ItemId))
+		{
+			continue;
+		}
+		USlimeSouvenirDefinition* Def = NewObject<USlimeSouvenirDefinition>(this, Packed.ItemId);
+		Def->ItemId = Packed.ItemId;
+		Def->DisplayName = FText::FromString(Packed.DisplayName);
+		Def->StoryText = FText::FromString(Packed.StoryText);
+		Def->Icon = TSoftObjectPtr<UTexture2D>(Packed.Icon);
+		Def->StoryImage = TSoftObjectPtr<UTexture2D>(Packed.StoryImage);
+		Def->StoryMesh = TSoftObjectPtr<UStaticMesh>(Packed.StoryMesh);
+		Def->StoryVideo = TSoftObjectPtr<UFileMediaSource>(Packed.StoryVideo);
+		RegisterItemDefinition(Def);
+	}
+	Entries = Save->Entries;
+	if (Save->Hotbar.Num() == SlimeHotbarSlotCount)
+	{
+		Hotbar = Save->Hotbar;
+	}
 }
 
 int32 USlimeInventorySubsystem::AddItem(FName ItemId, int32 Count)

@@ -143,4 +143,11 @@ public:
 
 	UPROPERTY()
 	bool bTrackingSide = false;
+
+	UPROPERTY()
+	int32 WeekIndex = 1;
+
+	/** Per-chapter highest unlocked week (1–3). Empty = legacy WeekIndex applies to every chapter. */
+	UPROPERTY()
+	TMap<FName, int32> HighestWeekByChapter;
 };
