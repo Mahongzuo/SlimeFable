@@ -234,9 +234,10 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 		return;
 	}
 
-	// Element wheel owns the scroll wheel while open.
+	// Element wheel and G-charge own the scroll wheel.
 	const bool bWheelOpen = SlimeAbilities && SlimeAbilities->IsWheelOpen();
-	if (!bWheelOpen)
+	const bool bChargingLaunch = SlimeAbilities && SlimeAbilities->IsChargingLaunch();
+	if (!bWheelOpen && !bChargingLaunch)
 	{
 		if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 		{

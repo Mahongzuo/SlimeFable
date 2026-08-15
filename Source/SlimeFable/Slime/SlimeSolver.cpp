@@ -1022,6 +1022,7 @@ void FSlimeSolver::Step(float Dt)
 	}, Count < GParallelMinBatch ? EParallelForFlags::ForceSingleThread : EParallelForFlags::None);
 
 	ApplyViscosity();
+	AdvanceKinematicShots(Dt);
 
 	// ---- Fragment lifetime ------------------------------------------------------------
 
@@ -1074,6 +1075,7 @@ void FSlimeSolver::Step(float Dt)
 					ShotMergeElapsed.Remove(ShotId);
 					ShotImpactApplied.Remove(ShotId);
 					ShotFloorOverrides.Remove(ShotId);
+					ShotPaths.Remove(ShotId);
 				}
 			}
 			RebuildShotStates();
@@ -1540,6 +1542,7 @@ void FSlimeSolver::RemoveShotParticles(uint8 ShotId)
 	ShotMergeElapsed.Remove(ShotId);
 	ShotImpactApplied.Remove(ShotId);
 	ShotFloorOverrides.Remove(ShotId);
+	ShotPaths.Remove(ShotId);
 	RebuildShotStates();
 	EnsureScratchCapacity(Particles.Num());
 }
@@ -1560,6 +1563,7 @@ void FSlimeSolver::RemoveAllClones()
 	ShotMergeElapsed.Reset();
 	ShotImpactApplied.Reset();
 	ShotFloorOverrides.Reset();
+	ShotPaths.Reset();
 	EnsureScratchCapacity(Particles.Num());
 }
 
@@ -1590,7 +1594,7 @@ void FSlimeSolver::ApplyMergeImpact(const FShotState& Shot)
 	LandingSettleRemaining = FMath::Max(LandingSettleRemaining, 1.1f);
 }
 
-int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots)
+int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path)
 {
 	SetLaunchFraction(Fraction);
 
@@ -1650,6 +1654,9 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 
 	const FVector3f LaunchVel(LaunchVelocity);
 	const FVector3f Away = Direction.IsNearlyZero() ? FVector3f::ForwardVector : Direction;
+	const bool bUsePath = Path && Path->bValid && Path->Points.Num() >= 2;
+	const FVector3f PathStart = bUsePath ? FVector3f(Path->Points[0]) : FVector3f::ZeroVector;
+	const float MiniScale = MiniMembraneRadius / FMath::Max(Params.RestRadius, KINDA_SMALL_NUMBER);
 
 	Particles.Reserve(Particles.Num() + Launched);
 	for (int32 I = 0; I < Launched; ++I)
@@ -1660,10 +1667,28 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 		Clone.ShotId = ShotId;
 		Clone.BallisticLife = Life;
 		Clone.Velocity = LaunchVel;
-		// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
-		Clone.Position = Template.Position + Away * (Params.RestRadius * 2.4f);
+		if (bUsePath)
+		{
+			Clone.Position = PathStart + (Template.Position - Center) * MiniScale;
+		}
+		else
+		{
+			// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
+			Clone.Position = Template.Position + Away * (Params.RestRadius * 2.4f);
+		}
 		Clone.PredictedPosition = Clone.Position;
 		Particles.Add(Clone);
+	}
+
+	if (bUsePath)
+	{
+		FShotPathFollow Follow;
+		Follow.Points = Path->Points;
+		Follow.Duration = FMath::Max(Path->Duration, 0.02f);
+		Follow.Elapsed = 0.f;
+		Follow.PrevCenter = Path->Points[0];
+		Follow.bActive = true;
+		ShotPaths.Add(ShotId, MoveTemp(Follow));
 	}
 
 	EnsureScratchCapacity(Particles.Num());
@@ -1792,6 +1817,8 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 		return true;
 	}
 
+	ClearKinematicPaths();
+
 	const FVector3f Home(Target);
 	const float ArriveRadius = Params.RestRadius * 0.8f;
 	const float ArriveSq = FMath::Square(ArriveRadius);
@@ -1853,4 +1880,159 @@ void FSlimeSolver::SnapFragmentsHome(const FVector& Target)
 {
 	(void)Target;
 	RemoveAllClones();
+}
+
+void FSlimeSolver::ClearKinematicPaths()
+{
+	ShotPaths.Reset();
+}
+
+bool FSlimeSolver::IsShotKinematic(uint8 ShotId) const
+{
+	if (const FShotPathFollow* Follow = ShotPaths.Find(ShotId))
+	{
+		return Follow->bActive;
+	}
+	return false;
+}
+
+FVector FSlimeSolver::GetShotCenterWorld(uint8 ShotId) const
+{
+	for (const FShotState& Shot : ShotStates)
+	{
+		if (Shot.Id == ShotId)
+		{
+			return FVector(Shot.Center);
+		}
+	}
+	return FVector::ZeroVector;
+}
+
+bool FSlimeSolver::SampleShotPath(const FShotPathFollow& Follow, float Time, FVector& OutPos, FVector& OutVel)
+{
+	if (Follow.Points.Num() < 2)
+	{
+		return false;
+	}
+
+	const float Duration = FMath::Max(Follow.Duration, KINDA_SMALL_NUMBER);
+	if (Time >= Duration)
+	{
+		OutPos = Follow.Points.Last();
+		const FVector Prev = Follow.Points[Follow.Points.Num() - 2];
+		OutVel = (OutPos - Prev) / 0.02f;
+		return false;
+	}
+
+	const float Alpha = FMath::Clamp(Time / Duration, 0.f, 1.f);
+	const float FloatIndex = Alpha * float(Follow.Points.Num() - 1);
+	const int32 Index = FMath::Clamp(FMath::FloorToInt(FloatIndex), 0, Follow.Points.Num() - 2);
+	const float LocalT = FloatIndex - float(Index);
+	OutPos = FMath::Lerp(Follow.Points[Index], Follow.Points[Index + 1], LocalT);
+	OutVel = (Follow.Points[Index + 1] - Follow.Points[Index]) / 0.02f;
+	return true;
+}
+
+void FSlimeSolver::AdvanceKinematicShots(float Dt)
+{
+	if (ShotPaths.Num() == 0)
+	{
+		return;
+	}
+
+	RebuildShotStates();
+
+	TArray<uint8> Finished;
+	for (TPair<uint8, FShotPathFollow>& Pair : ShotPaths)
+	{
+		FShotPathFollow& Follow = Pair.Value;
+		if (!Follow.bActive || Follow.Points.Num() < 2)
+		{
+			continue;
+		}
+
+		const FVector CurrentCom = GetShotCenterWorld(Pair.Key);
+		Follow.PrevCenter = CurrentCom;
+		Follow.Elapsed += Dt;
+
+		FVector NewPos = Follow.Points.Last();
+		FVector NewVel = FVector::ZeroVector;
+		const bool bStillFlying = SampleShotPath(Follow, Follow.Elapsed, NewPos, NewVel);
+
+		const FVector Delta = NewPos - CurrentCom;
+		for (FSlimeParticle& Particle : Particles)
+		{
+			if (!Particle.IsBallistic() || Particle.ShotId != Pair.Key)
+			{
+				continue;
+			}
+			Particle.Position += FVector3f(Delta);
+			Particle.PredictedPosition = Particle.Position;
+			Particle.Velocity = FVector3f(NewVel);
+		}
+
+		if (!bStillFlying)
+		{
+			Finished.Add(Pair.Key);
+		}
+	}
+
+	for (const uint8 ShotId : Finished)
+	{
+		EndKinematicShot(ShotId);
+	}
+
+	if (Finished.Num() > 0 || ShotPaths.Num() > 0)
+	{
+		RebuildShotStates();
+	}
+}
+
+void FSlimeSolver::EndKinematicShot(uint8 ShotId)
+{
+	if (FShotPathFollow* Follow = ShotPaths.Find(ShotId))
+	{
+		Follow->bActive = false;
+	}
+	ShotPaths.Remove(ShotId);
+}
+
+void FSlimeSolver::GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMotions) const
+{
+	OutMotions.Reset();
+	for (const TPair<uint8, FShotPathFollow>& Pair : ShotPaths)
+	{
+		if (!Pair.Value.bActive)
+		{
+			continue;
+		}
+		FKinematicShotMotion Motion;
+		Motion.Id = Pair.Key;
+		Motion.PrevCenter = Pair.Value.PrevCenter;
+		Motion.Center = GetShotCenterWorld(Pair.Key);
+		Motion.Radius = MiniMembraneRadius;
+		OutMotions.Add(Motion);
+	}
+}
+
+void FSlimeSolver::SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint)
+{
+	const FVector Current = GetShotCenterWorld(ShotId);
+	const FVector Delta = WorldPoint - Current;
+	for (FSlimeParticle& Particle : Particles)
+	{
+		if (!Particle.IsBallistic() || Particle.ShotId != ShotId)
+		{
+			continue;
+		}
+		Particle.Position += FVector3f(Delta);
+		Particle.PredictedPosition = Particle.Position;
+		Particle.Velocity = FVector3f::ZeroVector;
+	}
+	if (WorldPoint.Z > -1.e8f)
+	{
+		SetShotFloorZ(ShotId, float(WorldPoint.Z));
+	}
+	EndKinematicShot(ShotId);
+	RebuildShotStates();
 }

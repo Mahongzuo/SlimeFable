@@ -64,6 +64,12 @@ protected:
 	TObjectPtr<UProgressBar> UltimateBar;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> LaunchChargeBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> LaunchChargeTrack;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UButton> UnstuckButton;
 
 	UPROPERTY(Transient)

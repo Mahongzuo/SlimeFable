@@ -30,6 +30,14 @@ public:
 		int32 Count = 0;
 	};
 
+	struct FKinematicShotMotion
+	{
+		uint8 Id = 0;
+		FVector PrevCenter = FVector::ZeroVector;
+		FVector Center = FVector::ZeroVector;
+		float Radius = 18.f;
+	};
+
 	/** Builds the particle set as a dome resting on RestCenter's Z. */
 	void Initialize(const FSlimeSolverParams& InParams, const FVector& RestCenter);
 
@@ -155,7 +163,11 @@ public:
 	 *  Clones ~Fraction of body particles into a ballistic mini-slime without shrinking the body.
 	 *  Honours MaxActiveShots. Returns how many clone particles were spawned.
 	 */
-	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots);
+	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path = nullptr);
+
+	void ClearKinematicPaths();
+	void GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMotions) const;
+	void SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint);
 
 	/** Steers fragments home. Returns true once every clone has entered soft-merge or been removed. */
 	bool RecallFragments(float Dt, const FVector& Target, float PullSpeed);
@@ -183,6 +195,10 @@ private:
 	void ApplyMergeImpact(const FShotState& Shot);
 	void ClampToShotShell(FVector3f& InOutPoint, const FVector3f& ShotCenter) const;
 	void LiftShotCentersAboveFloor();
+	void AdvanceKinematicShots(float Dt);
+	void EndKinematicShot(uint8 ShotId);
+	bool IsShotKinematic(uint8 ShotId) const;
+	FVector GetShotCenterWorld(uint8 ShotId) const;
 	void BuildGrid();
 	void SolveDensity();
 	void ResolveCollisions();
@@ -258,6 +274,19 @@ private:
 	/** Persist merge timers across RebuildShotStates. */
 	TMap<uint8, float> ShotMergeElapsed;
 	TSet<uint8> ShotImpactApplied;
+
+	struct FShotPathFollow
+	{
+		TArray<FVector> Points;
+		float Duration = 0.f;
+		float Elapsed = 0.f;
+		FVector PrevCenter = FVector::ZeroVector;
+		bool bActive = false;
+	};
+
+	static bool SampleShotPath(const FShotPathFollow& Follow, float Time, FVector& OutPos, FVector& OutVel);
+
+	TMap<uint8, FShotPathFollow> ShotPaths;
 
 	int32 NumBallistic = 0;
 	int32 ActiveShotCount = 0;

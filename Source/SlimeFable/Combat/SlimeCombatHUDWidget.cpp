@@ -20,7 +20,9 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeCombatComponent.h"
+#include "SlimeAbilityComponent.h"
 #include "SlimeCharacter.h"
+#include "SlimeElementComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeHealthComponent.h"
 #include "EnemyCharacter.h"
@@ -87,7 +89,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel)
+	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar)
 	{
 		return;
 	}
@@ -236,6 +238,35 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	UnstuckButton->SetNavigationRuleBase(EUINavigation::Up, EUINavigationRule::Escape);
 	UnstuckButton->SetNavigationRuleBase(EUINavigation::Down, EUINavigationRule::Escape);
 	UnstuckButton->OnClicked.AddDynamic(this, &USlimeCombatHUDWidget::HandleUnstuckClicked);
+
+	LaunchChargeTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LaunchChargeTrack"));
+	LaunchChargeTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
+	LaunchChargeTrack->SetPadding(FMargin(4.f, 3.f));
+	LaunchChargeTrack->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* ChargeSlot = Root->AddChildToCanvas(LaunchChargeTrack))
+	{
+		ChargeSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		ChargeSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		ChargeSlot->SetPosition(FVector2D(0.f, -100.f));
+		ChargeSlot->SetSize(FVector2D(280.f, 18.f));
+		ChargeSlot->SetZOrder(15);
+	}
+
+	LaunchChargeBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("LaunchChargeBar"));
+	LaunchChargeBar->SetPercent(0.f);
+	LaunchChargeBar->SetFillColorAndOpacity(FLinearColor(0.72f, 0.58f, 0.32f, 0.95f));
+	if (ProgressMat)
+	{
+		FProgressBarStyle ChargeStyle = LaunchChargeBar->GetWidgetStyle();
+		FSlateBrush ChargeFill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(272.f, 12.f));
+		ChargeFill.TintColor = FSlateColor(FLinearColor(0.92f, 0.78f, 0.48f, 0.95f));
+		ChargeStyle.SetFillImage(ChargeFill);
+		FSlateBrush ChargeEmpty;
+		ChargeEmpty.DrawAs = ESlateBrushDrawType::NoDrawType;
+		ChargeStyle.SetBackgroundImage(ChargeEmpty);
+		LaunchChargeBar->SetWidgetStyle(ChargeStyle);
+	}
+	LaunchChargeTrack->AddChild(LaunchChargeBar);
 
 	UHorizontalBox* HotbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarRow"));
 	if (UCanvasPanelSlot* HotbarSlot = Root->AddChildToCanvas(HotbarRow))
@@ -491,6 +522,33 @@ void USlimeCombatHUDWidget::Refresh()
 				PromptSlot->SetPosition(ScreenPos);
 			}
 		}
+	}
+
+	if (LaunchChargeBar && LaunchChargeTrack)
+	{
+		bool bShowCharge = false;
+		float Charge = 0.f;
+		FLinearColor Fill = FMenuUIStyle::TodayEdgeColor();
+		if (APlayerController* PC = GetOwningPlayer())
+		{
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				if (USlimeAbilityComponent* Abilities = Pawn->FindComponentByClass<USlimeAbilityComponent>())
+				{
+					bShowCharge = Abilities->IsChargingLaunch();
+					Charge = Abilities->GetLaunchCharge();
+					Fill = Abilities->GetLaunchPreviewColor();
+				}
+			}
+		}
+		LaunchChargeTrack->SetVisibility(bShowCharge ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		LaunchChargeBar->SetPercent(Charge);
+		LaunchChargeBar->SetFillColorAndOpacity(Fill);
+		FProgressBarStyle ChargeStyle = LaunchChargeBar->GetWidgetStyle();
+		FSlateBrush ChargeFill = ChargeStyle.FillImage;
+		ChargeFill.TintColor = FSlateColor(Fill);
+		ChargeStyle.SetFillImage(ChargeFill);
+		LaunchChargeBar->SetWidgetStyle(ChargeStyle);
 	}
 }
 

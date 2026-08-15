@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "SlimeElementTypes.h"
+#include "SlimeTypes.h"
 #include "SlimeAbilityComponent.generated.h"
 
 class APlayerController;
@@ -60,7 +61,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> AbsorbAction;
 
-	/** Q: hold to aim, release to throw a chunk. */
+	/** G: hold to aim, release to throw a chunk. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> LaunchAction;
 
@@ -80,8 +81,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "100.0"))
 	float MaxLaunchSpeed = 1700.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "0.05", ClampMax = "3.0"))
-	float FullChargeTime = 0.8f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "0.05", ClampMax = "4.0"))
+	float FullChargeTime = 2.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "100.0", Units = "cm"))
+	float MinLaunchRange = 400.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "200.0", Units = "cm"))
+	float MaxLaunchRange = 2800.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "500.0", Units = "cm"))
+	float LaunchAimRange = 10000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "40.0", Units = "cm"))
+	float DefaultLaunchArcHeight = 80.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "200.0", Units = "cm"))
+	float DefaultLaunchRange = 1200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "20.0", Units = "cm"))
+	float LaunchRangeStep = 150.f;
 
 	/** Upward bias added to the aim direction so a flat aim still arcs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "0.0", ClampMax = "0.6"))
@@ -118,6 +137,9 @@ public:
 	float GetLaunchCharge() const;
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
+	FLinearColor GetLaunchPreviewColor() const;
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsWheelOpen() const { return bWheelOpen; }
 
 	/**
@@ -145,7 +167,13 @@ private:
 
 	void OpenWheel();
 	void CloseWheel(bool bCommit);
-	void DrawTrajectory() const;
+	void BeginLaunchCharge();
+	void ReleaseLaunchCharge();
+	void AdjustLaunchRange(int32 Step);
+	bool BuildLaunchPath(FSlimeLaunchPath& OutPath) const;
+	bool ResolveLaunchTarget(FVector& OutStart, FVector& OutTarget) const;
+	FVector SimulateLaunchTrajectory(const FVector& Start, const FVector& LaunchVelocity, TArray<FVector>& OutPoints) const;
+	void DrawLaunchPath(const FSlimeLaunchPath& Path) const;
 	bool GetAimDirection(FVector& OutDirection) const;
 	APlayerController* GetOwningPlayerController() const;
 
@@ -158,6 +186,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeElementWheelWidget> WheelWidget;
 
+	FSlimeLaunchPath PendingLaunchPath;
+	float LaunchExtraArcHeight = 80.f;
+	float LaunchRange = 1200.f;
 	float ChargeElapsed = 0.f;
 	float CycleCooldownRemaining = 0.f;
 	float SavedTimeDilation = 1.f;

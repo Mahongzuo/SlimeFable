@@ -3,6 +3,8 @@
 #include "SlimeAbilityComponent.h"
 
 #include "Blueprint/UserWidget.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
 #include "DrawDebugHelpers.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -155,9 +157,10 @@ void USlimeAbilityComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	if (bCharging)
 	{
 		ChargeElapsed += DeltaTime;
+		BuildLaunchPath(PendingLaunchPath);
 		if (bDrawTrajectoryPreview)
 		{
-			DrawTrajectory();
+			DrawLaunchPath(PendingLaunchPath);
 		}
 	}
 }
@@ -231,23 +234,12 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	if (bLaunch && !bPollLaunchDown)
 	{
 		bPollLaunchDown = true;
-		bCharging = true;
-		ChargeElapsed = 0.f;
+		BeginLaunchCharge();
 	}
 	else if (!bLaunch && bPollLaunchDown)
 	{
 		bPollLaunchDown = false;
-		if (bCharging)
-		{
-			bCharging = false;
-			FVector Direction;
-			if (Body && GetAimDirection(Direction))
-			{
-				const float Speed = FMath::Lerp(MinLaunchSpeed, MaxLaunchSpeed, GetLaunchCharge());
-				Body->LaunchChunk(Direction * Speed);
-			}
-			ChargeElapsed = 0.f;
-		}
+		ReleaseLaunchCharge();
 	}
 
 	const bool bWheel = IsDown(ESlimeInputAction::ElementWheel, EKeys::Tab);
@@ -262,7 +254,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		CloseWheel(true);
 	}
 
-	if (bWheelOpen && Element && CycleCooldownRemaining <= 0.f)
+	if (CycleCooldownRemaining <= 0.f)
 	{
 		int32 Step = 0;
 		if (PlayerController->WasInputKeyJustPressed(EKeys::MouseScrollUp))
@@ -273,14 +265,34 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		{
 			Step = -1;
 		}
+		else
+		{
+			const float WheelAxis = PlayerController->GetInputAnalogKeyState(EKeys::MouseWheelAxis);
+			if (WheelAxis > 0.1f)
+			{
+				Step = 1;
+			}
+			else if (WheelAxis < -0.1f)
+			{
+				Step = -1;
+			}
+		}
 
 		if (Step != 0)
 		{
-			CycleCooldownRemaining = CycleCooldown;
-			const ESlimeElement Next = Element->CycleElement(Step);
-			if (WheelWidget)
+			if (bWheelOpen && Element)
 			{
-				WheelWidget->SetHighlightedElement(Next);
+				CycleCooldownRemaining = CycleCooldown;
+				const ESlimeElement Next = Element->CycleElement(Step);
+				if (WheelWidget)
+				{
+					WheelWidget->SetHighlightedElement(Next);
+				}
+			}
+			else if (bCharging)
+			{
+				CycleCooldownRemaining = CycleCooldown;
+				AdjustLaunchRange(Step);
 			}
 		}
 	}
@@ -290,7 +302,22 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 
 float USlimeAbilityComponent::GetLaunchCharge() const
 {
-	return FMath::Clamp(ChargeElapsed / FMath::Max(FullChargeTime, KINDA_SMALL_NUMBER), 0.f, 1.f);
+	const float Period = FMath::Max(FullChargeTime, KINDA_SMALL_NUMBER);
+	return FMath::Fmod(ChargeElapsed, Period) / Period;
+}
+
+FLinearColor USlimeAbilityComponent::GetLaunchPreviewColor() const
+{
+	FLinearColor Base = FLinearColor::White;
+	if (Element)
+	{
+		Base = Element->GetProfile(Element->GetPreviewElement()).BaseColor;
+	}
+	FLinearColor Pale = FMath::Lerp(Base, FLinearColor::White, 0.28f);
+	Pale.R = FMath::Min(Pale.R * 1.08f, 1.f);
+	Pale.G = FMath::Min(Pale.G * 1.08f, 1.f);
+	Pale.B = FMath::Min(Pale.B * 1.08f, 1.f);
+	return Pale;
 }
 
 void USlimeAbilityComponent::HandleFlattenStarted()
@@ -367,8 +394,7 @@ void USlimeAbilityComponent::HandleLaunchStarted()
 	{
 		return;
 	}
-	bCharging = true;
-	ChargeElapsed = 0.f;
+	BeginLaunchCharge();
 }
 
 void USlimeAbilityComponent::HandleLaunchCompleted()
@@ -377,27 +403,61 @@ void USlimeAbilityComponent::HandleLaunchCompleted()
 	{
 		return;
 	}
+	ReleaseLaunchCharge();
+}
+
+void USlimeAbilityComponent::BeginLaunchCharge()
+{
+	bCharging = true;
+	ChargeElapsed = 0.f;
+	LaunchExtraArcHeight = DefaultLaunchArcHeight;
+	LaunchRange = FMath::Clamp(DefaultLaunchRange, MinLaunchRange, MaxLaunchRange);
+	PendingLaunchPath = FSlimeLaunchPath();
+}
+
+void USlimeAbilityComponent::ReleaseLaunchCharge()
+{
 	if (!bCharging)
 	{
 		return;
 	}
 	bCharging = false;
 
-	FVector Direction;
-	if (!Body || !GetAimDirection(Direction))
+	if (Body)
 	{
-		ChargeElapsed = 0.f;
-		return;
+		if (!PendingLaunchPath.bValid)
+		{
+			BuildLaunchPath(PendingLaunchPath);
+		}
+		if (PendingLaunchPath.bValid)
+		{
+			const int32 Launched = Body->LaunchChunkAlongPath(PendingLaunchPath);
+			if (Launched == 0)
+			{
+				UE_LOG(LogSlimeFable, Verbose, TEXT("Slime launch rejected: active shot limit or clone pool full."));
+			}
+		}
+		else
+		{
+			FVector Direction;
+			if (GetAimDirection(Direction))
+			{
+				const float Speed = FMath::Lerp(MinLaunchSpeed, MaxLaunchSpeed, GetLaunchCharge());
+				Body->LaunchChunk(Direction * Speed);
+			}
+		}
 	}
 
-	const float Speed = FMath::Lerp(MinLaunchSpeed, MaxLaunchSpeed, GetLaunchCharge());
-	const int32 Launched = Body->LaunchChunk(Direction * Speed);
 	ChargeElapsed = 0.f;
+	PendingLaunchPath = FSlimeLaunchPath();
+}
 
-	if (Launched == 0)
-	{
-		UE_LOG(LogSlimeFable, Verbose, TEXT("Slime launch rejected: active shot limit or clone pool full."));
-	}
+void USlimeAbilityComponent::AdjustLaunchRange(int32 Step)
+{
+	LaunchRange = FMath::Clamp(
+		LaunchRange + float(Step) * LaunchRangeStep,
+		MinLaunchRange,
+		MaxLaunchRange);
 }
 
 bool USlimeAbilityComponent::GetAimDirection(FVector& OutDirection) const
@@ -420,34 +480,183 @@ bool USlimeAbilityComponent::GetAimDirection(FVector& OutDirection) const
 	return false;
 }
 
-void USlimeAbilityComponent::DrawTrajectory() const
+bool USlimeAbilityComponent::ResolveLaunchTarget(FVector& OutStart, FVector& OutTarget) const
+{
+	UWorld* World = GetWorld();
+	APlayerController* PlayerController = GetOwningPlayerController();
+	if (!World || !Body || !PlayerController)
+	{
+		return false;
+	}
+
+	int32 ViewX = 0;
+	int32 ViewY = 0;
+	PlayerController->GetViewportSize(ViewX, ViewY);
+	FVector CamLoc = FVector::ZeroVector;
+	FVector CamDir = FVector::ForwardVector;
+	if (ViewX <= 0 || ViewY <= 0 ||
+		!PlayerController->DeprojectScreenPositionToWorld(float(ViewX) * 0.5f, float(ViewY) * 0.5f, CamLoc, CamDir))
+	{
+		FRotator ViewRotation;
+		PlayerController->GetPlayerViewPoint(CamLoc, ViewRotation);
+		CamDir = ViewRotation.Vector();
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeLaunchAim), false, GetOwner());
+	FHitResult Hit;
+
+	OutStart = Body->GetBlobCenter() + FVector(0.f, 0.f, 40.f);
+	FVector Flat(CamDir.X, CamDir.Y, 0.f);
+	if (Flat.Normalize())
+	{
+		const FVector Probe = OutStart + Flat * LaunchRange + FVector(0.f, 0.f, 200.f);
+		if (World->LineTraceSingleByChannel(Hit, Probe, Probe - FVector(0.f, 0.f, 5000.f), ECC_Visibility, Params))
+		{
+			OutTarget = Hit.ImpactPoint;
+		}
+		else
+		{
+			OutTarget = OutStart + Flat * LaunchRange;
+			OutTarget.Z = OutStart.Z;
+		}
+	}
+	else
+	{
+		OutTarget = OutStart + CamDir * LaunchRange;
+	}
+
+	return true;
+}
+
+FVector USlimeAbilityComponent::SimulateLaunchTrajectory(const FVector& Start, const FVector& LaunchVelocity, TArray<FVector>& OutPoints) const
+{
+	OutPoints.Reset();
+	OutPoints.Add(Start);
+
+	UWorld* World = GetWorld();
+	if (!World || !Body)
+	{
+		return Start;
+	}
+
+	constexpr float SimDt = 0.02f;
+	const float Damp = FMath::Exp(-Body->SolverParams.LinearDamping * SimDt);
+	const float Gravity = Body->SolverParams.Gravity;
+	const float Radius = FMath::Max(Body->SolverParams.RestRadius * FMath::Pow(Body->LaunchFraction, 1.f / 3.f), 8.f);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeLaunchPreview), false, GetOwner());
+	const FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+
+	FVector Position = Start;
+	FVector Velocity = LaunchVelocity;
+	FVector Previous = Start;
+
+	for (int32 Step = 0; Step < 500; ++Step)
+	{
+		Velocity *= Damp;
+		Velocity.Z += Gravity * SimDt;
+		const FVector Next = Position + Velocity * SimDt;
+
+		FHitResult Hit;
+		if (World->SweepSingleByChannel(Hit, Previous, Next, FQuat::Identity, ECC_Visibility, Shape, Params))
+		{
+			OutPoints.Add(Hit.ImpactPoint);
+			return Hit.ImpactPoint;
+		}
+
+		OutPoints.Add(Next);
+		Previous = Next;
+		Position = Next;
+	}
+
+	return Position;
+}
+
+bool USlimeAbilityComponent::BuildLaunchPath(FSlimeLaunchPath& OutPath) const
+{
+	OutPath = FSlimeLaunchPath();
+	if (!Body)
+	{
+		return false;
+	}
+
+	FVector Start = FVector::ZeroVector;
+	FVector Target = FVector::ZeroVector;
+	if (!ResolveLaunchTarget(Start, Target))
+	{
+		return false;
+	}
+
+	FVector Delta = Target - Start;
+	FVector Flat(Delta.X, Delta.Y, 0.f);
+	const float Horiz = FMath::Max(Flat.Size(), 200.f);
+	const float GravityAbs = FMath::Abs(Body->SolverParams.Gravity);
+	const float FlightTime = FMath::Clamp(Horiz / 520.f + 0.35f, 0.7f, 3.4f);
+
+	FVector V0 = Delta / FlightTime;
+	V0.Z = Delta.Z / FlightTime + 0.5f * GravityAbs * FlightTime + LaunchExtraArcHeight / FlightTime;
+
+	for (int32 Pass = 0; Pass < 3; ++Pass)
+	{
+		TArray<FVector> Scratch;
+		const FVector Landing = SimulateLaunchTrajectory(Start, V0, Scratch);
+		const FVector Miss = Target - Landing;
+		V0.X += Miss.X / FlightTime * 0.85f;
+		V0.Y += Miss.Y / FlightTime * 0.85f;
+		V0.Z += Miss.Z / FlightTime * 0.35f;
+	}
+
+	OutPath.LaunchVelocity = V0;
+	OutPath.Landing = SimulateLaunchTrajectory(Start, V0, OutPath.Points);
+	OutPath.Duration = FMath::Max(float(FMath::Max(OutPath.Points.Num() - 1, 1)) * 0.02f, 0.02f);
+	OutPath.bValid = OutPath.Points.Num() >= 2;
+	return OutPath.bValid;
+}
+
+void USlimeAbilityComponent::DrawLaunchPath(const FSlimeLaunchPath& Path) const
 {
 #if ENABLE_DRAW_DEBUG
 	UWorld* World = GetWorld();
-	FVector Direction;
-	if (!World || !Body || !GetAimDirection(Direction))
+	if (!World || !Path.bValid || Path.Points.Num() < 2)
 	{
 		return;
 	}
 
-	const float Speed = FMath::Lerp(MinLaunchSpeed, MaxLaunchSpeed, GetLaunchCharge());
-	const FVector Velocity = Direction * Speed;
-	const double Gravity = double(Body->SolverParams.Gravity);
-
-	const FVector Origin = Body->GetBlobCenter();
-	const FLinearColor Tint = Element ? Element->GetProfile(Element->GetPreviewElement()).BaseColor : FLinearColor::White;
-	const FColor Color = Tint.ToFColor(true);
-
-	constexpr int32 Samples = 22;
-	constexpr double Step = 0.055;
-	FVector Previous = Origin;
-	for (int32 Sample = 1; Sample <= Samples; ++Sample)
+	const FColor Color = GetLaunchPreviewColor().ToFColor(true);
+	constexpr float Dash = 18.f;
+	constexpr float Gap = 12.f;
+	float Carry = 0.f;
+	bool bDrawDash = true;
+	for (int32 Index = 1; Index < Path.Points.Num(); ++Index)
 	{
-		const double Time = Step * Sample;
-		const FVector Point = Origin + Velocity * Time + FVector(0.0, 0.0, 0.5 * Gravity * Time * Time);
-		DrawDebugLine(World, Previous, Point, Color, false, -1.f, 0, 2.f);
-		Previous = Point;
+		FVector Cursor = Path.Points[Index - 1];
+		const FVector End = Path.Points[Index];
+		FVector Remain = End - Cursor;
+		float RemainLen = Remain.Size();
+		if (RemainLen <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		FVector Dir = Remain / RemainLen;
+		while (RemainLen > KINDA_SMALL_NUMBER)
+		{
+			const float Slice = FMath::Min((bDrawDash ? Dash : Gap) - Carry, RemainLen);
+			const FVector Next = Cursor + Dir * Slice;
+			if (bDrawDash)
+			{
+				DrawDebugLine(World, Cursor, Next, Color, false, -1.f, 0, 2.f);
+			}
+			Carry += Slice;
+			RemainLen -= Slice;
+			Cursor = Next;
+			if (Carry >= (bDrawDash ? Dash : Gap) - KINDA_SMALL_NUMBER)
+			{
+				Carry = 0.f;
+				bDrawDash = !bDrawDash;
+			}
+		}
 	}
+	DrawDebugSphere(World, Path.Landing, 14.f, 10, Color, false, -1.f, 0, 1.5f);
 #endif
 }
 

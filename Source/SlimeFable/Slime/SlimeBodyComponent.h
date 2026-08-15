@@ -198,7 +198,7 @@ public:
 	int32 MaxActiveShots = 5;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.5"))
-	float FragmentLifetime = 6.f;
+	float FragmentLifetime = 10.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "100.0"))
 	float RecallPullSpeed = 900.f;
@@ -286,6 +286,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	int32 LaunchChunk(const FVector& LaunchVelocity);
 
+	int32 LaunchChunkAlongPath(const FSlimeLaunchPath& Path);
+
 	/** Combat tendrils: short-lived clone blobs that peel then get recalled. */
 	int32 LaunchTendril(const FVector& LaunchVelocity, float Fraction, float Life);
 
@@ -359,6 +361,7 @@ public:
 
 private:
 	void FixedStep(float StepDelta);
+	void SweepKinematicShots();
 	void RefreshColliders();
 	void UpdateFloor();
 	void ProbeSqueeze(float DeltaTime);

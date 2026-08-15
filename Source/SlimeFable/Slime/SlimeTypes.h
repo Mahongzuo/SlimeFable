@@ -45,6 +45,16 @@ struct SLIMEFABLE_API FSlimeCombatPoseState
 	float Flatten = 0.f;
 };
 
+/** Prescribed launch polyline shared by preview and kinematic shot follow. */
+struct FSlimeLaunchPath
+{
+	TArray<FVector> Points;
+	float Duration = 0.f;
+	FVector Landing = FVector::ZeroVector;
+	FVector LaunchVelocity = FVector::ZeroVector;
+	bool bValid = false;
+};
+
 /**
  *  Tunable solver settings.
  *  Everything here is runtime data so particle budget and resolution can be changed

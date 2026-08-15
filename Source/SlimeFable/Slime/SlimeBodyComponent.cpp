@@ -2,6 +2,7 @@
 
 #include "SlimeBodyComponent.h"
 
+#include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -263,6 +264,7 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		Solver.SetClingPlane(false, FVector::ZeroVector, FVector::UpVector);
 	}
 	Solver.Step(StepDelta);
+	SweepKinematicShots();
 
 	// Soft absorb AFTER step so contact/density can wobble before clones commit-destroy.
 	if (Solver.HasFragments())
@@ -1297,6 +1299,17 @@ int32 USlimeBodyComponent::LaunchChunk(const FVector& LaunchVelocity)
 	return LaunchTendril(LaunchVelocity, LaunchFraction, FragmentLifetime);
 }
 
+int32 USlimeBodyComponent::LaunchChunkAlongPath(const FSlimeLaunchPath& Path)
+{
+	const FVector Velocity = Path.bValid ? Path.LaunchVelocity : FVector::ZeroVector;
+	const int32 Launched = Solver.LaunchChunk(Velocity, LaunchFraction, FragmentLifetime, MaxActiveShots, &Path);
+	if (Launched > 0)
+	{
+		SetRecalling(false);
+	}
+	return Launched;
+}
+
 int32 USlimeBodyComponent::LaunchTendril(const FVector& LaunchVelocity, float Fraction, float Life)
 {
 	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, Fraction, Life, MaxActiveShots);
@@ -1305,6 +1318,39 @@ int32 USlimeBodyComponent::LaunchTendril(const FVector& LaunchVelocity, float Fr
 		SetRecalling(false);
 	}
 	return Launched;
+}
+
+void USlimeBodyComponent::SweepKinematicShots()
+{
+	UWorld* World = GetWorld();
+	if (!World || bRecalling)
+	{
+		return;
+	}
+
+	TArray<FSlimeSolver::FKinematicShotMotion> Motions;
+	Solver.GetKinematicShotMotions(Motions);
+	if (Motions.Num() == 0)
+	{
+		return;
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeLaunchFollow), false, GetOwner());
+	for (const FSlimeSolver::FKinematicShotMotion& Motion : Motions)
+	{
+		if (FVector::DistSquared(Motion.PrevCenter, Motion.Center) < 1.f)
+		{
+			continue;
+		}
+
+		FHitResult Hit;
+		const FCollisionShape Shape = FCollisionShape::MakeSphere(FMath::Max(Motion.Radius, 8.f));
+		if (World->SweepSingleByChannel(Hit, Motion.PrevCenter, Motion.Center, FQuat::Identity, ECC_Visibility, Shape, Params))
+		{
+			const FVector Snap = Hit.ImpactPoint + Hit.ImpactNormal * Motion.Radius;
+			Solver.SnapKinematicShotTo(Motion.Id, Snap);
+		}
+	}
 }
 
 void USlimeBodyComponent::SetRecalling(bool bInRecalling)
