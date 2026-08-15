@@ -49,6 +49,8 @@ UnrealEditor-Cmd.exe "E:/UE/SlimeFable/SlimeFable.uproject" -ExecutePythonScript
 
 **不要**打开/保存 `OperaHouse/Maps/Demonstration` 去摆门。门必须属于日关卡持久层，否则每天都会看到 0815 的门。
 
+从 Main 选关读的是磁盘上的日关卡：摆完必须保存 **0815**（或当天 MMDD）。Outliner World 列必须是日关卡名。点过剧院 Actor 后，Levels 窗口把日关卡设回 Current 再摆。刚打开日关卡时当前关一般就是持久关。
+
 ## 摆件
 
 路径：`/Game/_Slime/Quest/Actors/BP_DayChapterPortal`

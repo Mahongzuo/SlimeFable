@@ -1,7 +1,9 @@
 #include "Quest/DayChapterPortal.h"
+#include "SlimeFable.h"
 #include "Components/BoxComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
@@ -12,6 +14,7 @@ ADayChapterPortal::ADayChapterPortal()
 {
 	if (Mesh)
 	{
+		Mesh->SetMobility(EComponentMobility::Movable);
 		Mesh->SetVisibility(false);
 		Mesh->SetHiddenInGame(true);
 		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -27,6 +30,7 @@ ADayChapterPortal::ADayChapterPortal()
 
 	VisualPortal = CreateDefaultSubobject<UChildActorComponent>(TEXT("VisualPortal"));
 	VisualPortal->SetupAttachment(RootComponent);
+	VisualPortal->SetMobility(EComponentMobility::Movable);
 
 	PortalFx = CreateDefaultSubobject<UNiagaraComponent>(TEXT("PortalFx"));
 	PortalFx->SetupAttachment(RootComponent);
@@ -81,14 +85,53 @@ void ADayChapterPortal::ApplyPortalStyle()
 	UClass* StyleClass = ResolveStyleClass();
 	if (!StyleClass)
 	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("DayChapterPortal: no BP_Portal_%d style; showing placeholder mesh."),
+			FMath::Clamp(PortalStyle, 1, 10));
+		if (Mesh)
+		{
+			Mesh->SetVisibility(true);
+			Mesh->SetHiddenInGame(false);
+		}
 		return;
+	}
+
+	if (Mesh)
+	{
+		Mesh->SetVisibility(false);
+		Mesh->SetHiddenInGame(true);
 	}
 
 	if (VisualPortal->GetChildActorClass() != StyleClass)
 	{
 		VisualPortal->SetChildActorClass(StyleClass);
 	}
-	DisableChildGameplay(VisualPortal->GetChildActor());
+	if (AActor* Child = VisualPortal->GetChildActor())
+	{
+		DisableChildGameplay(Child);
+		SnapChildToPortal(Child);
+	}
+}
+
+void ADayChapterPortal::SnapChildToPortal(AActor* Child) const
+{
+	if (!Child || !VisualPortal)
+	{
+		return;
+	}
+
+	TArray<USceneComponent*> Scenes;
+	Child->GetComponents<USceneComponent>(Scenes);
+	for (USceneComponent* Scene : Scenes)
+	{
+		if (Scene)
+		{
+			Scene->SetMobility(EComponentMobility::Movable);
+		}
+	}
+
+	Child->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	Child->AttachToComponent(VisualPortal, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	Child->SetActorRelativeTransform(FTransform::Identity);
 }
 
 void ADayChapterPortal::DisableChildGameplay(AActor* Child) const
@@ -99,17 +142,23 @@ void ADayChapterPortal::DisableChildGameplay(AActor* Child) const
 	}
 
 	Child->SetActorEnableCollision(false);
-	Child->SetActorTickEnabled(false);
+	if (USceneComponent* Root = Child->GetRootComponent())
+	{
+		Root->SetMobility(EComponentMobility::Movable);
+	}
 	TArray<UActorComponent*> Components;
 	Child->GetComponents(Components);
 	for (UActorComponent* Component : Components)
 	{
+		if (USceneComponent* Scene = Cast<USceneComponent>(Component))
+		{
+			Scene->SetMobility(EComponentMobility::Movable);
+		}
 		if (UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(Component))
 		{
 			Prim->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Prim->SetGenerateOverlapEvents(false);
 		}
-		Component->SetComponentTickEnabled(false);
 	}
 }
 

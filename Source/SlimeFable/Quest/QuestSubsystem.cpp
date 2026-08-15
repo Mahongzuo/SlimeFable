@@ -238,7 +238,7 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 			}
 		}), 0.2f, false);
 	}
-	else if (ActiveDayId == FName(TEXT("0815")))
+	else if (ActiveDayId == FName(TEXT("0815")) && !InferChapterIdFromWorld(World).IsNone())
 	{
 		TWeakObjectPtr<UWorld> WeakWorld(World);
 		FTimerHandle SpawnHandle;

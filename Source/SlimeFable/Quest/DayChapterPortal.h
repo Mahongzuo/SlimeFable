@@ -64,6 +64,7 @@ protected:
 	void ApplyPortalVisuals();
 	void ApplyPortalStyle();
 	void DisableChildGameplay(AActor* Child) const;
+	void SnapChildToPortal(AActor* Child) const;
 	UClass* ResolveStyleClass() const;
 	static UClass* FindPortalStyleClass(int32 Style);
 };
