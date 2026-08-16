@@ -10,6 +10,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "MoviePlayer.h"
 #include "SlimeFable.h"
+#include "SlimeFablePlayerController.h"
 
 void USlimeFableGameInstance::Init()
 {
@@ -131,11 +132,18 @@ void USlimeFableGameInstance::ShowLoadingGate(UWorld* LoadedWorld)
 	ActiveLoadingGate->OnGateFinished.AddDynamic(this, &USlimeFableGameInstance::HandleLoadingGateFinished);
 	ActiveLoadingGate->AddToViewport(100);
 
-	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(ActiveLoadingGate->TakeWidget());
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	PC->SetInputMode(InputMode);
-	PC->bShowMouseCursor = false;
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PushUIInput(ESlimeUIInputReason::LoadingGate, ActiveLoadingGate);
+	}
+	else
+	{
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(ActiveLoadingGate->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = false;
+	}
 
 	UE_LOG(LogSlimeFable, Log, TEXT("Loading gate shown for world '%s'"), *LoadedWorld->GetMapName());
 }
@@ -149,21 +157,17 @@ void USlimeFableGameInstance::HandleLoadingGateFinished()
 	{
 		if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
 		{
-			// Main menu stays UI-only; gameplay maps use game input.
-			const FString MapName = World->GetMapName();
-			const bool bIsMainMenu = MapName.Contains(TEXT("Main"));
-			if (bIsMainMenu)
+			if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
 			{
+				SlimePC->PopUIInput(ESlimeUIInputReason::LoadingGate);
+			}
+			else
+			{
+				// Main menu stays UI-only.
 				FInputModeUIOnly InputMode;
 				InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 				PC->SetInputMode(InputMode);
 				PC->bShowMouseCursor = true;
-			}
-			else
-			{
-				FInputModeGameOnly InputMode;
-				PC->SetInputMode(InputMode);
-				PC->bShowMouseCursor = false;
 			}
 		}
 	}

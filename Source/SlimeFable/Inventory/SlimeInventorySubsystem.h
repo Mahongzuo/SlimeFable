@@ -12,6 +12,7 @@ class USlimeItemDefinition;
 class USlimeConsumableDefinition;
 class USlimePlaceableDefinition;
 class USlimeSouvenirDefinition;
+class USlimeSouvenirViewerWidget;
 class APawn;
 class APlayerController;
 
@@ -113,6 +114,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	bool OpenSouvenir(FName ItemId, APlayerController* PC);
 
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void CloseSouvenir();
+
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	bool IsSouvenirOpen() const { return SouvenirWidget != nullptr; }
+
 	/** Built-in test definitions used when Content DataAssets are not cooked yet. */
 	void EnsureBuiltinDefinitions();
 
@@ -125,6 +132,9 @@ protected:
 
 	UPROPERTY()
 	TMap<FName, TObjectPtr<USlimeItemDefinition>> Definitions;
+
+	UPROPERTY()
+	TObjectPtr<USlimeSouvenirViewerWidget> SouvenirWidget;
 
 	void NotifyChanged();
 	bool IsHotbarSlotValidForItem(int32 SlotIndex, const USlimeItemDefinition* Def) const;

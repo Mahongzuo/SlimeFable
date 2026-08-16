@@ -9,11 +9,36 @@
 #include "Engine/LocalPlayer.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
+#include "Inventory/SlimeInteractComponent.h"
+#include "Inventory/SlimeInventorySubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "SlimeFable.h"
 #include "Quest/QuestSubsystem.h"
+#include "Settings/SlimeInputSettings.h"
 #include "UI/PauseMenuWidget.h"
 #include "Widgets/Input/SVirtualJoystick.h"
+
+namespace
+{
+	bool IsOverlayReason(ESlimeUIInputReason Reason)
+	{
+		return Reason == ESlimeUIInputReason::QuestLog
+			|| Reason == ESlimeUIInputReason::AltCursor;
+	}
+
+	bool ShouldPauseReason(ESlimeUIInputReason Reason)
+	{
+		return Reason == ESlimeUIInputReason::Pause
+			|| Reason == ESlimeUIInputReason::WeekSelect
+			|| Reason == ESlimeUIInputReason::Inventory
+			|| Reason == ESlimeUIInputReason::Souvenir;
+	}
+
+	bool ShouldShowCursor(ESlimeUIInputReason Reason)
+	{
+		return Reason != ESlimeUIInputReason::LoadingGate;
+	}
+}
 
 void ASlimeFablePlayerController::BeginPlay()
 {
@@ -29,9 +54,9 @@ void ASlimeFablePlayerController::BeginPlay()
 	// Always reclaim game input when a gameplay controller starts.
 	if (IsLocalPlayerController())
 	{
-		FInputModeGameOnly InputMode;
-		SetInputMode(InputMode);
-		bShowMouseCursor = false;
+		UIInputStack.Reset();
+		bPausedByUIInput = false;
+		ApplyTopUIInput();
 	}
 
 	if (IsLocalPlayerController() && ShouldUseTouchControls())
@@ -91,8 +116,176 @@ bool ASlimeFablePlayerController::ShouldUseTouchControls() const
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
 }
 
+void ASlimeFablePlayerController::PushUIInput(ESlimeUIInputReason Reason, UUserWidget* FocusWidget)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	for (int32 Index = UIInputStack.Num() - 1; Index >= 0; --Index)
+	{
+		if (UIInputStack[Index].Reason == Reason)
+		{
+			UIInputStack[Index].FocusWidget = FocusWidget;
+			if (Index != UIInputStack.Num() - 1)
+			{
+				const FSlimeUIInputEntry Entry = UIInputStack[Index];
+				UIInputStack.RemoveAt(Index);
+				UIInputStack.Add(Entry);
+			}
+			ApplyTopUIInput();
+			return;
+		}
+	}
+
+	FSlimeUIInputEntry Entry;
+	Entry.Reason = Reason;
+	Entry.FocusWidget = FocusWidget;
+	UIInputStack.Add(Entry);
+	ApplyTopUIInput();
+}
+
+void ASlimeFablePlayerController::PopUIInput(ESlimeUIInputReason Reason)
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	UIInputStack.RemoveAll([Reason](const FSlimeUIInputEntry& Entry)
+	{
+		return Entry.Reason == Reason;
+	});
+	ApplyTopUIInput();
+}
+
+bool ASlimeFablePlayerController::HasUIInput(ESlimeUIInputReason Reason) const
+{
+	for (const FSlimeUIInputEntry& Entry : UIInputStack)
+	{
+		if (Entry.Reason == Reason)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool ASlimeFablePlayerController::HasModalUI() const
+{
+	for (const FSlimeUIInputEntry& Entry : UIInputStack)
+	{
+		if (!IsOverlayReason(Entry.Reason))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ASlimeFablePlayerController::ApplyTopUIInput()
+{
+	if (UIInputStack.IsEmpty())
+	{
+		if (bPausedByUIInput)
+		{
+			UGameplayStatics::SetGamePaused(this, false);
+			bPausedByUIInput = false;
+		}
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+		bShowMouseCursor = false;
+		return;
+	}
+
+	const FSlimeUIInputEntry& Top = UIInputStack.Last();
+	if (ShouldPauseReason(Top.Reason))
+	{
+		UGameplayStatics::SetGamePaused(this, true);
+		bPausedByUIInput = true;
+	}
+	else if (bPausedByUIInput)
+	{
+		UGameplayStatics::SetGamePaused(this, false);
+		bPausedByUIInput = false;
+	}
+
+	if (IsOverlayReason(Top.Reason))
+	{
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		if (UUserWidget* Focus = Top.FocusWidget.Get())
+		{
+			InputMode.SetWidgetToFocus(Focus->TakeWidget());
+		}
+		SetInputMode(InputMode);
+		bShowMouseCursor = true;
+		return;
+	}
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	if (UUserWidget* Focus = Top.FocusWidget.Get())
+	{
+		InputMode.SetWidgetToFocus(Focus->TakeWidget());
+	}
+	SetInputMode(InputMode);
+	bShowMouseCursor = ShouldShowCursor(Top.Reason);
+}
+
+bool ASlimeFablePlayerController::DismissOverlayUI()
+{
+	UGameInstance* GI = GetGameInstance();
+	UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
+	USlimeInventorySubsystem* Inventory = GI ? GI->GetSubsystem<USlimeInventorySubsystem>() : nullptr;
+
+	if (HasUIInput(ESlimeUIInputReason::WeekSelect))
+	{
+		if (Quests)
+		{
+			Quests->CloseWeekSelect();
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::Souvenir))
+	{
+		if (Inventory)
+		{
+			Inventory->CloseSouvenir();
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::Inventory))
+	{
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			if (USlimeInteractComponent* Interact = ControlledPawn->FindComponentByClass<USlimeInteractComponent>())
+			{
+				Interact->CloseInventory();
+			}
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::QuestLog))
+	{
+		if (Quests)
+		{
+			Quests->CloseQuestLog();
+		}
+		return true;
+	}
+	return false;
+}
+
 void ASlimeFablePlayerController::TogglePauseMenu()
 {
+	if (DismissOverlayUI())
+	{
+		return;
+	}
+
 	if (PauseMenuWidget && PauseMenuWidget->IsInViewport())
 	{
 		if (PauseMenuWidget->TryHandleEscape())
@@ -146,14 +339,7 @@ void ASlimeFablePlayerController::OpenPauseMenu()
 	}
 	PauseMenuWidget->SetVisibility(ESlateVisibility::Visible);
 	PauseMenuWidget->RefreshHubButtonVisibility();
-
-	UGameplayStatics::SetGamePaused(this, true);
-
-	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(PauseMenuWidget->TakeWidget());
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	SetInputMode(InputMode);
-	bShowMouseCursor = true;
+	PushUIInput(ESlimeUIInputReason::Pause, PauseMenuWidget);
 }
 
 void ASlimeFablePlayerController::ClosePauseMenu()
@@ -164,11 +350,7 @@ void ASlimeFablePlayerController::ClosePauseMenu()
 		PauseMenuWidget->RemoveFromParent();
 	}
 
-	UGameplayStatics::SetGamePaused(this, false);
-
-	FInputModeGameOnly InputMode;
-	SetInputMode(InputMode);
-	bShowMouseCursor = false;
+	PopUIInput(ESlimeUIInputReason::Pause);
 }
 
 void ASlimeFablePlayerController::HandlePauseContinue()
@@ -227,38 +409,37 @@ void ASlimeFablePlayerController::HandlePauseResetDay()
 
 void ASlimeFablePlayerController::UpdateAltCursor()
 {
-	if (!IsLocalPlayerController() || IsPauseMenuOpen())
+	if (!IsLocalPlayerController() || HasModalUI())
 	{
 		return;
 	}
+
+	bool bShowCursorDown = false;
 	if (const UGameInstance* GI = GetGameInstance())
 	{
-		if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+		if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
 		{
-			if (Quests->IsQuestLogOpen())
+			bShowCursorDown = InputSettings->IsKeyDown(this, ESlimeInputAction::ShowCursor);
+			if (InputSettings->GetKey(ESlimeInputAction::ShowCursor) == EKeys::LeftAlt)
 			{
-				return;
+				bShowCursorDown = bShowCursorDown || IsInputKeyDown(EKeys::RightAlt);
 			}
 		}
-	}
-
-	const bool bAltDown = IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt);
-	if (bAltDown)
-	{
-		if (!bShowMouseCursor)
+		else
 		{
-			FInputModeGameAndUI InputMode;
-			InputMode.SetHideCursorDuringCapture(false);
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			SetInputMode(InputMode);
-			bShowMouseCursor = true;
+			bShowCursorDown = IsInputKeyDown(EKeys::LeftAlt) || IsInputKeyDown(EKeys::RightAlt);
 		}
 	}
-	else if (bShowMouseCursor)
+	if (bShowCursorDown)
 	{
-		FInputModeGameOnly InputMode;
-		SetInputMode(InputMode);
-		bShowMouseCursor = false;
+		if (!HasUIInput(ESlimeUIInputReason::AltCursor))
+		{
+			PushUIInput(ESlimeUIInputReason::AltCursor, nullptr);
+		}
+	}
+	else if (HasUIInput(ESlimeUIInputReason::AltCursor))
+	{
+		PopUIInput(ESlimeUIInputReason::AltCursor);
 	}
 }
 

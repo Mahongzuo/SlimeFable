@@ -2,6 +2,7 @@
 
 #include "SlimeInteractComponent.h"
 
+#include "SlimeFablePlayerController.h"
 #include "SlimeWorldPickup.h"
 #include "SlimePlacedActor.h"
 #include "Quest/QuestInteractActor.h"
@@ -267,12 +268,19 @@ void USlimeInteractComponent::ToggleInventory()
 		return;
 	}
 	InventoryWidget->AddToViewport(30);
-	UGameplayStatics::SetGamePaused(PC, true);
-	FInputModeUIOnly Mode;
-	Mode.SetWidgetToFocus(InventoryWidget->TakeWidget());
-	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	PC->SetInputMode(Mode);
-	PC->bShowMouseCursor = true;
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PushUIInput(ESlimeUIInputReason::Inventory, InventoryWidget);
+	}
+	else
+	{
+		UGameplayStatics::SetGamePaused(PC, true);
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(InventoryWidget->TakeWidget());
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+		PC->bShowMouseCursor = true;
+	}
 }
 
 void USlimeInteractComponent::CloseInventory()
@@ -284,7 +292,11 @@ void USlimeInteractComponent::CloseInventory()
 		InventoryWidget->RemoveFromParent();
 		InventoryWidget = nullptr;
 	}
-	if (PC)
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PopUIInput(ESlimeUIInputReason::Inventory);
+	}
+	else if (PC)
 	{
 		UGameplayStatics::SetGamePaused(PC, false);
 		PC->SetInputMode(FInputModeGameOnly());

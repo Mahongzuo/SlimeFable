@@ -13,8 +13,6 @@
 #include "Components/Image.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
-#include "Input/Events.h"
-#include "InputCoreTypes.h"
 
 namespace
 {
@@ -81,16 +79,6 @@ void UWeekSelectWidget::NativeConstruct()
 	}
 	ApplyVisuals();
 	RefreshButtons();
-}
-
-FReply UWeekSelectWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
-{
-	if (InKeyEvent.GetKey() == EKeys::Escape)
-	{
-		HandleCancel();
-		return FReply::Handled();
-	}
-	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 
 void UWeekSelectWidget::BuildLayoutIfNeeded()

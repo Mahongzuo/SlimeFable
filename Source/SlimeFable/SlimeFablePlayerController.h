@@ -10,6 +10,24 @@ class UInputMappingContext;
 class UUserWidget;
 class UPauseMenuWidget;
 
+UENUM()
+enum class ESlimeUIInputReason : uint8
+{
+	Pause,
+	WeekSelect,
+	Inventory,
+	Souvenir,
+	QuestLog,
+	LoadingGate,
+	AltCursor
+};
+
+struct FSlimeUIInputEntry
+{
+	ESlimeUIInputReason Reason = ESlimeUIInputReason::Pause;
+	TWeakObjectPtr<UUserWidget> FocusWidget;
+};
+
 /**
  *  Basic PlayerController class for a third person game
  *  Manages input mappings and in-game pause menu (ESC).
@@ -18,6 +36,12 @@ UCLASS(abstract)
 class ASlimeFablePlayerController : public APlayerController
 {
 	GENERATED_BODY()
+
+public:
+	void PushUIInput(ESlimeUIInputReason Reason, UUserWidget* FocusWidget);
+	void PopUIInput(ESlimeUIInputReason Reason);
+	bool HasUIInput(ESlimeUIInputReason Reason) const;
+	bool HasModalUI() const;
 
 protected:
 
@@ -62,7 +86,9 @@ protected:
 	void OpenPauseMenu();
 	void ClosePauseMenu();
 	void UpdateAltCursor();
+	void ApplyTopUIInput();
 	bool IsPauseMenuOpen() const;
+	bool DismissOverlayUI();
 
 	UFUNCTION()
 	void HandlePauseContinue();
@@ -78,4 +104,7 @@ protected:
 
 	UFUNCTION()
 	void HandlePauseResetDay();
+
+	TArray<FSlimeUIInputEntry> UIInputStack;
+	bool bPausedByUIInput = false;
 };

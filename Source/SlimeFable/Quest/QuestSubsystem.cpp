@@ -10,6 +10,7 @@
 #include "Enemy/EnemyCharacter.h"
 #include "Combat/SlimeHealthComponent.h"
 #include "SlimeFable.h"
+#include "SlimeFablePlayerController.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
@@ -1022,12 +1023,19 @@ void UQuestSubsystem::ToggleQuestLog()
 		return;
 	}
 	LogWidget->AddToViewport(25);
-	FInputModeGameAndUI Mode;
-	Mode.SetWidgetToFocus(LogWidget->TakeWidget());
-	Mode.SetHideCursorDuringCapture(false);
-	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	PC->SetInputMode(Mode);
-	PC->bShowMouseCursor = true;
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PushUIInput(ESlimeUIInputReason::QuestLog, LogWidget);
+	}
+	else
+	{
+		FInputModeGameAndUI Mode;
+		Mode.SetWidgetToFocus(LogWidget->TakeWidget());
+		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+		PC->bShowMouseCursor = true;
+	}
 }
 
 void UQuestSubsystem::CloseQuestLog()
@@ -1042,7 +1050,11 @@ void UQuestSubsystem::CloseQuestLog()
 		LogWidget->RemoveFromParent();
 		LogWidget = nullptr;
 	}
-	if (PC)
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PopUIInput(ESlimeUIInputReason::QuestLog);
+	}
+	else if (PC)
 	{
 		PC->SetInputMode(FInputModeGameOnly());
 		PC->bShowMouseCursor = false;
@@ -1449,12 +1461,18 @@ void UQuestSubsystem::OpenWeekSelect(FName DayId, FName ChapterId)
 	}
 	WeekSelectWidget->Setup(DayId, ChapterId);
 	WeekSelectWidget->AddToViewport(30);
-	FInputModeGameAndUI Mode;
-	Mode.SetWidgetToFocus(WeekSelectWidget->TakeWidget());
-	Mode.SetHideCursorDuringCapture(false);
-	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	PC->SetInputMode(Mode);
-	PC->bShowMouseCursor = true;
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PushUIInput(ESlimeUIInputReason::WeekSelect, WeekSelectWidget);
+	}
+	else
+	{
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(WeekSelectWidget->TakeWidget());
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+		PC->bShowMouseCursor = true;
+	}
 }
 
 void UQuestSubsystem::CloseWeekSelect()
@@ -1469,7 +1487,11 @@ void UQuestSubsystem::CloseWeekSelect()
 		WeekSelectWidget->RemoveFromParent();
 		WeekSelectWidget = nullptr;
 	}
-	if (PC)
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PopUIInput(ESlimeUIInputReason::WeekSelect);
+	}
+	else if (PC)
 	{
 		PC->SetInputMode(FInputModeGameOnly());
 		PC->bShowMouseCursor = false;

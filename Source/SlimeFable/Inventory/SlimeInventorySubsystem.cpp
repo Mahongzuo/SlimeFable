@@ -7,6 +7,7 @@
 #include "SlimePlacementComponent.h"
 #include "Combat/SlimeCombatComponent.h"
 #include "Combat/SlimeHealthComponent.h"
+#include "SlimeFablePlayerController.h"
 #include "UI/SlimeSouvenirViewerWidget.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -440,6 +441,11 @@ bool USlimeInventorySubsystem::OpenSouvenir(FName ItemId, APlayerController* PC)
 		return false;
 	}
 
+	if (SouvenirWidget)
+	{
+		CloseSouvenir();
+	}
+
 	USlimeSouvenirViewerWidget* Viewer = CreateWidget<USlimeSouvenirViewerWidget>(PC, USlimeSouvenirViewerWidget::StaticClass());
 	if (!Viewer)
 	{
@@ -450,11 +456,34 @@ bool USlimeInventorySubsystem::OpenSouvenir(FName ItemId, APlayerController* PC)
 	// would silently hit null BindWidgetOptional pointers.
 	Viewer->AddToViewport(40);
 	Viewer->SetSouvenir(Def);
-	UGameplayStatics::SetGamePaused(PC, true);
-	FInputModeUIOnly Mode;
-	Mode.SetWidgetToFocus(Viewer->TakeWidget());
-	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	PC->SetInputMode(Mode);
-	PC->bShowMouseCursor = true;
+	SouvenirWidget = Viewer;
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PushUIInput(ESlimeUIInputReason::Souvenir, Viewer);
+	}
+	else
+	{
+		UGameplayStatics::SetGamePaused(PC, true);
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(Viewer->TakeWidget());
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+		PC->bShowMouseCursor = true;
+	}
 	return true;
+}
+
+void USlimeInventorySubsystem::CloseSouvenir()
+{
+	APlayerController* PC = nullptr;
+	if (SouvenirWidget)
+	{
+		PC = SouvenirWidget->GetOwningPlayer();
+		SouvenirWidget->Dismiss();
+		SouvenirWidget = nullptr;
+	}
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->PopUIInput(ESlimeUIInputReason::Souvenir);
+	}
 }

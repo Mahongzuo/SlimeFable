@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Input/Reply.h"
 #include "WeekSelectWidget.generated.h"
 
 class UImage;
@@ -22,7 +21,6 @@ public:
 
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
-	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 protected:
 	void BuildLayoutIfNeeded();

@@ -1,5 +1,6 @@
 #include "Quest/QuestLogWidget.h"
 #include "Quest/QuestSubsystem.h"
+#include "Settings/SlimeInputSettings.h"
 #include "UI/MenuUIStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
@@ -156,7 +157,15 @@ void UQuestLogWidget::NativeConstruct()
 
 FReply UQuestLogWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::Escape || InKeyEvent.GetKey() == EKeys::J)
+	FKey CloseKey = EKeys::J;
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+		{
+			CloseKey = InputSettings->GetKey(ESlimeInputAction::QuestLog);
+		}
+	}
+	if (InKeyEvent.GetKey() == CloseKey)
 	{
 		HandleCloseClicked();
 		return FReply::Handled();

@@ -3,8 +3,10 @@
 #include "UI/SlimeSouvenirViewerWidget.h"
 
 #include "UI/MenuUIStyle.h"
+#include "Inventory/SlimeInventorySubsystem.h"
 #include "Inventory/SlimeItemDefinition.h"
 #include "Inventory/SlimeSouvenirPreviewActor.h"
+#include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Blueprint/WidgetTree.h"
@@ -26,7 +28,6 @@
 #include "Materials/MaterialInterface.h"
 #include "InputCoreTypes.h"
 #include "SlimeFable.h"
-#include "Kismet/GameplayStatics.h"
 
 namespace SlimeSouvenirPaths
 {
@@ -94,16 +95,6 @@ void USlimeSouvenirViewerWidget::NativeTick(const FGeometry& MyGeometry, float I
 	{
 		bAwaitingVideoAspect = false;
 	}
-}
-
-FReply USlimeSouvenirViewerWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
-{
-	if (InKeyEvent.GetKey() == EKeys::Escape)
-	{
-		OnCloseClicked();
-		return FReply::Handled();
-	}
-	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 
 bool USlimeSouvenirViewerWidget::IsPointerOverPreviewBox(const FPointerEvent& InMouseEvent) const
@@ -715,15 +706,22 @@ void USlimeSouvenirViewerWidget::UpdateMeshFit()
 	PreviewActor->FitToWorldRect(Center, ViewRot, Width, Height);
 }
 
-void USlimeSouvenirViewerWidget::OnCloseClicked()
+void USlimeSouvenirViewerWidget::Dismiss()
 {
 	StopVideo();
 	EndMeshPreview();
-	if (APlayerController* PC = GetOwningPlayer())
-	{
-		UGameplayStatics::SetGamePaused(PC, false);
-		PC->SetInputMode(FInputModeGameOnly());
-		PC->bShowMouseCursor = false;
-	}
 	RemoveFromParent();
+}
+
+void USlimeSouvenirViewerWidget::OnCloseClicked()
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeInventorySubsystem* Inv = GI->GetSubsystem<USlimeInventorySubsystem>())
+		{
+			Inv->CloseSouvenir();
+			return;
+		}
+	}
+	Dismiss();
 }

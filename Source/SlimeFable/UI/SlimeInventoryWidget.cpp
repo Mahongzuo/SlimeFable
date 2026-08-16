@@ -8,6 +8,7 @@
 #include "Inventory/SlimeItemDefinition.h"
 #include "Inventory/SlimeInteractComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
+#include "Settings/SlimeInputSettings.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -63,7 +64,15 @@ void USlimeInventoryWidget::NativeDestruct()
 
 FReply USlimeInventoryWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::Escape || InKeyEvent.GetKey() == EKeys::B)
+	FKey CloseKey = EKeys::B;
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+		{
+			CloseKey = InputSettings->GetKey(ESlimeInputAction::Inventory);
+		}
+	}
+	if (InKeyEvent.GetKey() == CloseKey)
 	{
 		OnCloseClicked();
 		return FReply::Handled();

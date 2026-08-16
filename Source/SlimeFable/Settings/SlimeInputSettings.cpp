@@ -13,7 +13,7 @@ namespace SlimeInputPrivate
 {
 	static const TCHAR* ConfigSection = TEXT("SlimeInput");
 	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
-	static constexpr int32 CurrentBindSchemeVersion = 3;
+	static constexpr int32 CurrentBindSchemeVersion = 4;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
 	static const TCHAR* DefaultMoveContextPath =
@@ -79,6 +79,8 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::Hotbar4: return EKeys::Four;
 	case ESlimeInputAction::Hotbar5: return EKeys::Five;
 	case ESlimeInputAction::Hotbar6: return EKeys::Six;
+	case ESlimeInputAction::Dodge: return EKeys::RightMouseButton;
+	case ESlimeInputAction::ShowCursor: return EKeys::LeftAlt;
 	default: return EKeys::Invalid;
 	}
 }
@@ -130,6 +132,8 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::Hotbar4: return FText::FromString(TEXT("放置品快捷1"));
 	case ESlimeInputAction::Hotbar5: return FText::FromString(TEXT("放置品快捷2"));
 	case ESlimeInputAction::Hotbar6: return FText::FromString(TEXT("放置品快捷3"));
+	case ESlimeInputAction::Dodge: return FText::FromString(TEXT("闪避"));
+	case ESlimeInputAction::ShowCursor: return FText::FromString(TEXT("显示鼠标"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -275,7 +279,9 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 		ESlimeInputAction::Hotbar3,
 		ESlimeInputAction::Hotbar4,
 		ESlimeInputAction::Hotbar5,
-		ESlimeInputAction::Hotbar6
+		ESlimeInputAction::Hotbar6,
+		ESlimeInputAction::Dodge,
+		ESlimeInputAction::ShowCursor
 	};
 	for (ESlimeInputAction Action : NewActions)
 	{

@@ -16,6 +16,8 @@
 #include "SlimeDodgeAfterimage.h"
 #include "SlimeEnemyCharacter.h"
 #include "SlimeHealthComponent.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
 
 USlimeDodgeComponent::USlimeDodgeComponent()
@@ -167,7 +169,16 @@ void USlimeDodgeComponent::PollRightMouse()
 		return;
 	}
 
-	const bool bDown = PC->IsInputKeyDown(EKeys::RightMouseButton);
+	bool bDown = false;
+	const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+	if (const USlimeInputSettings* InputSettings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr)
+	{
+		bDown = InputSettings->IsKeyDown(PC, ESlimeInputAction::Dodge);
+	}
+	else
+	{
+		bDown = PC->IsInputKeyDown(EKeys::RightMouseButton);
+	}
 	if (bDown && !bRightMouseDown)
 	{
 		TryHandleRightClick();
