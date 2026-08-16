@@ -22,6 +22,7 @@ ASlimeWorldPickup::ASlimeWorldPickup()
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
+	Mesh->SetMobility(EComponentMobility::Movable);
 	Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 	Mesh->SetGenerateOverlapEvents(true);
 
@@ -29,7 +30,7 @@ ASlimeWorldPickup::ASlimeWorldPickup()
 	if (SphereMesh.Succeeded())
 	{
 		Mesh->SetStaticMesh(SphereMesh.Object);
-		Mesh->SetWorldScale3D(FVector(0.45f));
+		Mesh->SetRelativeScale3D(FVector(0.45f));
 	}
 
 	HighlightSphere = CreateDefaultSubobject<USphereComponent>(TEXT("HighlightSphere"));

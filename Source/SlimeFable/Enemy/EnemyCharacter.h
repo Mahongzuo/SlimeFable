@@ -15,6 +15,7 @@ class UWidgetComponent;
 class UStaticMeshComponent;
 class USkeletalMeshComponent;
 class UAnimMontage;
+class UAnimInstance;
 class USkeletalMesh;
 class UNiagaraSystem;
 class UMaterialInterface;
@@ -62,8 +63,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Mesh")
 	TArray<FEnemyMeshPart> MeshParts;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Mesh")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Mesh",
+		meta = (ToolTip = "主骨骼网格。空则编辑器/游戏显示占位立方体。按日 BP 用脚本绑，不要写死在 C++。"))
 	TSoftObjectPtr<USkeletalMesh> PrimarySkeletalMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Mesh",
+		meta = (ToolTip = "主骨骼用的 AnimBP。填了才会站姿/Idle；空则 T-pose。和 PrimarySkeletalMesh 一起绑。"))
+	TSoftClassPtr<UAnimInstance> PrimaryAnimClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;

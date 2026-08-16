@@ -59,7 +59,7 @@ void AQuestSouvenirPickup::ApplyWorldMesh()
 	if (UStaticMesh* Custom = SouvenirMesh.LoadSynchronous())
 	{
 		Mesh->SetStaticMesh(Custom);
-		Mesh->SetWorldScale3D(FVector(1.f));
+		Mesh->SetRelativeScale3D(FVector(1.f));
 	}
 }
 

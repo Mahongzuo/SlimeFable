@@ -11,6 +11,7 @@ AQuestInteractActor::AQuestInteractActor()
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
+	Mesh->SetMobility(EComponentMobility::Movable);
 	Mesh->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 	Mesh->SetGenerateOverlapEvents(true);
 
@@ -18,7 +19,7 @@ AQuestInteractActor::AQuestInteractActor()
 	if (SphereMesh.Succeeded())
 	{
 		Mesh->SetStaticMesh(SphereMesh.Object);
-		Mesh->SetWorldScale3D(FVector(0.5f));
+		Mesh->SetRelativeScale3D(FVector(0.5f));
 	}
 
 	Objective = CreateDefaultSubobject<UQuestObjectiveComponent>(TEXT("Objective"));
@@ -35,7 +36,7 @@ void AQuestInteractActor::Configure(FName ChapterId, FName QuestId, FName Branch
 	}
 	if (Mesh)
 	{
-		Mesh->SetWorldScale3D(FVector(Scale));
+		Mesh->SetRelativeScale3D(FVector(Scale));
 		if (UMaterial* Base = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")))
 		{
 			if (UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this))

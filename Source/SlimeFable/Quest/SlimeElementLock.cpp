@@ -7,7 +7,7 @@ ASlimeElementLock::ASlimeElementLock()
 {
 	if (Mesh)
 	{
-		Mesh->SetWorldScale3D(FVector(0.7f, 0.7f, 1.1f));
+		Mesh->SetRelativeScale3D(FVector(0.7f, 0.7f, 1.1f));
 	}
 }
 

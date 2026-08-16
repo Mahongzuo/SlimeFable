@@ -9,6 +9,9 @@
 - Soft 引用日关卡：Registry 用 `FSoftObjectPath`；运行时查询用 `TSoftObjectPtr<UWorld>`。
 - 新加模块依赖时同步改 `SlimeFable.Build.cs`。
 - Live Coding 开启时完整 UBT 可能被拒；新增 UCLASS/UFUNCTION 通常需要关编辑器编译或重启编辑器。
+- 关卡摆件根 `StaticMesh`（以及会点到的占位子网格）必须 `SetMobility(Movable)`，否则视口能选中、无移动/缩放 gizmo。
+- 构造 / Construction 用 `SetRelativeScale3D`，禁止 `SetWorldScale3D`（会和编辑器变换抢、缩放像锁死）。
+- 敌人网格与 AnimBP **不要**写死在 C++ 默认值；建该日 BP 时用 Python 绑到 CDO（`PrimarySkeletalMesh` / `PrimaryAnimClass` / 攻击与死亡 Montage）。只建空壳会永远显示占位立方体。细则见 `slimefable-day-levels` 的 `placeable-actors.md`。
 
 ## Details 分类
 

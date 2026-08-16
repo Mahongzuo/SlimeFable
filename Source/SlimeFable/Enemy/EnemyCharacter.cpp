@@ -51,13 +51,14 @@ AEnemyCharacter::AEnemyCharacter()
 
 	PlaceholderMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaceholderMesh"));
 	PlaceholderMesh->SetupAttachment(GetCapsuleComponent());
+	PlaceholderMesh->SetMobility(EComponentMobility::Movable);
 	PlaceholderMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PlaceholderMesh->SetRelativeLocation(FVector(0.f, 0.f, -20.f));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (CubeMesh.Succeeded())
 	{
 		PlaceholderMesh->SetStaticMesh(CubeMesh.Object);
-		PlaceholderMesh->SetWorldScale3D(FVector(0.7f, 0.7f, 1.4f));
+		PlaceholderMesh->SetRelativeScale3D(FVector(0.7f, 0.7f, 1.4f));
 	}
 
 	Health = CreateDefaultSubobject<USlimeHealthComponent>(TEXT("Health"));
@@ -353,6 +354,10 @@ void AEnemyCharacter::RebuildMeshParts()
 		GetMesh()->SetSkeletalMesh(Primary);
 		GetMesh()->SetHiddenInGame(false);
 		GetMesh()->SetVisibility(true);
+		if (UClass* AnimClass = PrimaryAnimClass.LoadSynchronous())
+		{
+			GetMesh()->SetAnimInstanceClass(AnimClass);
+		}
 	}
 	else
 	{

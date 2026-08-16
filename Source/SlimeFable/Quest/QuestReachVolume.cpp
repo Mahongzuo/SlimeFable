@@ -13,6 +13,7 @@ AQuestReachVolume::AQuestReachVolume()
 
 	Box = CreateDefaultSubobject<UBoxComponent>(TEXT("Box"));
 	SetRootComponent(Box);
+	Box->SetMobility(EComponentMobility::Movable);
 	Box->SetBoxExtent(FVector(180.f, 180.f, 120.f));
 	Box->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 	Box->SetGenerateOverlapEvents(true);
@@ -25,6 +26,7 @@ AQuestReachVolume::AQuestReachVolume()
 
 	Marker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Marker"));
 	Marker->SetupAttachment(Box);
+	Marker->SetMobility(EComponentMobility::Movable);
 	Marker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (CylinderMesh.Succeeded())

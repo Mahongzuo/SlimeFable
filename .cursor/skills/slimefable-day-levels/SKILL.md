@@ -10,6 +10,7 @@ description: >-
 
 API 与路径细节见 [references/day-level-api.md](references/day-level-api.md)。  
 每日故事资产目录见 [references/day-content-folders.md](references/day-content-folders.md)。  
+做可摆放 Actor / 建日关卡 BP 先读 [references/placeable-actors.md](references/placeable-actors.md)（根网格 Movable、相对缩放、敌人必须绑骨骼与 Montage、出生点用持久关 PlayerStart）。  
 大厅传送门、共用 OperaHouse、按年周目见 `slimefable-week-cycle`。
 
 **新日期 = 登记 Registry 子图 + 该日大厅摆 N 扇门 + 做 `SL_{DayId}_{Chapter}`。** 禁止再做一套大厅，禁止 MCP 逐关摆 366 扇门。365 张空日关卡（跳过 `0812`）流送同一份 `/Game/OperaHouse/Maps/Demonstration`，脚本：`Content/Python/apply_operahouse_lobby.py`。

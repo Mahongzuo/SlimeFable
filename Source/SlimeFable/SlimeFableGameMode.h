@@ -18,7 +18,6 @@ public:
 	
 	/** Constructor */
 	ASlimeFableGameMode();
+
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 };
-
-
-

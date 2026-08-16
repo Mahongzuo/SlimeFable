@@ -15,6 +15,7 @@ ADayChapterPortal::ADayChapterPortal()
 	if (Mesh)
 	{
 		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetRelativeScale3D(FVector::OneVector);
 		Mesh->SetVisibility(false);
 		Mesh->SetHiddenInGame(true);
 		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -42,6 +43,15 @@ ADayChapterPortal::ADayChapterPortal()
 void ADayChapterPortal::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	if (Mesh)
+	{
+		const FVector Scale = Mesh->GetRelativeScale3D();
+		if (!Scale.GetAbs().Equals(FVector(Scale.GetAbs().X), 0.01f))
+		{
+			const float Uniform = FMath::Pow(FMath::Abs(Scale.X * Scale.Y * Scale.Z), 1.f / 3.f);
+			Mesh->SetRelativeScale3D(FVector(FMath::IsFinite(Uniform) && Uniform > KINDA_SMALL_NUMBER ? Uniform : 1.f));
+		}
+	}
 	if (TravelVolume)
 	{
 		TravelVolume->SetBoxExtent(OverlapExtent);
@@ -131,7 +141,9 @@ void ADayChapterPortal::SnapChildToPortal(AActor* Child) const
 
 	Child->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	Child->AttachToComponent(VisualPortal, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-	Child->SetActorRelativeTransform(FTransform::Identity);
+	Child->SetActorRelativeLocation(FVector::ZeroVector);
+	Child->SetActorRelativeRotation(FRotator::ZeroRotator);
+	Child->SetActorRelativeScale3D(FVector::OneVector);
 }
 
 void ADayChapterPortal::DisableChildGameplay(AActor* Child) const

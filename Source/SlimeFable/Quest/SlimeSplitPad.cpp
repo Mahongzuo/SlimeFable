@@ -12,12 +12,14 @@ ASlimeSplitPad::ASlimeSplitPad()
 
 	Volume = CreateDefaultSubobject<UBoxComponent>(TEXT("Volume"));
 	SetRootComponent(Volume);
+	Volume->SetMobility(EComponentMobility::Movable);
 	Volume->SetBoxExtent(FVector(80.f, 80.f, 30.f));
 	Volume->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 	Volume->SetGenerateOverlapEvents(true);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(Volume);
+	Mesh->SetMobility(EComponentMobility::Movable);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (Cube.Succeeded())

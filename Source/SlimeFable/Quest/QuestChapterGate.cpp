@@ -9,7 +9,7 @@ AQuestChapterGate::AQuestChapterGate()
 {
 	if (Mesh)
 	{
-		Mesh->SetWorldScale3D(FVector(0.7f, 0.35f, 1.4f));
+		Mesh->SetRelativeScale3D(FVector(0.7f, 0.35f, 1.4f));
 	}
 }
 
