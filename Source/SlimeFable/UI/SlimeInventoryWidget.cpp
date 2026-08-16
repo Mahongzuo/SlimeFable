@@ -14,6 +14,8 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/PanelSlot.h"
+#include "Components/PanelWidget.h"
 #include "Components/Image.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -41,6 +43,7 @@ TSharedRef<SWidget> USlimeInventoryWidget::RebuildWidget()
 void USlimeInventoryWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	EnsureDiscardButton();
 	ApplyLook();
 
 	if (CloseButton) CloseButton->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnCloseClicked);
@@ -48,6 +51,7 @@ void USlimeInventoryWidget::NativeConstruct()
 	if (TabPlaceable) TabPlaceable->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnTabPlaceable);
 	if (TabSouvenir) TabSouvenir->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnTabSouvenir);
 	if (PrimaryActionButton) PrimaryActionButton->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnPrimaryActionClicked);
+	if (DiscardButton) DiscardButton->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnDiscardClicked);
 
 	Refresh();
 }
@@ -78,6 +82,7 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 	if (TitleText && ItemGrid && CloseButton)
 	{
 		bBuiltInCode = false;
+		EnsureDiscardButton();
 		return;
 	}
 	bBuiltInCode = true;
@@ -143,7 +148,26 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 	DetailDesc->SetMinDesiredWidth(360.f);
 	Panel->AddChildToVerticalBox(DetailDesc);
 
-	PrimaryActionButton = AddBtn(TEXT("PrimaryActionButton"), FText::FromString(TEXT("使用")));
+	ActionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ActionRow"));
+	if (UVerticalBoxSlot* ActionSlot = Panel->AddChildToVerticalBox(ActionRow))
+	{
+		ActionSlot->SetPadding(FMargin(0.f, 8.f));
+		ActionSlot->SetHorizontalAlignment(HAlign_Center);
+	}
+	auto AddRowBtn = [this](const FName& Name, const FText& Label) -> UButton*
+	{
+		UButton* Btn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), *(Name.ToString() + TEXT("_Lbl")));
+		Text->SetText(Label);
+		Btn->AddChild(Text);
+		if (UHorizontalBoxSlot* Slot = ActionRow->AddChildToHorizontalBox(Btn))
+		{
+			Slot->SetPadding(FMargin(8.f, 0.f));
+		}
+		return Btn;
+	};
+	PrimaryActionButton = AddRowBtn(TEXT("PrimaryActionButton"), FText::FromString(TEXT("使用")));
+	DiscardButton = AddRowBtn(TEXT("DiscardButton"), FText::FromString(TEXT("丢弃")));
 
 	HotbarAssignRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarAssignRow"));
 	Panel->AddChildToVerticalBox(HotbarAssignRow);
@@ -200,7 +224,8 @@ void USlimeInventoryWidget::ApplyLook()
 	StyleBtn(TabConsumable, FVector2D(120.f, 44.f));
 	StyleBtn(TabPlaceable, FVector2D(120.f, 44.f));
 	StyleBtn(TabSouvenir, FVector2D(120.f, 44.f));
-	StyleBtn(PrimaryActionButton, FVector2D(220.f, 48.f));
+	StyleBtn(PrimaryActionButton, FVector2D(200.f, 48.f));
+	StyleBtn(DiscardButton, FVector2D(200.f, 48.f));
 	StyleBtn(CloseButton, FVector2D(220.f, 48.f));
 	if (HotbarAssignRow)
 	{
@@ -293,11 +318,21 @@ void USlimeInventoryWidget::SelectItem(FName ItemId)
 		{
 			Label->SetText(FText::FromString(Action));
 		}
+		const ESlateVisibility ActionVis = Def ? ESlateVisibility::Visible : ESlateVisibility::Collapsed;
+		PrimaryActionButton->SetVisibility(ActionVis);
 		const bool bShowHotbar = Def && (Def->Category == ESlimeItemCategory::Consumable || Def->Category == ESlimeItemCategory::Placeable);
 		if (HotbarAssignRow)
 		{
 			HotbarAssignRow->SetVisibility(bShowHotbar ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 		}
+	}
+	if (DiscardButton)
+	{
+		DiscardButton->SetVisibility(Def ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (ActionRow)
+	{
+		ActionRow->SetVisibility(Def ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 }
 
@@ -315,6 +350,67 @@ void USlimeInventoryWidget::OnCloseClicked()
 		}
 	}
 	RemoveFromParent();
+}
+
+void USlimeInventoryWidget::EnsureDiscardButton()
+{
+	if (DiscardButton || !WidgetTree)
+	{
+		return;
+	}
+
+	UPanelWidget* InsertParent = nullptr;
+	int32 InsertIndex = 0;
+	if (PrimaryActionButton)
+	{
+		if (UHorizontalBox* ExistingRow = Cast<UHorizontalBox>(PrimaryActionButton->GetParent()))
+		{
+			ActionRow = ExistingRow;
+			InsertParent = ExistingRow;
+			InsertIndex = ExistingRow->GetChildIndex(PrimaryActionButton) + 1;
+		}
+		else if (UPanelWidget* Direct = Cast<UPanelWidget>(PrimaryActionButton->GetParent()))
+		{
+			InsertParent = Direct;
+			InsertIndex = Direct->GetChildIndex(PrimaryActionButton) + 1;
+		}
+	}
+	if (!InsertParent)
+	{
+		return;
+	}
+
+	DiscardButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("DiscardButton"));
+	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DiscardButton_Lbl"));
+	Label->SetText(FText::FromString(TEXT("丢弃")));
+	DiscardButton->AddChild(Label);
+	if (UPanelSlot* Inserted = InsertParent->InsertChildAt(InsertIndex, DiscardButton))
+	{
+		if (UHorizontalBoxSlot* HSlot = Cast<UHorizontalBoxSlot>(Inserted))
+		{
+			HSlot->SetPadding(FMargin(8.f, 0.f));
+		}
+	}
+}
+
+void USlimeInventoryWidget::OnDiscardClicked()
+{
+	if (SelectedItemId.IsNone())
+	{
+		return;
+	}
+	USlimeInventorySubsystem* Inv = GetInventory();
+	if (!Inv)
+	{
+		return;
+	}
+	const int32 Count = Inv->GetItemCount(SelectedItemId);
+	if (Count <= 0 || !Inv->RemoveItem(SelectedItemId, Count))
+	{
+		return;
+	}
+	SelectedItemId = NAME_None;
+	Refresh();
 }
 
 void USlimeInventoryWidget::OnTabConsumable() { SelectCategory(ESlimeItemCategory::Consumable); }

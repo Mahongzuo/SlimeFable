@@ -38,9 +38,27 @@ AEnemyFighter::AEnemyFighter()
 	EnemyCombat::FillDefaultFighterMoves(Moves);
 }
 
+void AEnemyFighter::EnsureMoveKit()
+{
+	if (bBiteOnlyKit)
+	{
+		const bool bAlreadyBite = Moves.Num() > 0 && Moves[0].MoveId == FName(TEXT("BiteSnap"));
+		if (!bAlreadyBite)
+		{
+			EnemyCombat::FillWatchdogBiteMoves(Moves);
+		}
+		return;
+	}
+	if (Moves.Num() == 0)
+	{
+		EnemyCombat::FillDefaultFighterMoves(Moves);
+	}
+}
+
 void AEnemyFighter::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	EnsureMoveKit();
 	SyncRangeVisuals();
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
@@ -55,10 +73,14 @@ void AEnemyFighter::BeginPlay()
 		LeashRange = DetectRange;
 	}
 	Super::BeginPlay();
+	EnsureMoveKit();
 	SyncRangeVisuals();
-	if (Moves.Num() == 0)
+	if (bUseSingleNodeAnims && IdleMontages.Num() > 0)
 	{
-		EnemyCombat::FillDefaultFighterMoves(Moves);
+		if (UAnimMontage* Idle = IdleMontages[0].LoadSynchronous())
+		{
+			PlayMeshAnimation(Idle, true);
+		}
 	}
 }
 

@@ -5,12 +5,10 @@
 #include "SlimeSouvenirPreviewActor.generated.h"
 
 class UStaticMeshComponent;
-class USceneCaptureComponent2D;
-class UDirectionalLightComponent;
-class UTextureRenderTarget2D;
+class UPointLightComponent;
 class UStaticMesh;
 
-/** Off-screen mesh + SceneCapture used by the souvenir viewer. */
+/** In-world inspect mesh shown through the souvenir viewer window. */
 UCLASS()
 class SLIMEFABLE_API ASlimeSouvenirPreviewActor : public AActor
 {
@@ -19,12 +17,13 @@ class SLIMEFABLE_API ASlimeSouvenirPreviewActor : public AActor
 public:
 	ASlimeSouvenirPreviewActor();
 
-	void SetupPreview(UStaticMesh* Mesh, UTextureRenderTarget2D* Target);
+	void SetupPreview(UStaticMesh* Mesh);
+	void FitToWorldRect(const FVector& Center, const FRotator& ViewRotation, float Width, float Height);
 	void AddOrbit(float YawDelta, float PitchDelta);
-	void Capture();
+	void AddZoom(float WheelDelta);
 
 protected:
-	void FrameCamera();
+	void ApplyMeshTransform();
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Pivot;
@@ -33,11 +32,11 @@ protected:
 	TObjectPtr<UStaticMeshComponent> PreviewMesh;
 
 	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<USceneCaptureComponent2D> CaptureComp;
+	TObjectPtr<UPointLightComponent> FillLight;
 
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UDirectionalLightComponent> KeyLight;
-
+	FBoxSphereBounds MeshBounds;
 	float OrbitYaw = 25.f;
 	float OrbitPitch = -18.f;
+	float ZoomScale = 1.f;
+	float FitScale = 1.f;
 };

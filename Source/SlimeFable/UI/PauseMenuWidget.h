@@ -16,6 +16,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuContinue);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuLevelSelect);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuMainMenu);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuReturnToHub);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuResetDay);
 
 UCLASS()
 class SLIMEFABLE_API UPauseMenuWidget : public UUserWidget
@@ -44,11 +45,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "UI")
 	FOnPauseMenuReturnToHub OnReturnToHubRequested;
 
+	UPROPERTY(BlueprintAssignable, Category = "UI")
+	FOnPauseMenuResetDay OnResetDayRequested;
+
 	void RefreshHubButtonVisibility();
 
 protected:
 	void BuildLayoutIfNeeded();
 	void EnsureReturnToHubButton();
+	void EnsureResetDayButton();
 	void ApplyLook();
 	void ResolveSettingsClasses();
 	void OpenKeybindSettings();
@@ -71,6 +76,9 @@ protected:
 
 	UFUNCTION()
 	void OnReturnToHubClicked();
+
+	UFUNCTION()
+	void OnResetDayClicked();
 
 	UPROPERTY(EditAnywhere, Category = "UI")
 	TSubclassOf<UKeybindSettingsWidget> KeybindSettingsClass;
@@ -107,6 +115,9 @@ protected:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> ReturnToHubButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ResetDayButton;
 
 	UPROPERTY()
 	TObjectPtr<UKeybindSettingsWidget> KeybindSettingsWidget;

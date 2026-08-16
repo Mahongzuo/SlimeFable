@@ -137,6 +137,7 @@ void ASlimeFablePlayerController::OpenPauseMenu()
 		PauseMenuWidget->OnLevelSelectRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseLevelSelect);
 		PauseMenuWidget->OnMainMenuRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseMainMenu);
 		PauseMenuWidget->OnReturnToHubRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseReturnToHub);
+		PauseMenuWidget->OnResetDayRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseResetDay);
 	}
 
 	if (!PauseMenuWidget->IsInViewport())
@@ -210,6 +211,17 @@ void ASlimeFablePlayerController::HandlePauseReturnToHub()
 	if (Quests && !HubDayId.IsNone())
 	{
 		Quests->TravelToHub(HubDayId);
+	}
+}
+
+void ASlimeFablePlayerController::HandlePauseResetDay()
+{
+	UGameInstance* GI = GetGameInstance();
+	UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
+	ClosePauseMenu();
+	if (Quests)
+	{
+		Quests->ResetDayProgressAndReload();
 	}
 }
 

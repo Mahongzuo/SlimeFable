@@ -22,8 +22,8 @@
 
 namespace
 {
-	constexpr float BannerBranchSeconds = 5.0f;
-	constexpr float BannerChapterSeconds = 6.5f;
+	constexpr float BannerBranchSeconds = 3.0f;
+	constexpr float BannerChapterSeconds = 4.0f;
 	const TCHAR* QuestStepDoneVoice = TEXT("/Game/_Slime/Quest/Audio/VO_QuestStepDone.VO_QuestStepDone");
 }
 
@@ -191,6 +191,7 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 	CompletedChapters.Reset();
 	CompletedSideQuestIds.Reset();
 	SideBranchCounts.Reset();
+	PreCompletedDefeatBranches.Reset();
 	WeekIndex = 1;
 	HighestWeekByChapter.Reset();
 	ChapterIndex = INDEX_NONE;
@@ -569,6 +570,59 @@ FString UQuestSubsystem::MakeSideCountKey(FName ChapterId, FName QuestId, FName 
 	return FString::Printf(TEXT("%s|%s|%s"), *ChapterId.ToString(), *QuestId.ToString(), *BranchId.ToString());
 }
 
+FString UQuestSubsystem::MakeMainBranchKey(FName ChapterId, FName QuestId, FName BranchId) const
+{
+	return FString::Printf(TEXT("%s|%s|%s"), *ChapterId.ToString(), *QuestId.ToString(), *BranchId.ToString());
+}
+
+bool UQuestSubsystem::IsMainDefeatBranchOpen(FName ChapterId, FName QuestId, FName BranchId) const
+{
+	const FQuestChapter* Chapter = GetActiveChapter();
+	const FQuestMain* Main = GetActiveMain();
+	const FQuestBranch* Target = Book ? Book->FindBranch(ChapterId, QuestId, BranchId) : nullptr;
+	if (!Chapter || !Main || !Target || Target->Type != EQuestObjectiveType::Defeat)
+	{
+		return false;
+	}
+	if (PreCompletedDefeatBranches.Contains(MakeMainBranchKey(ChapterId, QuestId, BranchId)))
+	{
+		return false;
+	}
+
+	int32 TargetIndex = INDEX_NONE;
+	for (int32 Index = 0; Index < Main->Branches.Num(); ++Index)
+	{
+		if (Main->Branches[Index].BranchId == BranchId)
+		{
+			TargetIndex = Index;
+			break;
+		}
+	}
+	return TargetIndex > BranchIndex;
+}
+
+void UQuestSubsystem::SkipPreCompletedDefeatBranches()
+{
+	const FQuestChapter* Chapter = GetActiveChapter();
+	const FQuestMain* Main = GetActiveMain();
+	if (!Chapter || !Main)
+	{
+		return;
+	}
+	while (BranchIndex >= 0 && BranchIndex < Main->Branches.Num())
+	{
+		const FName Id = Main->Branches[BranchIndex].BranchId;
+		const FString Key = MakeMainBranchKey(Chapter->ChapterId, Main->QuestId, Id);
+		if (!PreCompletedDefeatBranches.Contains(Key))
+		{
+			break;
+		}
+		PreCompletedDefeatBranches.Remove(Key);
+		++BranchIndex;
+		BranchCount = 0;
+	}
+}
+
 bool UQuestSubsystem::IsSideComplete(FName ChapterId, FName QuestId) const
 {
 	return CompletedSideQuestIds.Contains(FName(*MakeSideKey(ChapterId, QuestId)));
@@ -676,11 +730,18 @@ bool UQuestSubsystem::CanContribute(FName ChapterId, FName QuestId, FName Branch
 
 	const FQuestChapter* Chapter = GetActiveChapter();
 	const FQuestMain* Main = GetActiveMain();
-	const FQuestBranch* Branch = GetActiveBranch();
-	return Chapter && Main && Branch
-		&& Chapter->ChapterId == ChapterId
-		&& Main->QuestId == QuestId
-		&& Branch->BranchId == BranchId;
+	const FQuestBranch* Current = GetActiveBranch();
+	if (!Chapter || !Main || !Current
+		|| Chapter->ChapterId != ChapterId
+		|| Main->QuestId != QuestId)
+	{
+		return false;
+	}
+	if (Current->BranchId == BranchId)
+	{
+		return BranchCount < FMath::Max(1, Current->RequiredCount);
+	}
+	return IsMainDefeatBranchOpen(ChapterId, QuestId, BranchId);
 }
 
 void UQuestSubsystem::TryCatchUpDefeatObjectives()
@@ -764,17 +825,30 @@ bool UQuestSubsystem::NotifyProgress(FName ChapterId, FName QuestId, FName Branc
 		return true;
 	}
 
-	const FQuestBranch* Branch = GetActiveBranch();
-	if (!Branch)
+	const FQuestBranch* Current = GetActiveBranch();
+	if (!Current)
 	{
 		return false;
 	}
-	BranchCount = FMath::Min(Branch->RequiredCount, BranchCount + Amount);
+
+	if (Current->BranchId != BranchId)
+	{
+		const FQuestBranch* Ahead = Book->FindBranch(ChapterId, QuestId, BranchId);
+		if (!Ahead || Ahead->Type != EQuestObjectiveType::Defeat)
+		{
+			return false;
+		}
+		PreCompletedDefeatBranches.Add(MakeMainBranchKey(ChapterId, QuestId, BranchId));
+		ShowCompleteBanner(Ahead->Title, BannerBranchSeconds);
+		return true;
+	}
+
+	BranchCount = FMath::Min(Current->RequiredCount, BranchCount + Amount);
 	PersistProgress();
 
-	if (BranchCount >= Branch->RequiredCount)
+	if (BranchCount >= Current->RequiredCount)
 	{
-		ShowCompleteBanner(Branch->Title, BannerBranchSeconds);
+		ShowCompleteBanner(Current->Title, BannerBranchSeconds);
 		AdvanceAfterBranch();
 	}
 	return true;
@@ -793,13 +867,17 @@ void UQuestSubsystem::AdvanceAfterBranch()
 	{
 		++BranchIndex;
 		BranchCount = 0;
-		if (!bTrackingSide)
+		SkipPreCompletedDefeatBranches();
+		if (BranchIndex < Main->Branches.Num())
 		{
-			SyncTrackToMain();
+			if (!bTrackingSide)
+			{
+				SyncTrackToMain();
+			}
+			PersistProgress();
+			TryCatchUpDefeatObjectives();
+			return;
 		}
-		PersistProgress();
-		TryCatchUpDefeatObjectives();
-		return;
 	}
 
 	if (MainIndex + 1 < Chapter->MainQuests.Num())
@@ -807,13 +885,17 @@ void UQuestSubsystem::AdvanceAfterBranch()
 		++MainIndex;
 		BranchIndex = 0;
 		BranchCount = 0;
-		if (!bTrackingSide)
+		SkipPreCompletedDefeatBranches();
+		if (BranchIndex < Main->Branches.Num())
 		{
-			SyncTrackToMain();
+			if (!bTrackingSide)
+			{
+				SyncTrackToMain();
+			}
+			PersistProgress();
+			TryCatchUpDefeatObjectives();
+			return;
 		}
-		PersistProgress();
-		TryCatchUpDefeatObjectives();
-		return;
 	}
 
 	CompleteChapter();
@@ -1160,6 +1242,7 @@ void UQuestSubsystem::ActivateChapter(FName ChapterId)
 		MainIndex = 0;
 		BranchIndex = 0;
 		BranchCount = 0;
+		PreCompletedDefeatBranches.Reset();
 		SyncTrackToMain();
 		return;
 	}
@@ -1190,6 +1273,7 @@ void UQuestSubsystem::ResetChapterProgress(FName ChapterId)
 		MainIndex = 0;
 		BranchIndex = 0;
 		BranchCount = 0;
+		PreCompletedDefeatBranches.Reset();
 		SyncTrackToMain();
 	}
 }
@@ -1263,6 +1347,54 @@ bool UQuestSubsystem::TravelToHub(FName DayId)
 
 	CloseWeekSelect();
 	PersistProgress();
+	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+	{
+		return Days->TravelToDayId(World, DayId);
+	}
+	return false;
+}
+
+bool UQuestSubsystem::ResetDayProgressAndReload()
+{
+	const FName DayId = GetHostDayId();
+	UWorld* World = ActiveWorld.Get();
+	if (DayId.IsNone() || !World)
+	{
+		return false;
+	}
+
+	CloseWeekSelect();
+	CloseQuestLog();
+
+	CompletedChapters.Reset();
+	CompletedSideQuestIds.Reset();
+	SideBranchCounts.Reset();
+	PreCompletedDefeatBranches.Reset();
+	HighestWeekByChapter.Reset();
+	WeekIndex = 1;
+	ChapterIndex = INDEX_NONE;
+	MainIndex = INDEX_NONE;
+	BranchIndex = INDEX_NONE;
+	BranchCount = 0;
+	bTrackingSide = false;
+	TrackedChapterId = NAME_None;
+	TrackedQuestId = NAME_None;
+	TrackedBranchId = NAME_None;
+	PendingTravelChapterId = NAME_None;
+
+	const FString Slot = UDayLevelSubsystem::GetSaveSlotKeyForDayId(DayId);
+	const FString Legacy = FString::Printf(TEXT("Quest_%s"), *DayId.ToString());
+	if (UGameplayStatics::DoesSaveGameExist(Slot, 0))
+	{
+		UGameplayStatics::DeleteGameInSlot(Slot, 0);
+	}
+	if (UGameplayStatics::DoesSaveGameExist(Legacy, 0))
+	{
+		UGameplayStatics::DeleteGameInSlot(Legacy, 0);
+	}
+
+	UE_LOG(LogSlimeFable, Log, TEXT("QuestSubsystem: Reset day progress for %s"), *DayId.ToString());
+
 	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
 	{
 		return Days->TravelToDayId(World, DayId);
@@ -1355,6 +1487,7 @@ void UQuestSubsystem::ResetActiveChapterProgress()
 	BranchCount = 0;
 	MainIndex = 0;
 	BranchIndex = 0;
+	PreCompletedDefeatBranches.Reset();
 	for (const FQuestMain& Side : Chapter->SideQuests)
 	{
 		CompletedSideQuestIds.Remove(FName(*MakeSideKey(Chapter->ChapterId, Side.QuestId)));

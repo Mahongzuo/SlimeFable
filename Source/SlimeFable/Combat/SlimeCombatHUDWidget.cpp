@@ -662,7 +662,8 @@ namespace
 		return Upper.Contains(TEXT("ENEMY"))
 			|| Upper.Contains(TEXT("CHARACTER"))
 			|| Upper.Contains(TEXT("ACTOR"))
-			|| Upper.StartsWith(TEXT("BP_"));
+			|| Upper.StartsWith(TEXT("BP_"))
+			|| (Name.Len() > 0 && FChar::IsDigit(Name[0]));
 	}
 
 	FString StripInternalActorName(FString Raw)
@@ -696,18 +697,17 @@ namespace
 
 	FText ResolveLockOnDisplayName(AActor* Target)
 	{
-		FText Named;
 		if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Target))
 		{
-			Named = Enemy->DisplayName;
+			return Enemy->GetResolvedDisplayName();
 		}
-		else if (const ASlimeEnemyCharacter* SlimeEnemy = Cast<ASlimeEnemyCharacter>(Target))
+		if (const ASlimeEnemyCharacter* SlimeEnemy = Cast<ASlimeEnemyCharacter>(Target))
 		{
-			Named = SlimeEnemy->DisplayName;
-		}
-		if (!Named.IsEmpty())
-		{
-			return Named;
+			if (!SlimeEnemy->DisplayName.IsEmpty())
+			{
+				return SlimeEnemy->DisplayName;
+			}
+			return FText::FromString(TEXT("敌人"));
 		}
 
 		const FString Cleaned = Target ? StripInternalActorName(Target->GetActorNameOrLabel()) : FString();

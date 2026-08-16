@@ -1,90 +1,91 @@
 #include "SlimeSouvenirPreviewActor.h"
-#include "Components/SceneCaptureComponent2D.h"
+#include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/DirectionalLightComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/TextureRenderTarget2D.h"
-#include "Engine/World.h"
 
 ASlimeSouvenirPreviewActor::ASlimeSouvenirPreviewActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	SetTickableWhenPaused(true);
+	bReplicates = false;
 
 	Pivot = CreateDefaultSubobject<USceneComponent>(TEXT("Pivot"));
 	SetRootComponent(Pivot);
+	Pivot->SetMobility(EComponentMobility::Movable);
 
 	PreviewMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PreviewMesh"));
 	PreviewMesh->SetupAttachment(Pivot);
+	PreviewMesh->SetMobility(EComponentMobility::Movable);
 	PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PreviewMesh->SetCastShadow(true);
+	PreviewMesh->SetCastShadow(false);
+	PreviewMesh->SetCanEverAffectNavigation(false);
+	PreviewMesh->LightingChannels.bChannel0 = false;
+	PreviewMesh->LightingChannels.bChannel1 = true;
 
-	KeyLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("KeyLight"));
-	KeyLight->SetupAttachment(Pivot);
-	KeyLight->SetRelativeRotation(FRotator(-35.f, 40.f, 0.f));
-	KeyLight->SetIntensity(6.f);
-	KeyLight->SetLightColor(FLinearColor(1.f, 0.92f, 0.78f));
-
-	CaptureComp = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("Capture"));
-	CaptureComp->SetupAttachment(Pivot);
-	CaptureComp->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
-	CaptureComp->bCaptureEveryFrame = true;
-	CaptureComp->bCaptureOnMovement = true;
-	CaptureComp->ShowFlags.SetAtmosphere(false);
-	CaptureComp->ShowFlags.SetFog(false);
-	CaptureComp->ShowFlags.SetDynamicShadows(true);
-	CaptureComp->CaptureSource = SCS_FinalColorLDR;
+	FillLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("FillLight"));
+	FillLight->SetupAttachment(Pivot);
+	FillLight->SetMobility(EComponentMobility::Movable);
+	FillLight->SetRelativeLocation(FVector(-40.f, 35.f, 30.f));
+	FillLight->SetIntensity(2500.f);
+	FillLight->SetAttenuationRadius(280.f);
+	FillLight->SetSourceRadius(12.f);
+	FillLight->SetLightColor(FLinearColor(1.f, 0.93f, 0.82f));
+	FillLight->SetCastShadows(false);
+	FillLight->LightingChannels.bChannel0 = false;
+	FillLight->LightingChannels.bChannel1 = true;
 }
 
-void ASlimeSouvenirPreviewActor::SetupPreview(UStaticMesh* Mesh, UTextureRenderTarget2D* Target)
+void ASlimeSouvenirPreviewActor::SetupPreview(UStaticMesh* Mesh)
 {
-	if (PreviewMesh)
+	if (!PreviewMesh || !Mesh)
 	{
-		PreviewMesh->SetStaticMesh(Mesh);
-		CaptureComp->ShowOnlyComponent(PreviewMesh);
+		return;
 	}
-	if (CaptureComp)
-	{
-		CaptureComp->TextureTarget = Target;
-	}
+
+	PreviewMesh->SetStaticMesh(Mesh);
+	PreviewMesh->UpdateBounds();
+	MeshBounds = Mesh->GetBounds();
 	OrbitYaw = 25.f;
 	OrbitPitch = -18.f;
-	FrameCamera();
-	Capture();
+	ZoomScale = 1.f;
+	ApplyMeshTransform();
+}
+
+void ASlimeSouvenirPreviewActor::FitToWorldRect(
+	const FVector& Center, const FRotator& ViewRotation, float Width, float Height)
+{
+	SetActorLocation(Center);
+	SetActorRotation(ViewRotation);
+
+	const float Radius = FMath::Max(MeshBounds.SphereRadius, 1.f);
+	const float MaxDim = FMath::Min(Width, Height) * 0.85f;
+	FitScale = MaxDim / (Radius * 2.f);
+	ApplyMeshTransform();
 }
 
 void ASlimeSouvenirPreviewActor::AddOrbit(float YawDelta, float PitchDelta)
 {
 	OrbitYaw += YawDelta;
 	OrbitPitch = FMath::Clamp(OrbitPitch + PitchDelta, -70.f, 70.f);
-	FrameCamera();
-	Capture();
+	ApplyMeshTransform();
 }
 
-void ASlimeSouvenirPreviewActor::FrameCamera()
+void ASlimeSouvenirPreviewActor::AddZoom(float WheelDelta)
 {
-	if (!CaptureComp || !PreviewMesh)
+	ZoomScale = FMath::Clamp(ZoomScale + WheelDelta * 0.08f, 0.35f, 1.f);
+	ApplyMeshTransform();
+}
+
+void ASlimeSouvenirPreviewActor::ApplyMeshTransform()
+{
+	if (!PreviewMesh)
 	{
 		return;
 	}
 
-	const FBoxSphereBounds Bounds = PreviewMesh->Bounds;
-	const float Radius = FMath::Max(Bounds.SphereRadius, 20.f);
-	const FVector Center = Bounds.Origin;
-	const float Dist = Radius * 2.6f;
-	const FRotator Rot(OrbitPitch, OrbitYaw, 0.f);
-	const FVector Offset = Rot.Vector() * Dist;
-	CaptureComp->SetWorldLocation(Center - Offset);
-	CaptureComp->SetWorldRotation((-Offset).Rotation());
-	if (CaptureComp->ProjectionType == ECameraProjectionMode::Perspective)
-	{
-		CaptureComp->FOVAngle = 35.f;
-	}
-}
-
-void ASlimeSouvenirPreviewActor::Capture()
-{
-	if (CaptureComp)
-	{
-		CaptureComp->CaptureScene();
-	}
+	const float Scale = FMath::Max(FitScale * ZoomScale, 0.001f);
+	const FRotator Orbit(OrbitPitch, OrbitYaw, 0.f);
+	PreviewMesh->SetRelativeScale3D(FVector(Scale));
+	PreviewMesh->SetRelativeRotation(Orbit);
+	PreviewMesh->SetRelativeLocation(Orbit.RotateVector(-MeshBounds.Origin * Scale));
 }

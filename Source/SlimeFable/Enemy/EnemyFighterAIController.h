@@ -8,6 +8,7 @@
 #include "EnemyFighterAIController.generated.h"
 
 class AEnemyFighter;
+class UAnimMontage;
 class UEnemyCombatComponent;
 class UNiagaraComponent;
 
@@ -41,7 +42,14 @@ public:
 
 protected:
 	APawn* FindPlayerPawn() const;
-	void TickIdle(float Dist);
+	void TickIdle(float DeltaSeconds, float Dist);
+	void TickWander(float DeltaSeconds);
+	void StartWanderTo(const FVector& Dest);
+	void TickDirectWander();
+	void TryPlayRandomIdleMontage();
+	void StopIdleMontage();
+	void PlayWalkAnim();
+	void ClearDirectWander();
 	void TickCombat(float DeltaSeconds, float Dist);
 	void EnterTelegraph(int32 MoveIndex);
 	void TickTelegraph(float DeltaSeconds);
@@ -64,6 +72,12 @@ protected:
 	int32 ActiveMoveIndex = INDEX_NONE;
 	float StateTime = 0.f;
 	float PathRefreshRemaining = 0.f;
+	float WanderPauseRemaining = 0.f;
+	bool bWasWanderMoving = false;
+	bool bDirectWander = false;
+	bool bPlayingWalk = false;
+	FVector WanderDirectDest = FVector::ZeroVector;
 	TArray<float> MoveCooldowns;
 	TWeakObjectPtr<UNiagaraComponent> TelegraphFx;
+	TWeakObjectPtr<UAnimMontage> PlayingIdleMontage;
 };

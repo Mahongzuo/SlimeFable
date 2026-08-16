@@ -119,6 +119,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Quest")
 	bool TravelToHub(FName DayId);
 
+	/** Wipe this day's quest save and reload the hub so the day can be replayed. */
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	bool ResetDayProgressAndReload();
+
 	UFUNCTION(BlueprintPure, Category = "Quest")
 	bool IsCurrentChapterComplete() const;
 
@@ -184,8 +188,11 @@ protected:
 	static FName InferChapterIdFromWorld(UWorld* World);
 	void SyncTrackToMain();
 	void TryCatchUpDefeatObjectives();
+	void SkipPreCompletedDefeatBranches();
+	bool IsMainDefeatBranchOpen(FName ChapterId, FName QuestId, FName BranchId) const;
 	FString MakeSideKey(FName ChapterId, FName QuestId) const;
 	FString MakeSideCountKey(FName ChapterId, FName QuestId, FName BranchId) const;
+	FString MakeMainBranchKey(FName ChapterId, FName QuestId, FName BranchId) const;
 	UDayQuestBook* ResolveBookForWorld(UWorld* World) const;
 	static FName InferDayIdFromWorld(UWorld* World);
 	static bool IsPlayWorld(const UWorld* World);
@@ -217,6 +224,7 @@ protected:
 	TMap<FName, int32> HighestWeekByChapter;
 	TSet<FName> CompletedSideQuestIds;
 	TMap<FString, int32> SideBranchCounts;
+	TSet<FString> PreCompletedDefeatBranches;
 	FName ActiveDayId;
 	int32 ChapterIndex = INDEX_NONE;
 	int32 MainIndex = INDEX_NONE;

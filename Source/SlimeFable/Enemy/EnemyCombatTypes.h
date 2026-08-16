@@ -187,5 +187,6 @@ namespace EnemyCombat
 {
 	SLIMEFABLE_API FSlimeSkillDef ToSlimeHitSkill(const FEnemySkillDef& Def);
 	SLIMEFABLE_API void FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves);
+	SLIMEFABLE_API void FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves);
 	SLIMEFABLE_API FEnemySkillDef MakeDefaultMissileSkill();
 }

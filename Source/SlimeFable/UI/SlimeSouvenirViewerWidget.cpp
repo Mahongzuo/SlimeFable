@@ -6,9 +6,10 @@
 #include "Inventory/SlimeItemDefinition.h"
 #include "Inventory/SlimeSouvenirPreviewActor.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/SlateBlueprintLibrary.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -18,6 +19,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "GameFramework/PlayerController.h"
 #include "MediaPlayer.h"
 #include "MediaTexture.h"
 #include "FileMediaSource.h"
@@ -29,6 +31,7 @@
 namespace SlimeSouvenirPaths
 {
 	static const TCHAR* PostcardTexture = TEXT("/Game/Movies/T_ZzmxPostcard.T_ZzmxPostcard");
+	static constexpr float PreviewViewDepth = 80.f;
 }
 
 USlimeSouvenirViewerWidget::USlimeSouvenirViewerWidget(const FObjectInitializer& ObjectInitializer)
@@ -46,6 +49,7 @@ TSharedRef<SWidget> USlimeSouvenirViewerWidget::RebuildWidget()
 void USlimeSouvenirViewerWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	EnsureDimBars();
 	ApplyLook();
 	if (PlayButton) PlayButton->OnClicked.AddUniqueDynamic(this, &USlimeSouvenirViewerWidget::OnPlayClicked);
 	if (CloseButton) CloseButton->OnClicked.AddUniqueDynamic(this, &USlimeSouvenirViewerWidget::OnCloseClicked);
@@ -77,6 +81,10 @@ void USlimeSouvenirViewerWidget::NativeDestruct()
 void USlimeSouvenirViewerWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (bShowingMesh)
+	{
+		UpdatePreviewWindow();
+	}
 	if (!bAwaitingVideoAspect)
 	{
 		return;
@@ -98,9 +106,19 @@ FReply USlimeSouvenirViewerWidget::NativeOnKeyDown(const FGeometry& InGeometry, 
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 
+bool USlimeSouvenirViewerWidget::IsPointerOverPreviewBox(const FPointerEvent& InMouseEvent) const
+{
+	if (!StoryImageBox || StoryImageBox->GetVisibility() == ESlateVisibility::Collapsed)
+	{
+		return false;
+	}
+	return StoryImageBox->GetCachedGeometry().IsUnderLocation(InMouseEvent.GetScreenSpacePosition());
+}
+
 FReply USlimeSouvenirViewerWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	if (bShowingMesh && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	if (bShowingMesh && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
+		&& IsPointerOverPreviewBox(InMouseEvent))
 	{
 		bDraggingPreview = true;
 		return FReply::Handled().CaptureMouse(TakeWidget());
@@ -129,17 +147,45 @@ FReply USlimeSouvenirViewerWidget::NativeOnMouseMove(const FGeometry& InGeometry
 	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
 }
 
+FReply USlimeSouvenirViewerWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bShowingMesh && PreviewActor && IsPointerOverPreviewBox(InMouseEvent))
+	{
+		PreviewActor->AddZoom(InMouseEvent.GetWheelDelta());
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseWheel(InGeometry, InMouseEvent);
+}
+
 void USlimeSouvenirViewerWidget::BuildLayoutIfNeeded()
 {
 	if (TitleText && CloseButton && StoryImageBox && VideoImageBox)
 	{
 		bBuiltInCode = false;
+		EnsureDimBars();
 		return;
 	}
 	bBuiltInCode = true;
 
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Root"));
 	WidgetTree->RootWidget = Root;
+
+	auto AddDim = [this, Root](const FName& Name) -> UImage*
+	{
+		UImage* Image = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), Name);
+		if (UCanvasPanelSlot* Slot = Root->AddChildToCanvas(Image))
+		{
+			Slot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f));
+			Slot->SetAlignment(FVector2D(0.f, 0.f));
+			Slot->SetAutoSize(false);
+		}
+		Image->SetVisibility(ESlateVisibility::Collapsed);
+		return Image;
+	};
+	DimTop = AddDim(TEXT("DimTop"));
+	DimBottom = AddDim(TEXT("DimBottom"));
+	DimLeft = AddDim(TEXT("DimLeft"));
+	DimRight = AddDim(TEXT("DimRight"));
 
 	DimOverlay = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("DimOverlay"));
 	if (UCanvasPanelSlot* CanvasSlot = Root->AddChildToCanvas(DimOverlay))
@@ -201,6 +247,44 @@ void USlimeSouvenirViewerWidget::BuildLayoutIfNeeded()
 	}
 }
 
+void USlimeSouvenirViewerWidget::EnsureDimBars()
+{
+	if ((DimTop && DimBottom && DimLeft && DimRight) || !WidgetTree)
+	{
+		return;
+	}
+
+	UCanvasPanel* Root = Cast<UCanvasPanel>(GetRootWidget());
+	if (!Root)
+	{
+		Root = Cast<UCanvasPanel>(WidgetTree->RootWidget);
+	}
+	if (!Root)
+	{
+		return;
+	}
+
+	auto AddDim = [this, Root](TObjectPtr<UImage>& Target, const FName& Name)
+	{
+		if (Target)
+		{
+			return;
+		}
+		Target = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), Name);
+		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Root->InsertChildAt(0, Target)))
+		{
+			CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f));
+			CanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
+			CanvasSlot->SetAutoSize(false);
+		}
+		Target->SetVisibility(ESlateVisibility::Collapsed);
+	};
+	AddDim(DimTop, TEXT("DimTop"));
+	AddDim(DimBottom, TEXT("DimBottom"));
+	AddDim(DimLeft, TEXT("DimLeft"));
+	AddDim(DimRight, TEXT("DimRight"));
+}
+
 void USlimeSouvenirViewerWidget::FitMediaToBoxes(
 	UImage* Image, USizeBox* Box, float AspectRatio, float MaxWidth, float MaxHeight)
 {
@@ -222,7 +306,6 @@ void USlimeSouvenirViewerWidget::FitMediaToBoxes(
 		Box->SetWidthOverride(Width);
 		Box->SetHeightOverride(Height);
 	}
-	// Keep existing ResourceObject — only sync ImageSize so Fit never blanks the brush.
 	FSlateBrush Brush = Image->GetBrush();
 	if (Brush.GetResourceObject())
 	{
@@ -232,17 +315,27 @@ void USlimeSouvenirViewerWidget::FitMediaToBoxes(
 	}
 }
 
+void USlimeSouvenirViewerWidget::ApplyDimBrush(UImage* Image)
+{
+	if (!Image)
+	{
+		return;
+	}
+	FSlateBrush DimBrush;
+	DimBrush.DrawAs = ESlateBrushDrawType::Box;
+	DimBrush.TintColor = FSlateColor(FLinearColor(0.03f, 0.025f, 0.02f, 0.7f));
+	DimBrush.ImageSize = FVector2D(32.f, 32.f);
+	Image->SetBrush(DimBrush);
+}
+
 void USlimeSouvenirViewerWidget::ApplyLook()
 {
-	if (DimOverlay)
-	{
-		FSlateBrush DimBrush;
-		DimBrush.DrawAs = ESlateBrushDrawType::Box;
-		DimBrush.TintColor = FSlateColor(FLinearColor(0.03f, 0.025f, 0.02f, 0.7f));
-		DimBrush.ImageSize = FVector2D(32.f, 32.f);
-		DimOverlay->SetBrush(DimBrush);
-	}
-	// Chinese title must use KuaiLe — Marker has no CJK and shows "字" placeholders.
+	ApplyDimBrush(DimOverlay);
+	ApplyDimBrush(DimTop);
+	ApplyDimBrush(DimBottom);
+	ApplyDimBrush(DimLeft);
+	ApplyDimBrush(DimRight);
+
 	FMenuUIStyle::ApplyBrushCJKFont(TitleText, 32.f, FMenuUIStyle::WarmTitleColor());
 	FMenuUIStyle::ApplyBrushCJKFont(StoryText, 18.f, FMenuUIStyle::WarmTextColor());
 
@@ -293,8 +386,6 @@ void USlimeSouvenirViewerWidget::SetSouvenir(USlimeSouvenirDefinition* InSouveni
 	}
 	if (!StoryImage)
 	{
-		// Layout is built lazily in RebuildWidget; force it so callers may
-		// invoke SetSouvenir before AddToViewport without losing the data.
 		TakeWidget();
 	}
 	if (TitleText)
@@ -313,6 +404,7 @@ void USlimeSouvenirViewerWidget::SetSouvenir(USlimeSouvenirDefinition* InSouveni
 	}
 	else if (StoryImage && StoryImageBox)
 	{
+		SetDimBarsVisible(false);
 		if (UTexture2D* Tex = ResolveStoryTexture())
 		{
 			const int32 W = FMath::Max(Tex->GetSizeX(), 1);
@@ -320,7 +412,6 @@ void USlimeSouvenirViewerWidget::SetSouvenir(USlimeSouvenirDefinition* InSouveni
 			const float Aspect = static_cast<float>(W) / static_cast<float>(H);
 			StoryImage->SetBrushFromTexture(Tex, true);
 			FitMediaToBoxes(StoryImage, StoryImageBox, Aspect);
-			// Fit may touch ImageSize — reassert texture resource explicitly.
 			{
 				FSlateBrush Brush = StoryImage->GetBrush();
 				Brush.SetResourceObject(Tex);
@@ -387,6 +478,7 @@ void USlimeSouvenirViewerWidget::OnPlayClicked()
 		StoryImageBox->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	EndMeshPreview();
+	SetDimBarsVisible(false);
 	bAwaitingVideoAspect = true;
 	VideoAspectRetrySeconds = 2.5f;
 	TryApplyVideoAspect();
@@ -439,6 +531,19 @@ void USlimeSouvenirViewerWidget::StopVideo()
 	}
 }
 
+void USlimeSouvenirViewerWidget::SetDimBarsVisible(bool bVisible)
+{
+	const ESlateVisibility BarVis = bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed;
+	if (DimTop) DimTop->SetVisibility(BarVis);
+	if (DimBottom) DimBottom->SetVisibility(BarVis);
+	if (DimLeft) DimLeft->SetVisibility(BarVis);
+	if (DimRight) DimRight->SetVisibility(BarVis);
+	if (DimOverlay)
+	{
+		DimOverlay->SetVisibility(bVisible ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	}
+}
+
 void USlimeSouvenirViewerWidget::BeginMeshPreview()
 {
 	if (!Souvenir || !StoryImage || !StoryImageBox)
@@ -453,13 +558,12 @@ void USlimeSouvenirViewerWidget::BeginMeshPreview()
 		return;
 	}
 
-	if (!PreviewRT)
+	APlayerController* PC = GetOwningPlayer();
+	FVector SpawnLoc = FVector::ZeroVector;
+	if (PC && PC->PlayerCameraManager)
 	{
-		PreviewRT = NewObject<UTextureRenderTarget2D>(this);
-		PreviewRT->RenderTargetFormat = RTF_RGBA8;
-		PreviewRT->ClearColor = FLinearColor(0.12f, 0.1f, 0.07f, 1.f);
-		PreviewRT->InitAutoFormat(720, 480);
-		PreviewRT->UpdateResource();
+		SpawnLoc = PC->PlayerCameraManager->GetCameraLocation()
+			+ PC->PlayerCameraManager->GetCameraRotation().Vector() * SlimeSouvenirPaths::PreviewViewDepth;
 	}
 
 	FActorSpawnParameters Params;
@@ -467,21 +571,28 @@ void USlimeSouvenirViewerWidget::BeginMeshPreview()
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	PreviewActor = World->SpawnActor<ASlimeSouvenirPreviewActor>(
 		ASlimeSouvenirPreviewActor::StaticClass(),
-		FVector(0.f, 0.f, -50000.f),
+		SpawnLoc,
 		FRotator::ZeroRotator,
 		Params);
 	if (PreviewActor)
 	{
-		PreviewActor->SetupPreview(Mesh, PreviewRT);
+		PreviewActor->SetTickableWhenPaused(true);
+		PreviewActor->SetupPreview(Mesh);
 	}
 
 	FSlateBrush Brush;
-	Brush.SetResourceObject(PreviewRT);
-	Brush.DrawAs = ESlateBrushDrawType::Image;
+	Brush.DrawAs = ESlateBrushDrawType::Box;
+	Brush.TintColor = FSlateColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+	Brush.ImageSize = FVector2D(720.f, 480.f);
 	StoryImage->SetBrush(Brush);
+	StoryImage->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.f));
 	FitMediaToBoxes(StoryImage, StoryImageBox, 720.f / 480.f);
+	StoryImageBox->SetWidthOverride(720.f);
+	StoryImageBox->SetHeightOverride(480.f);
 	StoryImageBox->SetVisibility(ESlateVisibility::Visible);
 	StoryImage->SetVisibility(ESlateVisibility::Visible);
+	SetDimBarsVisible(true);
+	UpdatePreviewWindow();
 }
 
 void USlimeSouvenirViewerWidget::EndMeshPreview()
@@ -493,6 +604,115 @@ void USlimeSouvenirViewerWidget::EndMeshPreview()
 		PreviewActor->Destroy();
 		PreviewActor = nullptr;
 	}
+	if (StoryImage)
+	{
+		StoryImage->SetColorAndOpacity(FLinearColor::White);
+	}
+}
+
+void USlimeSouvenirViewerWidget::UpdatePreviewWindow()
+{
+	UpdateDimHole();
+	UpdateMeshFit();
+}
+
+void USlimeSouvenirViewerWidget::UpdateDimHole()
+{
+	if (!StoryImageBox || !DimTop || !DimBottom || !DimLeft || !DimRight)
+	{
+		return;
+	}
+
+	const FGeometry& RootGeo = GetCachedGeometry();
+	const FGeometry& BoxGeo = StoryImageBox->GetCachedGeometry();
+	const FVector2D RootSize = RootGeo.GetLocalSize();
+	const FVector2D BoxSize = BoxGeo.GetLocalSize();
+	if (RootSize.X < 1.f || RootSize.Y < 1.f || BoxSize.X < 1.f || BoxSize.Y < 1.f)
+	{
+		return;
+	}
+
+	const FVector2D BoxTL = RootGeo.AbsoluteToLocal(BoxGeo.LocalToAbsolute(FVector2D::ZeroVector));
+	const float Left = FMath::Clamp(BoxTL.X, 0.f, RootSize.X);
+	const float Top = FMath::Clamp(BoxTL.Y, 0.f, RootSize.Y);
+	const float Right = FMath::Clamp(BoxTL.X + BoxSize.X, 0.f, RootSize.X);
+	const float Bottom = FMath::Clamp(BoxTL.Y + BoxSize.Y, 0.f, RootSize.Y);
+
+	auto PlaceBar = [](UImage* Image, float X, float Y, float W, float H)
+	{
+		if (!Image)
+		{
+			return;
+		}
+		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Image->Slot))
+		{
+			Slot->SetAnchors(FAnchors(0.f, 0.f));
+			Slot->SetAlignment(FVector2D(0.f, 0.f));
+			Slot->SetOffsets(FMargin(X, Y, W, H));
+		}
+	};
+
+	PlaceBar(DimTop, 0.f, 0.f, RootSize.X, Top);
+	PlaceBar(DimBottom, 0.f, Bottom, RootSize.X, RootSize.Y - Bottom);
+	PlaceBar(DimLeft, 0.f, Top, Left, Bottom - Top);
+	PlaceBar(DimRight, Right, Top, RootSize.X - Right, Bottom - Top);
+}
+
+void USlimeSouvenirViewerWidget::UpdateMeshFit()
+{
+	if (!PreviewActor || !StoryImageBox)
+	{
+		return;
+	}
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return;
+	}
+
+	const FGeometry& BoxGeo = StoryImageBox->GetCachedGeometry();
+	const FVector2D BoxSize = BoxGeo.GetLocalSize();
+	if (BoxSize.X < 1.f || BoxSize.Y < 1.f)
+	{
+		return;
+	}
+
+	FVector2D PixelTL, PixelBR, ViewportUnused;
+	USlateBlueprintLibrary::LocalToViewport(this, BoxGeo, FVector2D::ZeroVector, PixelTL, ViewportUnused);
+	USlateBlueprintLibrary::LocalToViewport(this, BoxGeo, BoxSize, PixelBR, ViewportUnused);
+
+	const FVector2D PixelCenter = (PixelTL + PixelBR) * 0.5f;
+	const float MidY = (PixelTL.Y + PixelBR.Y) * 0.5f;
+	const float MidX = (PixelTL.X + PixelBR.X) * 0.5f;
+
+	auto ProjectAtDepth = [PC](float ScreenX, float ScreenY) -> FVector
+	{
+		FVector World, Dir;
+		if (!PC->DeprojectScreenPositionToWorld(ScreenX, ScreenY, World, Dir))
+		{
+			return FVector::ZeroVector;
+		}
+		return World + Dir * SlimeSouvenirPaths::PreviewViewDepth;
+	};
+
+	const FVector Center = ProjectAtDepth(PixelCenter.X, PixelCenter.Y);
+	const FVector Left = ProjectAtDepth(PixelTL.X, MidY);
+	const FVector Right = ProjectAtDepth(PixelBR.X, MidY);
+	const FVector Top = ProjectAtDepth(MidX, PixelTL.Y);
+	const FVector Bottom = ProjectAtDepth(MidX, PixelBR.Y);
+	const float Width = FVector::Dist(Left, Right);
+	const float Height = FVector::Dist(Top, Bottom);
+	if (Width < 1.f || Height < 1.f)
+	{
+		return;
+	}
+
+	FRotator ViewRot = FRotator::ZeroRotator;
+	if (PC->PlayerCameraManager)
+	{
+		ViewRot = PC->PlayerCameraManager->GetCameraRotation();
+	}
+	PreviewActor->FitToWorldRect(Center, ViewRot, Width, Height);
 }
 
 void USlimeSouvenirViewerWidget::OnCloseClicked()

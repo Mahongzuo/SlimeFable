@@ -75,4 +75,7 @@ protected:
 
 	UFUNCTION()
 	void HandlePauseReturnToHub();
+
+	UFUNCTION()
+	void HandlePauseResetDay();
 };

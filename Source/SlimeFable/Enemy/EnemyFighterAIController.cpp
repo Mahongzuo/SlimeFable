@@ -2,6 +2,10 @@
 
 #include "EnemyFighterAIController.h"
 
+#include "AITypes.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "EnemyCombatComponent.h"
 #include "EnemyFighter.h"
 #include "Kismet/GameplayStatics.h"
@@ -21,6 +25,7 @@ void AEnemyFighterAIController::ReturnToIdle()
 {
 	StopMovement();
 	ClearTelegraphFx();
+	StopIdleMontage();
 	if (Combat)
 	{
 		Combat->InterruptCombat();
@@ -28,6 +33,9 @@ void AEnemyFighterAIController::ReturnToIdle()
 	State = EEnemyFighterState::Idle;
 	ActiveMoveIndex = INDEX_NONE;
 	StateTime = 0.f;
+	ClearDirectWander();
+	WanderPauseRemaining = 0.f;
+	TryPlayRandomIdleMontage();
 }
 
 void AEnemyFighterAIController::OnPossess(APawn* InPawn)
@@ -43,6 +51,10 @@ void AEnemyFighterAIController::OnPossess(APawn* InPawn)
 	State = EEnemyFighterState::Idle;
 	ActiveMoveIndex = INDEX_NONE;
 	StateTime = 0.f;
+	ClearDirectWander();
+	WanderPauseRemaining = Fighter
+		? FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax)
+		: 1.5f;
 }
 
 APawn* AEnemyFighterAIController::FindPlayerPawn() const
@@ -82,16 +94,19 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	}
 
 	APawn* Player = FindPlayerPawn();
-	if (!Player)
-	{
-		return;
-	}
-
-	const float Dist = FVector::Dist(Fighter->GetActorLocation(), Player->GetActorLocation());
+	const float Dist = Player
+		? FVector::Dist(Fighter->GetActorLocation(), Player->GetActorLocation())
+		: TNumericLimits<float>::Max();
 
 	if (State == EEnemyFighterState::Idle)
 	{
-		TickIdle(Dist);
+		TickIdle(DeltaSeconds, Dist);
+		return;
+	}
+
+	if (!Player)
+	{
+		ReturnToIdle();
 		return;
 	}
 
@@ -99,6 +114,7 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	{
 		StopMovement();
 		ClearTelegraphFx();
+		ClearDirectWander();
 		Combat->InterruptCombat();
 		State = EEnemyFighterState::Idle;
 		ActiveMoveIndex = INDEX_NONE;
@@ -132,13 +148,203 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	}
 }
 
-void AEnemyFighterAIController::TickIdle(float Dist)
+void AEnemyFighterAIController::TickIdle(float DeltaSeconds, float Dist)
 {
 	if (Dist <= Fighter->DetectRange && Fighter->GetEnemyPresence() == EEnemyPresence::Active)
 	{
+		StopIdleMontage();
+		StopMovement();
+		ClearDirectWander();
 		State = EEnemyFighterState::Combat;
 		StateTime = 0.f;
+		return;
 	}
+
+	if (Fighter->bWanderWhenIdle)
+	{
+		TickWander(DeltaSeconds);
+	}
+}
+
+void AEnemyFighterAIController::TickWander(float DeltaSeconds)
+{
+	if (bDirectWander)
+	{
+		TickDirectWander();
+		return;
+	}
+
+	const bool bMoving = GetMoveStatus() == EPathFollowingStatus::Moving;
+	if (bWasWanderMoving && !bMoving)
+	{
+		TryPlayRandomIdleMontage();
+		WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+	}
+	bWasWanderMoving = bMoving;
+	if (bMoving)
+	{
+		return;
+	}
+
+	WanderPauseRemaining -= DeltaSeconds;
+	if (WanderPauseRemaining > 0.f)
+	{
+		if (!PlayingIdleMontage.IsValid())
+		{
+			TryPlayRandomIdleMontage();
+		}
+		return;
+	}
+
+	const FVector Origin = Fighter->GetSpawnTransform().GetLocation();
+	const float Radius = FMath::Max(Fighter->WanderRadius, 50.f);
+	const FVector2D Offset = FMath::RandPointInCircle(Radius);
+	FVector Dest = Origin + FVector(Offset.X, Offset.Y, 0.f);
+	Dest.Z = Fighter->GetActorLocation().Z;
+	if (FVector::DistSquared2D(Dest, Fighter->GetActorLocation()) < FMath::Square(80.f))
+	{
+		TryPlayRandomIdleMontage();
+		WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+		return;
+	}
+
+	StartWanderTo(Dest);
+}
+
+void AEnemyFighterAIController::StartWanderTo(const FVector& Dest)
+{
+	const EPathFollowingRequestResult::Type Result = MoveToLocation(Dest);
+	if (Result == EPathFollowingRequestResult::RequestSuccessful)
+	{
+		bDirectWander = false;
+		bWasWanderMoving = true;
+		PlayWalkAnim();
+		return;
+	}
+	if (Result == EPathFollowingRequestResult::AlreadyAtGoal)
+	{
+		TryPlayRandomIdleMontage();
+		WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+		return;
+	}
+
+	StopMovement();
+	WanderDirectDest = Dest;
+	bDirectWander = true;
+	bWasWanderMoving = true;
+	PlayWalkAnim();
+}
+
+void AEnemyFighterAIController::TickDirectWander()
+{
+	if (!Fighter)
+	{
+		ClearDirectWander();
+		return;
+	}
+
+	FVector To = WanderDirectDest - Fighter->GetActorLocation();
+	To.Z = 0.f;
+	if (To.SizeSquared() < FMath::Square(80.f))
+	{
+		ClearDirectWander();
+		TryPlayRandomIdleMontage();
+		WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+		return;
+	}
+
+	const FVector Dir = To.GetSafeNormal();
+	Fighter->AddMovementInput(Dir, 1.f);
+	Fighter->SetActorRotation(Dir.Rotation());
+}
+
+void AEnemyFighterAIController::ClearDirectWander()
+{
+	bDirectWander = false;
+	bWasWanderMoving = false;
+	bPlayingWalk = false;
+}
+
+void AEnemyFighterAIController::PlayWalkAnim()
+{
+	if (!Fighter || bPlayingWalk)
+	{
+		return;
+	}
+	if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
+	{
+		Fighter->PlayMeshAnimation(Walk, true);
+		bPlayingWalk = true;
+		PlayingIdleMontage.Reset();
+	}
+}
+
+void AEnemyFighterAIController::TryPlayRandomIdleMontage()
+{
+	if (!Fighter || Fighter->IdleMontages.Num() == 0)
+	{
+		return;
+	}
+	bPlayingWalk = false;
+	if (Fighter->UsesSingleNodeAnims())
+	{
+		const int32 Index = FMath::RandRange(0, Fighter->IdleMontages.Num() - 1);
+		if (UAnimMontage* Montage = Fighter->IdleMontages[Index].LoadSynchronous())
+		{
+			Fighter->PlayMeshAnimation(Montage, false);
+			PlayingIdleMontage = Montage;
+		}
+		return;
+	}
+
+	USkeletalMeshComponent* Mesh = Fighter->GetMesh();
+	UAnimInstance* Anim = Mesh ? Mesh->GetAnimInstance() : nullptr;
+	if (!Anim)
+	{
+		return;
+	}
+	if (UAnimMontage* Playing = PlayingIdleMontage.Get())
+	{
+		if (Anim->Montage_IsPlaying(Playing))
+		{
+			return;
+		}
+	}
+
+	const int32 Index = FMath::RandRange(0, Fighter->IdleMontages.Num() - 1);
+	if (UAnimMontage* Montage = Fighter->IdleMontages[Index].LoadSynchronous())
+	{
+		Anim->Montage_Play(Montage);
+		PlayingIdleMontage = Montage;
+	}
+}
+
+void AEnemyFighterAIController::StopIdleMontage()
+{
+	if (!Fighter)
+	{
+		PlayingIdleMontage.Reset();
+		bPlayingWalk = false;
+		return;
+	}
+	if (Fighter->UsesSingleNodeAnims())
+	{
+		Fighter->StopMeshAnimation();
+		PlayingIdleMontage.Reset();
+		bPlayingWalk = false;
+		return;
+	}
+	USkeletalMeshComponent* Mesh = Fighter->GetMesh();
+	UAnimInstance* Anim = Mesh ? Mesh->GetAnimInstance() : nullptr;
+	if (Anim)
+	{
+		if (UAnimMontage* Playing = PlayingIdleMontage.Get())
+		{
+			Anim->Montage_Stop(0.15f, Playing);
+		}
+	}
+	PlayingIdleMontage.Reset();
+	bPlayingWalk = false;
 }
 
 void AEnemyFighterAIController::TickCombat(float DeltaSeconds, float Dist)
@@ -227,6 +433,7 @@ void AEnemyFighterAIController::BeginExecute()
 	}
 	const FEnemyMoveDef& Move = Fighter->GetMoves()[ActiveMoveIndex];
 	FacePlayer();
+	bPlayingWalk = false;
 	if (!Combat->TryExecute(Move.Skill))
 	{
 		State = EEnemyFighterState::Combat;
@@ -358,7 +565,7 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 
 	PathRefreshRemaining -= GetWorld()->GetDeltaSeconds();
 	const float Preferred = Fighter->PreferredDistance;
-	const bool bTooFar = Dist > Preferred * 1.25f;
+	const bool bTooFar = Dist > Preferred * 1.1f;
 	const bool bTooClose = Dist < Preferred * 0.55f;
 
 	if (!bTooFar && !bTooClose)
@@ -378,14 +585,27 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 
 	if (bTooFar)
 	{
-		MoveToActor(Player, Preferred * 0.85f);
+		const EPathFollowingRequestResult::Type Result = MoveToActor(Player, Preferred * 0.85f);
+		if (Result != EPathFollowingRequestResult::RequestSuccessful)
+		{
+			FVector To = Player->GetActorLocation() - Fighter->GetActorLocation();
+			To.Z = 0.f;
+			if (!To.IsNearlyZero())
+			{
+				Fighter->AddMovementInput(To.GetSafeNormal(), 1.f);
+			}
+		}
+		PlayWalkAnim();
 	}
 	else
 	{
-		// Step away slightly when too close.
 		const FVector Away = (Fighter->GetActorLocation() - Player->GetActorLocation()).GetSafeNormal2D();
 		const FVector Dest = Player->GetActorLocation() + Away * Preferred;
-		MoveToLocation(Dest);
+		const EPathFollowingRequestResult::Type Result = MoveToLocation(Dest);
+		if (Result != EPathFollowingRequestResult::RequestSuccessful)
+		{
+			Fighter->AddMovementInput(Away, 1.f);
+		}
 	}
 }
 

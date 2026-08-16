@@ -4,6 +4,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimationAsset.h"
 #include "AIController.h"
 #include "BrainComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -74,6 +75,7 @@ AEnemyCharacter::AEnemyCharacter()
 		FSoftObjectPath(TEXT("/Game/_Slime/Days/08/0815/Y1945/Actors/BP_0815_Souvenir_1945.BP_0815_Souvenir_1945_C")));
 
 	Combat = CreateDefaultSubobject<UEnemyCombatComponent>(TEXT("Combat"));
+	Objective = CreateDefaultSubobject<UQuestObjectiveComponent>(TEXT("Objective"));
 
 	HealthBar = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBar"));
 	HealthBar->SetupAttachment(RootComponent);
@@ -99,6 +101,80 @@ void AEnemyCharacter::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 	RebuildMeshParts();
 	ApplyHealthBarOffset();
+	EnsureDefaultQuestIds();
+	EnsureDefaultDisplayName();
+}
+
+FText AEnemyCharacter::GetResolvedDisplayName() const
+{
+	if (!DisplayName.IsEmpty())
+	{
+		return DisplayName;
+	}
+	return FText::FromString(TEXT("敌人"));
+}
+
+void AEnemyCharacter::EnsureDefaultDisplayName()
+{
+	if (!DisplayName.IsEmpty())
+	{
+		return;
+	}
+
+	const FString ClassName = GetClass()->GetName();
+	if (ClassName.Contains(TEXT("Watchdog")) || ClassName.Contains(TEXT("Akita")))
+	{
+		DisplayName = FText::FromString(TEXT("看门狗"));
+	}
+	else if (ClassName.Contains(TEXT("Samurai")))
+	{
+		DisplayName = FText::FromString(TEXT("武士"));
+	}
+	else if (ClassName.Contains(TEXT("Gunner")))
+	{
+		DisplayName = FText::FromString(TEXT("机枪手"));
+	}
+	else if (ClassName.Contains(TEXT("Emperor")))
+	{
+		DisplayName = FText::FromString(TEXT("天皇"));
+	}
+}
+
+void AEnemyCharacter::EnsureDefaultQuestIds()
+{
+	if (!Objective || !Objective->ChapterId.IsNone() || !Objective->QuestId.IsNone() || !Objective->BranchId.IsNone())
+	{
+		return;
+	}
+
+	const FString ClassName = GetClass()->GetName();
+	auto Fill = [this](const TCHAR* Chapter, const TCHAR* Quest, const TCHAR* Branch, const TCHAR* Verb)
+	{
+		Objective->ChapterId = Chapter;
+		Objective->QuestId = Quest;
+		Objective->BranchId = Branch;
+		if (Objective->PromptVerb.IsEmpty())
+		{
+			Objective->PromptVerb = FText::FromString(Verb);
+		}
+	};
+
+	if (ClassName.Contains(TEXT("Watchdog")) || ClassName.Contains(TEXT("Akita")))
+	{
+		Fill(TEXT("1945"), TEXT("Broadcast"), TEXT("Watchdog"), TEXT("打败"));
+	}
+	else if (ClassName.Contains(TEXT("Samurai")))
+	{
+		Fill(TEXT("1945"), TEXT("Broadcast"), TEXT("Samurai"), TEXT("打败"));
+	}
+	else if (ClassName.Contains(TEXT("Gunner")))
+	{
+		Fill(TEXT("1945"), TEXT("Broadcast"), TEXT("Gunner"), TEXT("打败"));
+	}
+	else if (ClassName.Contains(TEXT("Emperor")))
+	{
+		Fill(TEXT("1945"), TEXT("Broadcast"), TEXT("Emperor"), TEXT("打败"));
+	}
 }
 
 void AEnemyCharacter::ApplyHealthBarOffset()
@@ -248,6 +324,8 @@ void AEnemyCharacter::BeginPlay()
 	}
 
 	Super::BeginPlay();
+	EnsureDefaultQuestIds();
+	EnsureDefaultDisplayName();
 	RebuildMeshParts();
 	if (UWorld* World = GetWorld())
 	{
@@ -358,6 +436,7 @@ void AEnemyCharacter::RebuildMeshParts()
 		{
 			GetMesh()->SetAnimInstanceClass(AnimClass);
 		}
+		ApplySingleNodeAnimModeIfNeeded();
 	}
 	else
 	{
@@ -504,7 +583,7 @@ void AEnemyCharacter::HandleDied()
 	}
 	bDeathSequence = true;
 
-	if (UQuestObjectiveComponent* Objective = FindComponentByClass<UQuestObjectiveComponent>())
+	if (Objective)
 	{
 		Objective->TryContribute();
 	}
@@ -539,11 +618,78 @@ void AEnemyCharacter::HandleDied()
 	PlayDeathMontageThenDissolve();
 }
 
+void AEnemyCharacter::ApplySingleNodeAnimModeIfNeeded()
+{
+	if (!UsesSingleNodeAnims())
+	{
+		return;
+	}
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		Skel->SetAnimInstanceClass(nullptr);
+		Skel->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	}
+}
+
+void AEnemyCharacter::PlayMeshAnimation(UAnimationAsset* Asset, bool bLoop)
+{
+	USkeletalMeshComponent* Skel = GetMesh();
+	if (!Skel || !Asset)
+	{
+		return;
+	}
+	if (UsesSingleNodeAnims())
+	{
+		Skel->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		Skel->PlayAnimation(Asset, bLoop);
+		return;
+	}
+	if (UAnimMontage* Montage = Cast<UAnimMontage>(Asset))
+	{
+		if (UAnimInstance* Anim = Skel->GetAnimInstance())
+		{
+			Anim->Montage_Play(Montage);
+		}
+	}
+}
+
+void AEnemyCharacter::StopMeshAnimation()
+{
+	USkeletalMeshComponent* Skel = GetMesh();
+	if (!Skel)
+	{
+		return;
+	}
+	if (UsesSingleNodeAnims())
+	{
+		Skel->Stop();
+		return;
+	}
+	if (UAnimInstance* Anim = Skel->GetAnimInstance())
+	{
+		Anim->Montage_Stop(0.15f);
+	}
+}
+
 void AEnemyCharacter::PlayDeathMontageThenDissolve()
 {
 	UAnimMontage* Montage = DeathMontage.LoadSynchronous();
 	USkeletalMeshComponent* Skel = GetMesh();
 	UAnimInstance* Anim = Skel ? Skel->GetAnimInstance() : nullptr;
+	if (Montage && UsesSingleNodeAnims())
+	{
+		PlayMeshAnimation(Montage, false);
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				DeathMontageFallbackTimer,
+				this,
+				&AEnemyCharacter::StartDeathDissolve,
+				Montage->GetPlayLength() + 0.05f,
+				false);
+		}
+		return;
+	}
 	if (Montage && Anim)
 	{
 		const float Played = Anim->Montage_Play(Montage);

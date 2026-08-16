@@ -29,6 +29,7 @@ protected:
 	void BuildLayoutIfNeeded();
 	void Refresh();
 	void UpdateWaypoint(UQuestSubsystem* Quests, APlayerController* PC);
+	bool IsLocalCombatActive(APlayerController* PC) const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> TrackerPanel;

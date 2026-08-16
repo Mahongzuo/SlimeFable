@@ -43,6 +43,8 @@ protected:
 	UFUNCTION() void OnTabPlaceable();
 	UFUNCTION() void OnTabSouvenir();
 	UFUNCTION() void OnPrimaryActionClicked();
+	UFUNCTION() void OnDiscardClicked();
+	void EnsureDiscardButton();
 	UFUNCTION() void OnHotbar1();
 	UFUNCTION() void OnHotbar2();
 	UFUNCTION() void OnHotbar3();
@@ -65,6 +67,8 @@ public:
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UTextBlock> DetailName;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UTextBlock> DetailDesc;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> PrimaryActionButton;
+	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> DiscardButton;
+	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UHorizontalBox> ActionRow;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UHorizontalBox> HotbarAssignRow;
 
 	ESlimeItemCategory ActiveCategory = ESlimeItemCategory::Consumable;

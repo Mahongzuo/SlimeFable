@@ -16,10 +16,12 @@ class UStaticMeshComponent;
 class USkeletalMeshComponent;
 class UAnimMontage;
 class UAnimInstance;
+class UAnimationAsset;
 class USkeletalMesh;
 class UNiagaraSystem;
 class UMaterialInterface;
 class USlimeSouvenirDefinition;
+class UQuestObjectiveComponent;
 
 UCLASS(meta = (PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API AEnemyCharacter : public ACharacter, public ISlimeLockTarget, public ICombatDamageable
@@ -74,8 +76,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD",
+		meta = (ToolTip = "锁定顶栏显示的名字。每个拖进关卡的实例都可以改。空则显示「敌人」，不会用 BP_ 内部名。"))
 	FText DisplayName;
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	FText GetResolvedDisplayName() const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "-200.0", ClampMax = "800.0", Units = "cm"))
 	float HealthBarZOffset = 120.f;
@@ -147,16 +153,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Presence")
 	void RestoreToSpawn();
 
-protected:
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	virtual bool UsesSingleNodeAnims() const { return false; }
+
+	void PlayMeshAnimation(UAnimationAsset* Asset, bool bLoop);
+	void StopMeshAnimation();
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
 	virtual bool IsInCombat() const;
+
+protected:
 	virtual void OnRestoredToSpawn();
 	void TickOutOfCombatReset(float DeltaSeconds);
 	void ApplyHealthBarOffset();
 	void RefreshWorldHealthBarVisibility();
 	void RebuildMeshParts();
+	void ApplySingleNodeAnimModeIfNeeded();
 	void ClearGeneratedParts();
 	USceneComponent* ResolveAttachParent(const FEnemyMeshPart& Part) const;
 	void ApplyPlaceholderVisual();
+	void EnsureDefaultQuestIds();
+	void EnsureDefaultDisplayName();
 
 	virtual void ApplyDifficultyToCombat(float DamageMul, float IntervalMul);
 	void CaptureDifficultyBases();
@@ -184,6 +201,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<UStaticMeshComponent> PlaceholderMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
+	TObjectPtr<UQuestObjectiveComponent> Objective;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<USceneComponent>> GeneratedParts;

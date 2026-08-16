@@ -151,3 +151,78 @@ void EnemyCombat::FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves)
 		OutMoves.Add(Move);
 	}
 }
+
+void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
+{
+	OutMoves.Reset();
+
+	{
+		FEnemyMoveDef Move;
+		Move.MoveId = TEXT("BiteSnap");
+		Move.Skill.DisplayName = FText::FromString(TEXT("轻咬"));
+		Move.Skill.Exec = EEnemySkillExec::Melee;
+		Move.Skill.Windup = 0.1f;
+		Move.Skill.HitStart = 0.16f;
+		Move.Skill.HitEnd = 0.28f;
+		Move.Skill.Recovery = 0.28f;
+		Move.Skill.Damage = 10.f;
+		Move.Skill.Knockback = 220.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
+		Move.Skill.Hit.Radius = 80.f;
+		Move.Skill.Hit.Range = 140.f;
+		Move.Skill.Hit.OriginForwardOffset = 45.f;
+		Move.MinRange = 0.f;
+		Move.MaxRange = 240.f;
+		Move.Weight = 1.5f;
+		Move.TelegraphTime = 0.12f;
+		Move.Cooldown = 0.7f;
+		OutMoves.Add(Move);
+	}
+
+	{
+		FEnemyMoveDef Move;
+		Move.MoveId = TEXT("BiteTear");
+		Move.Skill.DisplayName = FText::FromString(TEXT("连撕"));
+		Move.Skill.Exec = EEnemySkillExec::Melee;
+		Move.Skill.Windup = 0.14f;
+		Move.Skill.HitStart = 0.2f;
+		Move.Skill.HitEnd = 0.42f;
+		Move.Skill.Recovery = 0.4f;
+		Move.Skill.Damage = 12.f;
+		Move.Skill.Knockback = 280.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
+		Move.Skill.Hit.Radius = 85.f;
+		Move.Skill.Hit.Range = 150.f;
+		Move.Skill.Hit.OriginForwardOffset = 50.f;
+		Move.MinRange = 0.f;
+		Move.MaxRange = 260.f;
+		Move.Weight = 1.1f;
+		Move.TelegraphTime = 0.16f;
+		Move.Cooldown = 1.1f;
+		OutMoves.Add(Move);
+	}
+
+	{
+		FEnemyMoveDef Move;
+		Move.MoveId = TEXT("BiteLunge");
+		Move.Skill.DisplayName = FText::FromString(TEXT("扑咬"));
+		Move.Skill.Exec = EEnemySkillExec::Melee;
+		Move.Skill.Windup = 0.16f;
+		Move.Skill.HitStart = 0.22f;
+		Move.Skill.HitEnd = 0.4f;
+		Move.Skill.Recovery = 0.45f;
+		Move.Skill.Damage = 14.f;
+		Move.Skill.Knockback = 340.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Capsule;
+		Move.Skill.Hit.Radius = 70.f;
+		Move.Skill.Hit.Range = 200.f;
+		Move.Skill.Hit.OriginForwardOffset = 60.f;
+		Move.MinRange = 80.f;
+		Move.MaxRange = 320.f;
+		Move.Weight = 0.9f;
+		Move.TelegraphTime = 0.2f;
+		Move.Cooldown = 1.6f;
+		Move.bGapCloser = true;
+		OutMoves.Add(Move);
+	}
+}

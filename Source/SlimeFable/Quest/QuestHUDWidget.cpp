@@ -1,5 +1,8 @@
 #include "Quest/QuestHUDWidget.h"
 #include "Quest/QuestSubsystem.h"
+#include "Combat/SlimeLockOnComponent.h"
+#include "Enemy/EnemyCharacter.h"
+#include "EngineUtils.h"
 #include "UI/MenuUIStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -320,10 +323,45 @@ FReply UQuestHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, con
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }
 
+bool UQuestHUDWidget::IsLocalCombatActive(APlayerController* PC) const
+{
+	if (!PC)
+	{
+		return false;
+	}
+	if (APawn* Pawn = PC->GetPawn())
+	{
+		if (const USlimeLockOnComponent* Lock = Pawn->FindComponentByClass<USlimeLockOnComponent>())
+		{
+			if (Lock->IsLockedOn())
+			{
+				return true;
+			}
+		}
+	}
+	if (UWorld* World = PC->GetWorld())
+	{
+		for (TActorIterator<AEnemyCharacter> It(World); It; ++It)
+		{
+			if (It->IsInCombat())
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 void UQuestHUDWidget::UpdateWaypoint(UQuestSubsystem* Quests, APlayerController* PC)
 {
 	if (!WaypointMark || !Quests || !PC)
 	{
+		return;
+	}
+
+	if (IsLocalCombatActive(PC))
+	{
+		WaypointMark->SetVisibility(ESlateVisibility::Collapsed);
 		return;
 	}
 

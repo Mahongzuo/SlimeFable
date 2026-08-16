@@ -65,6 +65,10 @@ void UPauseMenuWidget::NativeConstruct()
 	{
 		ReturnToHubButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnReturnToHubClicked);
 	}
+	if (ResetDayButton)
+	{
+		ResetDayButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnResetDayClicked);
+	}
 	RefreshHubButtonVisibility();
 }
 
@@ -119,6 +123,7 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	{
 		bBuiltInCode = false;
 		EnsureReturnToHubButton();
+		EnsureResetDayButton();
 		return;
 	}
 
@@ -176,6 +181,7 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	TitleText = AddText(TEXT("TitleText"), FText::FromString(TEXT("暂停")));
 	ContinueButton = AddButton(TEXT("ContinueButton"), FText::FromString(TEXT("继续游戏")));
 	ReturnToHubButton = AddButton(TEXT("ReturnToHubButton"), FText::FromString(TEXT("回到大厅")));
+	ResetDayButton = AddButton(TEXT("ResetDayButton"), FText::FromString(TEXT("重制本关进度")));
 	LevelSelectButton = AddButton(TEXT("LevelSelectButton"), FText::FromString(TEXT("返回选关")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
 	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
@@ -235,6 +241,60 @@ void UPauseMenuWidget::EnsureReturnToHubButton()
 	}
 }
 
+void UPauseMenuWidget::EnsureResetDayButton()
+{
+	if (ResetDayButton || !WidgetTree)
+	{
+		return;
+	}
+
+	UPanelWidget* InsertParent = nullptr;
+	int32 InsertIndex = 1;
+	UWidget* After = ReturnToHubButton ? Cast<UWidget>(ReturnToHubButton) : Cast<UWidget>(ContinueButton);
+	if (After)
+	{
+		if (USizeBox* AfterSize = Cast<USizeBox>(After->GetParent()))
+		{
+			InsertParent = Cast<UPanelWidget>(AfterSize->GetParent());
+			if (InsertParent)
+			{
+				InsertIndex = InsertParent->GetChildIndex(AfterSize) + 1;
+			}
+		}
+		else if (UPanelWidget* Direct = Cast<UPanelWidget>(After->GetParent()))
+		{
+			InsertParent = Direct;
+			InsertIndex = Direct->GetChildIndex(After) + 1;
+		}
+	}
+	if (!InsertParent)
+	{
+		return;
+	}
+
+	USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(), TEXT("ResetDayButton_Size"));
+	SizeBox->SetWidthOverride(320.f);
+	SizeBox->SetHeightOverride(60.f);
+
+	ResetDayButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ResetDayButton"));
+	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(
+		UTextBlock::StaticClass(), TEXT("ResetDayButton_Label"));
+	Label->SetText(FText::FromString(TEXT("重制本关进度")));
+	Label->SetJustification(ETextJustify::Center);
+	ResetDayButton->AddChild(Label);
+	SizeBox->AddChild(ResetDayButton);
+
+	if (UPanelSlot* InsertedSlot = InsertParent->InsertChildAt(InsertIndex, SizeBox))
+	{
+		if (UVerticalBoxSlot* VSlot = Cast<UVerticalBoxSlot>(InsertedSlot))
+		{
+			VSlot->SetPadding(FMargin(0.f, 8.f));
+			VSlot->SetHorizontalAlignment(HAlign_Center);
+		}
+	}
+}
+
 void UPauseMenuWidget::RefreshHubButtonVisibility()
 {
 	bool bShow = false;
@@ -279,6 +339,7 @@ void UPauseMenuWidget::ApplyLook()
 	const FVector2D Size(320.f, 60.f);
 	FMenuUIStyle::ApplyMaterialButtonStyle(ContinueButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(ReturnToHubButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(ResetDayButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(LevelSelectButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(GraphicsButton, BrushBtn, Size);
@@ -297,6 +358,7 @@ void UPauseMenuWidget::ApplyLook()
 	};
 	StyleLabel(ContinueButton);
 	StyleLabel(ReturnToHubButton);
+	StyleLabel(ResetDayButton);
 	StyleLabel(LevelSelectButton);
 	StyleLabel(KeybindButton);
 	StyleLabel(GraphicsButton);
@@ -309,6 +371,7 @@ void UPauseMenuWidget::ApplyLook()
 	};
 	BindHover(ContinueButton);
 	BindHover(ReturnToHubButton);
+	BindHover(ResetDayButton);
 	BindHover(LevelSelectButton);
 	BindHover(KeybindButton);
 	BindHover(GraphicsButton);
@@ -401,4 +464,9 @@ void UPauseMenuWidget::OnMainMenuClicked()
 void UPauseMenuWidget::OnReturnToHubClicked()
 {
 	OnReturnToHubRequested.Broadcast();
+}
+
+void UPauseMenuWidget::OnResetDayClicked()
+{
+	OnResetDayRequested.Broadcast();
 }

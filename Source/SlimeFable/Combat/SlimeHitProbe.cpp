@@ -137,8 +137,10 @@ bool USlimeHitProbe::GatherOverlaps(
 			Shape = FCollisionShape::MakeCapsule(Spec.Radius, FMath::Max(Axis.Size() * 0.5f, Spec.Radius));
 			break;
 		}
-	case ESlimeHitShape::Cone:
 	case ESlimeHitShape::Sphere:
+		Shape = FCollisionShape::MakeSphere(FMath::Max(Spec.Radius + Spec.Range, 1.f));
+		break;
+	case ESlimeHitShape::Cone:
 	case ESlimeHitShape::ProjectileSweep:
 	default:
 		Shape = FCollisionShape::MakeSphere(Spec.Shape == ESlimeHitShape::Cone

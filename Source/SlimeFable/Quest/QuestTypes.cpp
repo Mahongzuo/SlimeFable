@@ -178,7 +178,8 @@ UDayQuestBook* UDayQuestBook::Make0815Book(UObject* Outer)
 		  MakeBranch(TEXT("Workers"), TEXT("把创刊号交给工人"), EQuestObjectiveType::Talk, 3) },
 		TEXT("1945"), TEXT("Souvenir1920"), TEXT("创刊号影印")));
 	Book->Chapters.Add(MakeYearChapter(TEXT("1945"), TEXT("终战广播"), TEXT("Broadcast"), TEXT("打败守军，让胜利的声音传出去"),
-		{ MakeBranch(TEXT("Samurai"), TEXT("打败武士"), EQuestObjectiveType::Defeat, 1),
+		{ MakeBranch(TEXT("Watchdog"), TEXT("打败看门狗"), EQuestObjectiveType::Defeat, 1),
+		  MakeBranch(TEXT("Samurai"), TEXT("打败武士"), EQuestObjectiveType::Defeat, 1),
 		  MakeBranch(TEXT("Gunner"), TEXT("打败机枪手"), EQuestObjectiveType::Defeat, 1),
 		  MakeBranch(TEXT("Emperor"), TEXT("打败天皇"), EQuestObjectiveType::Defeat, 1),
 		  MakeBranch(TEXT("Play"), TEXT("按下播放"), EQuestObjectiveType::Talk, 1) },

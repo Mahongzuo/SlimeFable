@@ -4,6 +4,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "EnemyCharacter.h"
 #include "EnemyProjectile.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -51,7 +52,11 @@ void UEnemyCombatComponent::InterruptCombat()
 	{
 		return;
 	}
-	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+	{
+		Enemy->StopMeshAnimation();
+	}
+	else if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 	{
 		if (UAnimInstance* Anim = Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr)
 		{
@@ -74,9 +79,24 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 
 	SpawnVfx(Def.CastNiagara, GetOwner()->GetActorLocation());
 
-	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+	if (UAnimMontage* Montage = Def.AttackMontage.LoadSynchronous())
 	{
-		if (UAnimMontage* Montage = Def.AttackMontage.LoadSynchronous())
+		if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+		{
+			if (Enemy->UsesSingleNodeAnims())
+			{
+				Enemy->PlayMeshAnimation(Montage, false);
+			}
+			else if (UAnimInstance* Anim = Enemy->GetMesh() ? Enemy->GetMesh()->GetAnimInstance() : nullptr)
+			{
+				const float Played = Anim->Montage_Play(Montage);
+				if (Played <= 0.f)
+				{
+					Enemy->PlayMeshAnimation(Montage, false);
+				}
+			}
+		}
+		else if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 		{
 			if (UAnimInstance* Anim = Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr)
 			{
