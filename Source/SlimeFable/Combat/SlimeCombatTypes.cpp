@@ -102,6 +102,17 @@ FSlimeCombatPoseState SlimeCombat::MakePose(ESlimeCombatPose Pose, const FVector
 		State.StretchSide = FMath::Lerp(1.f, 0.45f, S);
 		State.StretchUp = FMath::Lerp(1.f, 0.6f, S);
 		break;
+	case ESlimeCombatPose::MawOpen:
+		State.StretchForward = FMath::Lerp(1.f, 1.6f, S);
+		State.StretchSide = FMath::Lerp(1.f, 0.8f, S);
+		State.StretchUp = FMath::Lerp(1.f, 1.15f, S);
+		break;
+	case ESlimeCombatPose::Swallow:
+		State.StretchForward = FMath::Lerp(1.f, 0.9f, S);
+		State.StretchSide = FMath::Lerp(1.f, 1.05f, S);
+		State.StretchUp = FMath::Lerp(1.f, 1.1f, S);
+		State.Pulse = 0.25f * S;
+		break;
 	default:
 		State.bActive = false;
 		break;

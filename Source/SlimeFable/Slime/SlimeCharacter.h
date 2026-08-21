@@ -22,6 +22,7 @@ class USlimePlacementComponent;
 class USlimeInteractComponent;
 class USlimeDodgeComponent;
 class USlimeVehicleComponent;
+class USlimeDevourComponent;
 class UStaticMeshComponent;
 
 /**
@@ -112,6 +113,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	USlimeDodgeComponent* GetSlimeDodge() const { return SlimeDodge; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	USlimeDevourComponent* GetSlimeDevour() const { return SlimeDevour; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
 	USlimeVehicleComponent* GetSlimeVehicle() const { return SlimeVehicle; }
@@ -204,6 +208,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<USlimeDodgeComponent> SlimeDodge;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
+	TObjectPtr<USlimeDevourComponent> SlimeDevour;
 
 	/** Flyer mesh under the slime; hidden until mounted. Adjust transform in BP. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Vehicle")

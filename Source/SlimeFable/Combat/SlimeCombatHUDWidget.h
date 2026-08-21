@@ -36,6 +36,8 @@ protected:
 	void BuildLayoutIfNeeded();
 	void Refresh();
 	void RefreshLockOnBar(float DeltaTime);
+	void ApplyProgressBarFill(UProgressBar* Bar, const FLinearColor& Fill);
+	FLinearColor GetSlimeHudTint() const;
 
 	UFUNCTION()
 	void HandleUnstuckClicked();
@@ -84,6 +86,27 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> LaunchChargeTrack;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> DevourHoldBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> DevourHoldTrack;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> DigestBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> DigestTrack;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> PhantomCountText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> Skill1ChargeBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> Skill1ChargeTrack;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UButton> UnstuckButton;

@@ -24,6 +24,7 @@
 #include "SlimeCharacter.h"
 #include "SlimeElementComponent.h"
 #include "SlimeLockOnComponent.h"
+#include "SlimeDevourComponent.h"
 #include "SlimeHealthComponent.h"
 #include "EnemyCharacter.h"
 #include "SlimeEnemyCharacter.h"
@@ -91,7 +92,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && SlotCdTexts.Num() == 3 && PlayerHealthBar)
+	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 3 && PlayerHealthBar)
 	{
 		return;
 	}
@@ -281,6 +282,80 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	}
 	LaunchChargeTrack->AddChild(LaunchChargeBar);
 
+	DevourHoldTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DevourHoldTrack"));
+	DevourHoldTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
+	DevourHoldTrack->SetPadding(FMargin(4.f, 3.f));
+	DevourHoldTrack->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* HoldSlot = Root->AddChildToCanvas(DevourHoldTrack))
+	{
+		HoldSlot->SetAnchors(FAnchors(0.f, 0.f));
+		HoldSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		HoldSlot->SetPosition(FVector2D(0.f, 0.f));
+		HoldSlot->SetSize(FVector2D(160.f, 14.f));
+		HoldSlot->SetZOrder(16);
+	}
+	DevourHoldBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("DevourHoldBar"));
+	DevourHoldBar->SetPercent(0.f);
+	DevourHoldBar->SetFillColorAndOpacity(FLinearColor(0.72f, 0.58f, 0.32f, 0.95f));
+	if (ProgressMat)
+	{
+		FProgressBarStyle HoldStyle = DevourHoldBar->GetWidgetStyle();
+		FSlateBrush HoldFill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(152.f, 8.f));
+		HoldFill.TintColor = FSlateColor(FLinearColor(0.92f, 0.78f, 0.48f, 0.95f));
+		HoldStyle.SetFillImage(HoldFill);
+		FSlateBrush HoldEmpty;
+		HoldEmpty.DrawAs = ESlateBrushDrawType::NoDrawType;
+		HoldStyle.SetBackgroundImage(HoldEmpty);
+		DevourHoldBar->SetWidgetStyle(HoldStyle);
+	}
+	DevourHoldTrack->AddChild(DevourHoldBar);
+
+	DigestTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DigestTrack"));
+	DigestTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
+	DigestTrack->SetPadding(FMargin(4.f, 3.f));
+	DigestTrack->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* DigestSlot = Root->AddChildToCanvas(DigestTrack))
+	{
+		DigestSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		DigestSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		DigestSlot->SetPosition(FVector2D(0.f, -124.f));
+		DigestSlot->SetSize(FVector2D(240.f, 14.f));
+		DigestSlot->SetZOrder(15);
+	}
+	DigestBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("DigestBar"));
+	DigestBar->SetPercent(0.f);
+	DigestBar->SetFillColorAndOpacity(FLinearColor(0.55f, 0.42f, 0.24f, 0.95f));
+	DigestTrack->AddChild(DigestBar);
+
+	Skill1ChargeTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Skill1ChargeTrack"));
+	Skill1ChargeTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
+	Skill1ChargeTrack->SetPadding(FMargin(4.f, 3.f));
+	Skill1ChargeTrack->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* HoldSlot = Root->AddChildToCanvas(Skill1ChargeTrack))
+	{
+		HoldSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		HoldSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		HoldSlot->SetPosition(FVector2D(0.f, -146.f));
+		HoldSlot->SetSize(FVector2D(180.f, 12.f));
+		HoldSlot->SetZOrder(15);
+	}
+	Skill1ChargeBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("Skill1ChargeBar"));
+	Skill1ChargeBar->SetPercent(0.f);
+	Skill1ChargeBar->SetFillColorAndOpacity(FMenuUIStyle::TodayEdgeColor());
+	Skill1ChargeTrack->AddChild(Skill1ChargeBar);
+
+	PhantomCountText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PhantomCountText"));
+	PhantomCountText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	if (UCanvasPanelSlot* CountSlot = Root->AddChildToCanvas(PhantomCountText))
+	{
+		CountSlot->SetAnchors(FAnchors(0.f, 1.f));
+		CountSlot->SetAlignment(FVector2D(0.f, 1.f));
+		CountSlot->SetPosition(FVector2D(28.f, -28.f));
+		CountSlot->SetAutoSize(true);
+		CountSlot->SetZOrder(15);
+	}
+	FMenuUIStyle::ApplyMarkerFont(PhantomCountText, 18.f, FMenuUIStyle::WarmMutedTextColor());
+
 	UHorizontalBox* HotbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarRow"));
 	if (UCanvasPanelSlot* HotbarSlot = Root->AddChildToCanvas(HotbarRow))
 	{
@@ -434,6 +509,34 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	}
 }
 
+void USlimeCombatHUDWidget::ApplyProgressBarFill(UProgressBar* Bar, const FLinearColor& Fill)
+{
+	if (!Bar)
+	{
+		return;
+	}
+	Bar->SetFillColorAndOpacity(Fill);
+	FProgressBarStyle Style = Bar->GetWidgetStyle();
+	FSlateBrush FillImage = Style.FillImage;
+	FillImage.TintColor = FSlateColor(Fill);
+	Style.SetFillImage(FillImage);
+	Bar->SetWidgetStyle(Style);
+}
+
+FLinearColor USlimeCombatHUDWidget::GetSlimeHudTint() const
+{
+	if (APawn* Pawn = GetOwningPlayerPawn())
+	{
+		if (const USlimeElementComponent* Element = Pawn->FindComponentByClass<USlimeElementComponent>())
+		{
+			FLinearColor Color = Element->GetCurrentProfile().BaseColor;
+			Color.A = 0.95f;
+			return Color;
+		}
+	}
+	return FLinearColor(0.72f, 0.58f, 0.32f, 0.95f);
+}
+
 void USlimeCombatHUDWidget::Refresh()
 {
 	if (!Combat)
@@ -560,6 +663,10 @@ void USlimeCombatHUDWidget::Refresh()
 								? InputSettings->GetKeyDisplayName(ESlimeInputAction::Interact).ToString()
 								: TEXT("F");
 							const FString Verb = Interact->GetFocusedPromptVerb().ToString();
+							if (Verb == TEXT("吞噬"))
+							{
+								ScreenPos.Y -= 36.f;
+							}
 							Prompt = FText::FromString(FString::Printf(
 								TEXT("%s %s"),
 								*KeyName,
@@ -580,6 +687,32 @@ void USlimeCombatHUDWidget::Refresh()
 				PromptSlot->SetAlignment(FVector2D(0.5f, 1.f));
 				PromptSlot->SetAutoSize(true);
 				PromptSlot->SetPosition(ScreenPos);
+			}
+		}
+
+		if (DevourHoldTrack && DevourHoldBar)
+		{
+			float Hold = 0.f;
+			bool bShowHold = false;
+			if (APawn* Pawn = GetOwningPlayerPawn())
+			{
+				if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
+				{
+					Hold = Devour->GetHoldProgress();
+					bShowHold = Hold > KINDA_SMALL_NUMBER && bShow;
+				}
+			}
+			DevourHoldTrack->SetVisibility(bShowHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+			DevourHoldBar->SetPercent(Hold);
+			ApplyProgressBarFill(DevourHoldBar, GetSlimeHudTint());
+			if (bShowHold)
+			{
+				if (UCanvasPanelSlot* HoldSlot = Cast<UCanvasPanelSlot>(DevourHoldTrack->Slot))
+				{
+					HoldSlot->SetAnchors(FAnchors(0.f, 0.f));
+					HoldSlot->SetAlignment(FVector2D(0.5f, 0.f));
+					HoldSlot->SetPosition(ScreenPos + FVector2D(0.f, 6.f));
+				}
 			}
 		}
 	}
@@ -603,12 +736,33 @@ void USlimeCombatHUDWidget::Refresh()
 		}
 		LaunchChargeTrack->SetVisibility(bShowCharge ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		LaunchChargeBar->SetPercent(Charge);
-		LaunchChargeBar->SetFillColorAndOpacity(Fill);
-		FProgressBarStyle ChargeStyle = LaunchChargeBar->GetWidgetStyle();
-		FSlateBrush ChargeFill = ChargeStyle.FillImage;
-		ChargeFill.TintColor = FSlateColor(Fill);
-		ChargeStyle.SetFillImage(ChargeFill);
-		LaunchChargeBar->SetWidgetStyle(ChargeStyle);
+		ApplyProgressBarFill(LaunchChargeBar, Fill);
+	}
+
+	if (APawn* Pawn = GetOwningPlayerPawn())
+	{
+		if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
+		{
+			if (DigestTrack && DigestBar)
+			{
+				const bool bDigest = Devour->GetPhase() == ESlimeDevourPhase::Digest;
+				DigestTrack->SetVisibility(bDigest ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+				DigestBar->SetPercent(Devour->GetDigestAlpha());
+				ApplyProgressBarFill(DigestBar, GetSlimeHudTint());
+			}
+			if (PhantomCountText)
+			{
+				PhantomCountText->SetText(FText::FromString(
+					FString::Printf(TEXT("%d/6"), Devour->GetPhantomSlotCount())));
+			}
+			if (Skill1ChargeTrack && Skill1ChargeBar && Combat)
+			{
+				const float Hold = Combat->GetSkill1HoldFraction();
+				const bool bShowHold = Hold > KINDA_SMALL_NUMBER && !Devour->IsPhantomWheelOpen();
+				Skill1ChargeTrack->SetVisibility(bShowHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+				Skill1ChargeBar->SetPercent(Hold);
+			}
+		}
 	}
 
 	if (PlayerHealthBar && PlayerHealthBarMID)

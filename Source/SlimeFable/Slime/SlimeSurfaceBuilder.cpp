@@ -342,7 +342,7 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 	Build(Particles, DegenerateAnchor, NoMerging);
 }
 
-void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds)
+void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift, float InClipFloorZ)
 {
 	if (!IsConfigured())
 	{
@@ -353,6 +353,8 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 	LiveVertexCount = 0;
 	bTruncated = false;
+	VisualZLift = FMath::Max(InVisualZLift, 0.f);
+	ClipFloorZ = InClipFloorZ;
 	ActiveMergingShots.Reset();
 	for (const uint8 ShotId : MergingShotIds)
 	{
@@ -362,6 +364,7 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 		}
 	}
 
+	const FVector Lift(0.f, 0.f, VisualZLift);
 	FBox BodyBounds(ForceInit);
 	TMap<uint8, FBox> ShotBounds;
 	for (const FSlimeParticle& Particle : Particles)
@@ -374,8 +377,7 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 			}
 			if (ActiveMergingShots.Contains(Particle.ShotId))
 			{
-				// Merging clones join the body metaball field.
-				BodyBounds += FVector(Particle.Position);
+				BodyBounds += FVector(Particle.Position) + Lift;
 			}
 			else
 			{
@@ -384,7 +386,7 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 		}
 		else
 		{
-			BodyBounds += FVector(Particle.Position);
+			BodyBounds += FVector(Particle.Position) + Lift;
 		}
 	}
 
@@ -466,9 +468,11 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds, uint8 ShotFilter)
 {
+	bClipFloorThisCluster = !bBallisticSubset && ClipFloorZ > -1.e8f;
 	PrepareGrid(Bounds, !bBallisticSubset);
 	SplatDensity(Particles, bBallisticSubset, ShotFilter, bBallisticSubset ? nullptr : &ActiveMergingShots);
 	BlurDensity();
+	ClipDensityBelowFloor();
 	Triangulate();
 }
 
@@ -684,7 +688,12 @@ void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles,
 			}
 		}
 
-		const FVector Local = FVector(Particle.Position) - GridOrigin;
+		FVector WorldPos(Particle.Position);
+		if (!bBallisticSubset)
+		{
+			WorldPos.Z += VisualZLift;
+		}
+		const FVector Local = WorldPos - GridOrigin;
 		const FIntVector Base(
 			FMath::FloorToInt(Local.X * InvCell),
 			FMath::FloorToInt(Local.Y * InvCell),
@@ -732,6 +741,32 @@ void FSlimeSurfaceBuilder::SplatDensity(const TArray<FSlimeParticle>& Particles,
 	for (int32 Index = 0; Index < NumSamples; ++Index)
 	{
 		Density[Index] *= InvInteriorValue;
+	}
+}
+
+void FSlimeSurfaceBuilder::ClipDensityBelowFloor()
+{
+	if (!bClipFloorThisCluster || ClipFloorZ <= -1.e8f || Dims.Z <= 0)
+	{
+		return;
+	}
+
+	constexpr float Eps = 1.f;
+	const float CutZ = ClipFloorZ + Eps;
+	for (int32 Z = 0; Z < Dims.Z; ++Z)
+	{
+		const float WorldZ = GridOrigin.Z + float(Z) * ActiveCellSize;
+		if (WorldZ >= CutZ)
+		{
+			continue;
+		}
+		for (int32 Y = 0; Y < Dims.Y; ++Y)
+		{
+			for (int32 X = 0; X < Dims.X; ++X)
+			{
+				Density[SampleIndex(X, Y, Z)] = 0.f;
+			}
+		}
 	}
 }
 

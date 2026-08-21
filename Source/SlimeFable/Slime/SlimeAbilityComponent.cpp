@@ -19,6 +19,7 @@
 #include "Misc/App.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeClingComponent.h"
+#include "SlimeDevourComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeFable.h"
 #include "Settings/SlimeInputSettings.h"
@@ -201,10 +202,13 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 
 	// Drive Body/UI directly so Enhanced Input handlers can hard-return while polling is on.
 	const bool bFlatten = IsDown(ESlimeInputAction::Flatten, EKeys::C);
+	const USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr;
+	const bool bCombatLocked = Devour && Devour->IsCombatLocked();
+	const bool bPhantomWheelOpen = Devour && Devour->IsPhantomWheelOpen();
 	if (bFlatten != bPollFlattenDown)
 	{
 		bPollFlattenDown = bFlatten;
-		if (Body)
+		if (Body && !(bFlatten && bCombatLocked))
 		{
 			Body->SetSpread(bFlatten);
 		}
@@ -217,7 +221,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		{
 			bDetached = Cling->TryDetach();
 		}
-		if (!bDetached && Body)
+		if (!bDetached && Body && !bCombatLocked)
 		{
 			Body->ResetBody();
 		}
@@ -225,7 +229,8 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 
 	const bool bAbsorb = IsDown(ESlimeInputAction::Absorb, EKeys::X);
 	bPollAbsorbDown = bAbsorb;
-	if (Body)
+	const bool bDevourOwnsShots = Devour && Devour->IsDevouring();
+	if (Body && !bDevourOwnsShots)
 	{
 		Body->SetRecalling(bAbsorb);
 	}
@@ -234,7 +239,10 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	if (bLaunch && !bPollLaunchDown)
 	{
 		bPollLaunchDown = true;
-		BeginLaunchCharge();
+		if (!bCombatLocked && !bPhantomWheelOpen)
+		{
+			BeginLaunchCharge();
+		}
 	}
 	else if (!bLaunch && bPollLaunchDown)
 	{
@@ -246,7 +254,10 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	if (bWheel && !bPollWheelDown)
 	{
 		bPollWheelDown = true;
-		OpenWheel();
+		if (!bPhantomWheelOpen && !bCombatLocked)
+		{
+			OpenWheel();
+		}
 	}
 	else if (!bWheel && bPollWheelDown)
 	{
@@ -715,6 +726,13 @@ void USlimeAbilityComponent::OpenWheel()
 			UE_LOG(LogSlimeFable, Warning, TEXT("SlimeAbilityComponent: cannot open element wheel — no SlimeElementComponent."));
 		}
 		return;
+	}
+	if (const USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr)
+	{
+		if (Devour->IsPhantomWheelOpen())
+		{
+			return;
+		}
 	}
 
 	if (!WheelWidget)

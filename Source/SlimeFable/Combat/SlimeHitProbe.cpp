@@ -18,6 +18,7 @@
 #include "SlimeSliceableComponent.h"
 #include "SlimeSliceUtil.h"
 #include "SlimeStatusComponent.h"
+#include "EnemyCharacter.h"
 #include "Sound/SoundBase.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -197,9 +198,19 @@ void USlimeHitProbe::ApplyToActor(
 	float DamageAmount = Skill.Damage;
 	if (Instigator)
 	{
-		if (USlimeCombatComponent* Combat = Instigator->FindComponentByClass<USlimeCombatComponent>())
+		if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Instigator))
 		{
-			DamageAmount = Combat->ResolveOutgoingDamage(Skill);
+			if (Enemy->bHarmless)
+			{
+				DamageAmount = 0.f;
+			}
+		}
+		if (DamageAmount > 0.f)
+		{
+			if (USlimeCombatComponent* Combat = Instigator->FindComponentByClass<USlimeCombatComponent>())
+			{
+				DamageAmount = Combat->ResolveOutgoingDamage(Skill);
+			}
 		}
 	}
 

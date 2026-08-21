@@ -58,7 +58,9 @@ enum class ESlimeCombatPose : uint8
 	Spike,
 	WhipSnap,
 	Pulse,
-	DashRibbon
+	DashRibbon,
+	MawOpen,
+	Swallow
 };
 
 UENUM(BlueprintType)

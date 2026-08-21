@@ -3,7 +3,7 @@
 #include "SlimeInteractComponent.h"
 
 #include "SlimeFablePlayerController.h"
-#include "SlimeWorldPickup.h"
+#include "EnemyCharacter.h"
 #include "SlimePlacedActor.h"
 #include "Quest/QuestInteractActor.h"
 #include "Quest/QuestSubsystem.h"
@@ -14,6 +14,7 @@
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "SlimeAbilityComponent.h"
+#include "SlimeDevourComponent.h"
 #include "SlimeVehicleComponent.h"
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
@@ -63,6 +64,13 @@ bool USlimeInteractComponent::CanInteractNow() const
 			return false;
 		}
 	}
+	if (const USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
+	{
+		if (Devour->IsPhantomWheelOpen() || Devour->IsCombatLocked())
+		{
+			return false;
+		}
+	}
 	if (const USlimePlacementComponent* Placement = Pawn->FindComponentByClass<USlimePlacementComponent>())
 	{
 		if (Placement->IsPlacing())
@@ -78,6 +86,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 	FocusedPickup.Reset();
 	FocusedPlaced.Reset();
 	FocusedQuest.Reset();
+	FocusedDevour.Reset();
 
 	APawn* Pawn = Cast<APawn>(GetOwner());
 	UWorld* World = GetWorld();
@@ -159,6 +168,18 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 		}
 	}
 
+	if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
+	{
+		if (AEnemyCharacter* DevourTarget = Devour->FindBestDevourTarget())
+		{
+			FocusedDevour = DevourTarget;
+			FocusedPickup.Reset();
+			FocusedPlaced.Reset();
+			FocusedQuest.Reset();
+			return;
+		}
+	}
+
 	FocusedPickup = BestPickup;
 	FocusedPlaced = BestPlaced;
 	FocusedQuest = BestQuest;
@@ -166,6 +187,11 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 
 bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation) const
 {
+	if (AEnemyCharacter* Enemy = FocusedDevour.Get())
+	{
+		OutLocation = Enemy->GetHudAnchorLocation() + FVector(0.f, 0.f, Enemy->HealthBarZOffset);
+		return true;
+	}
 	if (ASlimeWorldPickup* Pickup = FocusedPickup.Get())
 	{
 		OutLocation = Pickup->GetPromptWorldLocation();
@@ -186,6 +212,10 @@ bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation
 
 FText USlimeInteractComponent::GetFocusedPromptVerb() const
 {
+	if (FocusedDevour.IsValid())
+	{
+		return FText::FromString(TEXT("吞噬"));
+	}
 	if (ASlimeWorldPickup* Pickup = FocusedPickup.Get())
 	{
 		return Pickup->GetInteractPromptVerb();
@@ -224,6 +254,13 @@ bool USlimeInteractComponent::TryInteract()
 	}
 
 	RefreshFocusedTarget();
+	if (FocusedDevour.IsValid())
+	{
+		if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
+		{
+			return Devour->TryDevourFocused();
+		}
+	}
 	if (ASlimeWorldPickup* Pickup = FocusedPickup.Get())
 	{
 		return Pickup->TryPickup(Pawn);
@@ -324,6 +361,14 @@ void USlimeInteractComponent::PollKeys()
 		}
 		return PC->WasInputKeyJustPressed(Fallback);
 	};
+	auto IsDown = [PC, InputSettings](ESlimeInputAction Action, const FKey& Fallback) -> bool
+	{
+		if (InputSettings)
+		{
+			return InputSettings->IsKeyDown(PC, Action);
+		}
+		return PC->IsInputKeyDown(Fallback);
+	};
 
 	if (WasPressed(ESlimeInputAction::Inventory, EKeys::B))
 	{
@@ -345,6 +390,14 @@ void USlimeInteractComponent::PollKeys()
 			{
 				Quests->ToggleQuestLog();
 			}
+		}
+	}
+
+	if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
+	{
+		if (Devour->GetPhase() == ESlimeDevourPhase::Charging && !IsDown(ESlimeInputAction::Interact, EKeys::F))
+		{
+			Devour->CancelHold();
 		}
 	}
 

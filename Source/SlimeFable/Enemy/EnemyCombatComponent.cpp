@@ -21,6 +21,17 @@ UEnemyCombatComponent::UEnemyCombatComponent()
 void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+	{
+		if (Enemy->IsDevourLocked())
+		{
+			if (bAttacking)
+			{
+				InterruptCombat();
+			}
+			return;
+		}
+	}
 	if (bAttacking)
 	{
 		TickAction(DeltaTime);
@@ -34,7 +45,18 @@ bool UEnemyCombatComponent::CanStartAction() const
 		return false;
 	}
 	const AActor* Owner = GetOwner();
-	return Owner != nullptr;
+	if (!Owner)
+	{
+		return false;
+	}
+	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+	{
+		if (Enemy->IsDevourLocked())
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 bool UEnemyCombatComponent::TryExecute(const FEnemySkillDef& Def)
@@ -48,10 +70,6 @@ bool UEnemyCombatComponent::TryExecute(const FEnemySkillDef& Def)
 
 void UEnemyCombatComponent::InterruptCombat()
 {
-	if (!bAttacking)
-	{
-		return;
-	}
 	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
 	{
 		Enemy->StopMeshAnimation();
@@ -120,6 +138,14 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 
 void UEnemyCombatComponent::TickAction(float DeltaTime)
 {
+	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+	{
+		if (Enemy->IsDevourLocked())
+		{
+			InterruptCombat();
+			return;
+		}
+	}
 	ActionElapsed += DeltaTime;
 
 	if (!bHitFired && ActionElapsed >= ActiveDef.HitStart)
@@ -148,6 +174,13 @@ void UEnemyCombatComponent::FireHit()
 	if (!Owner)
 	{
 		return;
+	}
+	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+	{
+		if (Enemy->IsDevourLocked())
+		{
+			return;
+		}
 	}
 
 	const FVector Forward = ActiveForward.GetSafeNormal();
@@ -210,7 +243,9 @@ void UEnemyCombatComponent::ExecuteProjectile(const FEnemySkillDef& Def, const F
 
 	if (AEnemyProjectile* Projectile = World->SpawnActor<AEnemyProjectile>(Origin, Dir.Rotation(), Params))
 	{
-		Projectile->InitProjectile(Owner, Def, Velocity);
+		FEnemySkillDef Shot = Def;
+		Shot.Damage = ResolveDamage(Def);
+		Projectile->InitProjectile(Owner, Shot, Velocity);
 	}
 	SpawnVfx(Def.CastNiagara, Origin);
 }
@@ -258,5 +293,12 @@ FVector UEnemyCombatComponent::GetMuzzleLocation() const
 
 float UEnemyCombatComponent::ResolveDamage(const FEnemySkillDef& Skill) const
 {
+	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+	{
+		if (Enemy->bHarmless)
+		{
+			return 0.f;
+		}
+	}
 	return FMath::Max(Skill.Damage + AttackPower * 0.35f, 0.f);
 }

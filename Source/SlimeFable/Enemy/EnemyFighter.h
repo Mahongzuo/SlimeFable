@@ -80,6 +80,10 @@ public:
 		meta = (ToolTip = "未进战时绕出生点闲逛。看门狗勾上，武士等保持关。"))
 	bool bWanderWhenIdle = false;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug",
+		meta = (ToolTip = "勾选后不主动进战，仍可闲逛或被打。SlimeLab 测试桩勾上。"))
+	bool bPassive = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
 		meta = (ClampMin = "50.0", Units = "cm",
 			ToolTip = "闲逛半径，绕出生点。默认 500（5 米）。"))

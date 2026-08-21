@@ -18,6 +18,7 @@
 #include "SlimeCombatHUDWidget.h"
 #include "Quest/QuestSubsystem.h"
 #include "SlimeDodgeComponent.h"
+#include "SlimeDevourComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
@@ -57,8 +58,13 @@ ASlimeCharacter::ASlimeCharacter()
 	{
 		Boom->TargetArmLength = CameraArmLengthDefault;
 		Boom->SocketOffset = FVector(0.f, 0.f, 40.f);
+		Boom->ProbeSize = 8.f;
 		Boom->bEnableCameraLag = true;
 		Boom->CameraLagSpeed = 12.f;
+	}
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 	}
 	DesiredCameraArmLength = CameraArmLengthDefault;
 
@@ -148,6 +154,7 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimePlacement = CreateDefaultSubobject<USlimePlacementComponent>(TEXT("SlimePlacement"));
 	SlimeInteract = CreateDefaultSubobject<USlimeInteractComponent>(TEXT("SlimeInteract"));
 	SlimeDodge = CreateDefaultSubobject<USlimeDodgeComponent>(TEXT("SlimeDodge"));
+	SlimeDevour = CreateDefaultSubobject<USlimeDevourComponent>(TEXT("SlimeDevour"));
 	SlimeVehicle = CreateDefaultSubobject<USlimeVehicleComponent>(TEXT("SlimeVehicle"));
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
@@ -380,6 +387,11 @@ void ASlimeCharacter::Unstuck()
 	{
 		SlimeCling->TryDetach();
 	}
+	if (SlimeDevour)
+	{
+		SlimeDevour->ClosePhantomWheel(false);
+		SlimeDevour->AbortDevour(true);
+	}
 
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 	{
@@ -467,6 +479,12 @@ void ASlimeCharacter::HandleDeath()
 		return;
 	}
 	bPlayerDead = true;
+
+	if (SlimeDevour)
+	{
+		SlimeDevour->ClosePhantomWheel(false);
+		SlimeDevour->AbortDevour(true);
+	}
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{

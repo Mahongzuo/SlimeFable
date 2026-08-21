@@ -49,6 +49,42 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual FVector GetLockOnLocation() const override;
 
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	UStaticMeshComponent* GetPlaceholderMesh() const { return PlaceholderMesh; }
+
+	const TArray<TObjectPtr<USceneComponent>>& GetGeneratedParts() const { return GeneratedParts; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	bool IsInDeathSequence() const { return bDeathSequence; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	bool IsPhantomInstance() const { return bPhantomInstance; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	bool IsDevouredDeath() const { return bDevouredDeath; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	bool IsDevourLocked() const { return bDevourLocked; }
+
+	void SetDevourLocked(bool bLocked);
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	bool IsDevourableNow() const;
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	AActor* GetPhantomMaster() const { return PhantomMaster.Get(); }
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void InitAsPhantom(float LifeSeconds, AActor* Master);
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void BeginDevouredDeath(AActor* Devourer);
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void BeginPhantomExpire();
+
+	FLinearColor ResolveDevourWheelTint() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
 
@@ -76,6 +112,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour",
+		meta = (ToolTip = "能否被史莱姆吞噬。塔默认关。幻形实例运行时会关掉。"))
+	bool bDevourable = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug",
+		meta = (ToolTip = "勾选后攻击伤害归零（含近战/投射）。SlimeLab 测试桩勾上。"))
+	bool bHarmless = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug", meta = (ClampMin = "0.0", ClampMax = "1.0",
+		ToolTip = "出生时把 HP 设为 MaxHP 的这个比例。0 表示关闭。设 0.08 可直接测吞噬。脱战复位也会再套一次。"))
+	float DebugStartHealthPercent = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug",
+		meta = (ToolTip = "勾选后关掉脱战/卡住回出生点（掉虚空仍会拉回）。SlimeLab 测试桩运行时会自动勾。"))
+	bool bSuppressOutOfCombatReset = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD",
 		meta = (ToolTip = "锁定顶栏显示的名字。每个拖进关卡的实例都可以改。空则显示「敌人」，不会用 BP_ 内部名。"))
 	FText DisplayName;
@@ -83,8 +135,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	FText GetResolvedDisplayName() const;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "-200.0", ClampMax = "800.0", Units = "cm"))
-	float HealthBarZOffset = 120.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "-200.0", ClampMax = "800.0", Units = "cm",
+		ToolTip = "血条在网格顶上方的额外厘米。默认 12。网格用参考姿势包围盒，不跟动画抖。没网格时退回胶囊顶。"))
+	float HealthBarZOffset = 12.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "100.0", Units = "cm"))
 	float HealthBarVisibleRange = 1000.f;
@@ -150,6 +203,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	FVector GetVisualBoundsCenter() const;
 
+	/** Reference-pose mesh box in world space (no animation jitter). */
+	bool GetStableMeshBounds(FBox& OutBox) const;
+
+	/** Actor XY + cached mesh top Z. Ignores animation jitter; follows the capsule. */
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	FVector GetHudAnchorLocation() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Presence")
 	void RestoreToSpawn();
 
@@ -167,6 +227,7 @@ protected:
 	void TickOutOfCombatReset(float DeltaSeconds);
 	void ApplyHealthBarOffset();
 	void RefreshWorldHealthBarVisibility();
+	void UpdateHudAnchorCache() const;
 	void RebuildMeshParts();
 	void ApplySingleNodeAnimModeIfNeeded();
 	void ClearGeneratedParts();
@@ -183,6 +244,9 @@ protected:
 	void TickDeathDissolve();
 	void FinishDeathSequence();
 	void ApplyDeathDissolveVisual(float Alpha);
+	void ApplyPhantomVisuals();
+	void ApplyLabDummyFlags();
+	void ApplyHealthOverridesAfterBeginPlay();
 
 	UFUNCTION()
 	void HandleDied();
@@ -216,6 +280,14 @@ protected:
 	bool bPresenceRegistered = false;
 	float OutOfCombatSeconds = 0.f;
 	bool bDeathSequence = false;
+	bool bDevouredDeath = false;
+	bool bDevourLocked = false;
+	mutable bool bHudAnchorCached = false;
+	mutable float HudAnchorRelZ = 0.f;
+	bool bPhantomInstance = false;
+	float PhantomLifeSeconds = 5.f;
+	TWeakObjectPtr<AActor> PhantomMaster;
+	FTimerHandle PhantomLifeTimer;
 	bool bDifficultyBasesCaptured = false;
 	float DifficultyBaseMaxHP = 200.f;
 	float DeathDissolveElapsed = 0.f;

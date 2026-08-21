@@ -2,6 +2,10 @@
 
 #include "EnemyCharacter.h"
 
+#include "EnemyAllyAIController.h"
+#include "EnemyFighter.h"
+#include "EnemyTower.h"
+
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimationAsset.h"
@@ -40,6 +44,7 @@ AEnemyCharacter::AEnemyCharacter()
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 
 	if (USkeletalMeshComponent* CharMesh = GetMesh())
 	{
@@ -179,9 +184,16 @@ void AEnemyCharacter::EnsureDefaultQuestIds()
 
 void AEnemyCharacter::ApplyHealthBarOffset()
 {
-	if (HealthBar)
+	if (!HealthBar)
 	{
-		HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
+		return;
+	}
+
+	UpdateHudAnchorCache();
+	const FVector Desired(0.f, 0.f, HudAnchorRelZ + HealthBarZOffset);
+	if (!HealthBar->GetRelativeLocation().Equals(Desired, 0.05f))
+	{
+		HealthBar->SetRelativeLocation(Desired);
 	}
 }
 
@@ -189,6 +201,15 @@ void AEnemyCharacter::RefreshWorldHealthBarVisibility()
 {
 	if (!HealthBar)
 	{
+		return;
+	}
+
+	ApplyHealthBarOffset();
+
+	if (bDevourLocked || bDevouredDeath)
+	{
+		HealthBar->SetHiddenInGame(true);
+		HealthBar->SetVisibility(false);
 		return;
 	}
 
@@ -259,6 +280,11 @@ void AEnemyCharacter::RestoreToSpawn()
 	if (Health)
 	{
 		Health->ResetHP();
+		if (!bPhantomInstance && DebugStartHealthPercent > KINDA_SMALL_NUMBER)
+		{
+			Health->CurrentHP = FMath::Clamp(Health->MaxHP * DebugStartHealthPercent, 1.f, Health->MaxHP);
+			Health->OnHealthChanged.Broadcast(Health->CurrentHP, Health->MaxHP);
+		}
 	}
 	if (Combat)
 	{
@@ -266,6 +292,7 @@ void AEnemyCharacter::RestoreToSpawn()
 	}
 
 	OnRestoredToSpawn();
+	bHudAnchorCached = false;
 }
 
 void AEnemyCharacter::TickOutOfCombatReset(float DeltaSeconds)
@@ -290,10 +317,18 @@ void AEnemyCharacter::TickOutOfCombatReset(float DeltaSeconds)
 
 	OutOfCombatSeconds += DeltaSeconds;
 
+	if (bSuppressOutOfCombatReset)
+	{
+		return;
+	}
+
 	const float DistFromSpawn = FVector::Dist2D(Location, SpawnTransform.GetLocation());
 	const float HorizSpeed = GetVelocity().Size2D();
 	constexpr float StuckSpeed = 15.f;
-	const bool bStuck = DistFromSpawn > StuckResetDistance && HorizSpeed < StuckSpeed;
+	constexpr float StuckIdleSeconds = 2.f;
+	const bool bStuck = DistFromSpawn > StuckResetDistance
+		&& HorizSpeed < StuckSpeed
+		&& OutOfCombatSeconds >= StuckIdleSeconds;
 
 	if (bStuck || (OutOfCombatResetSeconds > 0.f && OutOfCombatSeconds >= OutOfCombatResetSeconds))
 	{
@@ -307,13 +342,17 @@ void AEnemyCharacter::BeginPlay()
 
 	if (Health)
 	{
-		Health->Team = ESlimeTeam::Enemy;
+		Health->Team = bPhantomInstance ? ESlimeTeam::Player : ESlimeTeam::Enemy;
 		Health->bDestroyOnDeath = false;
 		Health->bRegenOnDeath = false;
 		Health->MaxHP = MaxHP;
+		if (bPhantomInstance)
+		{
+			Health->MaxHP = FMath::Max(MaxHP * 0.35f, 20.f);
+		}
 		if (SavedHP > 0.f)
 		{
-			Health->CurrentHP = FMath::Clamp(SavedHP, 1.f, MaxHP);
+			Health->CurrentHP = FMath::Clamp(SavedHP, 1.f, Health->MaxHP);
 			Health->OnHealthChanged.Broadcast(Health->CurrentHP, Health->MaxHP);
 		}
 		else
@@ -324,16 +363,27 @@ void AEnemyCharacter::BeginPlay()
 	}
 
 	Super::BeginPlay();
-	EnsureDefaultQuestIds();
+	if (!bPhantomInstance)
+	{
+		EnsureDefaultQuestIds();
+	}
+	else if (Objective)
+	{
+		Objective->SetConsumed(true);
+	}
 	EnsureDefaultDisplayName();
 	RebuildMeshParts();
-	if (UWorld* World = GetWorld())
+	UpdateHudAnchorCache();
+	if (!bPhantomInstance)
 	{
-		if (UGameInstance* GI = World->GetGameInstance())
+		if (UWorld* World = GetWorld())
 		{
-			if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+			if (UGameInstance* GI = World->GetGameInstance())
 			{
-				ApplyWeekDifficulty(Quests->GetWeekIndex());
+				if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
+				{
+					ApplyWeekDifficulty(Quests->GetWeekIndex());
+				}
 			}
 		}
 	}
@@ -345,9 +395,23 @@ void AEnemyCharacter::BeginPlay()
 		{
 			Bar->SetHealth(Health);
 		}
+		if (bPhantomInstance)
+		{
+			HealthBar->SetVisibility(false);
+			HealthBar->SetHiddenInGame(true);
+		}
 	}
 
-	if (UWorld* World = GetWorld())
+	if (bPhantomInstance)
+	{
+		ApplyPhantomVisuals();
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				PhantomLifeTimer, this, &AEnemyCharacter::BeginPhantomExpire, FMath::Max(PhantomLifeSeconds, 0.2f), false);
+		}
+	}
+	else if (UWorld* World = GetWorld())
 	{
 		if (UEnemyPresenceSubsystem* PresenceSys = World->GetSubsystem<UEnemyPresenceSubsystem>())
 		{
@@ -355,10 +419,57 @@ void AEnemyCharacter::BeginPlay()
 			bPresenceRegistered = true;
 		}
 	}
+
+	ApplyLabDummyFlags();
+	ApplyHealthOverridesAfterBeginPlay();
+}
+
+void AEnemyCharacter::ApplyLabDummyFlags()
+{
+	static const FName DummyTag(TEXT("SlimeLabDevourDummy"));
+	static const FName PassiveTag(TEXT("SlimeLabPassive"));
+	const bool bLabDummy = ActorHasTag(DummyTag) || ActorHasTag(PassiveTag);
+	if (bLabDummy)
+	{
+		bSuppressOutOfCombatReset = true;
+	}
+	if (!ActorHasTag(PassiveTag))
+	{
+		return;
+	}
+	bHarmless = true;
+	if (AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
+	{
+		Fighter->bPassive = true;
+		Fighter->bWanderWhenIdle = false;
+	}
+}
+
+void AEnemyCharacter::ApplyHealthOverridesAfterBeginPlay()
+{
+	if (!Health || bPhantomInstance)
+	{
+		return;
+	}
+	if (SavedHP > 0.f)
+	{
+		Health->CurrentHP = FMath::Clamp(SavedHP, 1.f, Health->MaxHP);
+		Health->OnHealthChanged.Broadcast(Health->CurrentHP, Health->MaxHP);
+		return;
+	}
+	if (DebugStartHealthPercent > KINDA_SMALL_NUMBER)
+	{
+		Health->CurrentHP = FMath::Clamp(Health->MaxHP * DebugStartHealthPercent, 1.f, Health->MaxHP);
+		Health->OnHealthChanged.Broadcast(Health->CurrentHP, Health->MaxHP);
+	}
 }
 
 void AEnemyCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PhantomLifeTimer);
+	}
 	if (bPresenceRegistered)
 	{
 		if (UWorld* World = GetWorld())
@@ -499,6 +610,10 @@ void AEnemyCharacter::RebuildMeshParts()
 
 bool AEnemyCharacter::CanBeLockedOn() const
 {
+	if (bPhantomInstance || bDevourLocked)
+	{
+		return false;
+	}
 	if (Presence == EEnemyPresence::Sleep || Presence == EEnemyPresence::Despawned)
 	{
 		return false;
@@ -506,9 +621,86 @@ bool AEnemyCharacter::CanBeLockedOn() const
 	return Health && Health->IsAlive();
 }
 
+void AEnemyCharacter::SetDevourLocked(bool bLocked)
+{
+	bDevourLocked = bLocked;
+}
+
 FVector AEnemyCharacter::GetLockOnLocation() const
 {
 	return GetActorLocation() + FVector(0.f, 0.f, 60.f);
+}
+
+bool AEnemyCharacter::GetStableMeshBounds(FBox& OutBox) const
+{
+	OutBox = FBox(ForceInit);
+	bool bAny = false;
+
+	auto Accumulate = [&](UPrimitiveComponent* Prim)
+	{
+		if (!Prim || Prim->bHiddenInGame || !Prim->IsVisible())
+		{
+			return;
+		}
+		const FBox Local = Prim->GetLocalBounds().GetBox();
+		OutBox += Local.TransformBy(Prim->GetComponentTransform());
+		bAny = true;
+	};
+
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		if (Skel->GetSkeletalMeshAsset() != nullptr)
+		{
+			Accumulate(Skel);
+		}
+	}
+
+	if (!bAny && PlaceholderMesh)
+	{
+		Accumulate(PlaceholderMesh);
+	}
+
+	return bAny;
+}
+
+void AEnemyCharacter::UpdateHudAnchorCache() const
+{
+	const FVector CapsuleLoc = GetCapsuleComponent()
+		? GetCapsuleComponent()->GetComponentLocation()
+		: GetActorLocation();
+
+	float TargetRelZ = 60.f;
+	FBox Box;
+	if (GetStableMeshBounds(Box))
+	{
+		TargetRelZ = Box.Max.Z - CapsuleLoc.Z;
+	}
+	else if (const UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		TargetRelZ = Capsule->GetScaledCapsuleHalfHeight();
+	}
+
+	constexpr float DeadzoneCm = 24.f;
+	if (!bHudAnchorCached)
+	{
+		HudAnchorRelZ = TargetRelZ;
+		bHudAnchorCached = true;
+		return;
+	}
+
+	if (FMath::Abs(TargetRelZ - HudAnchorRelZ) > DeadzoneCm)
+	{
+		HudAnchorRelZ = TargetRelZ;
+	}
+}
+
+FVector AEnemyCharacter::GetHudAnchorLocation() const
+{
+	UpdateHudAnchorCache();
+	const FVector Loc = GetCapsuleComponent()
+		? GetCapsuleComponent()->GetComponentLocation()
+		: GetActorLocation();
+	return FVector(Loc.X, Loc.Y, Loc.Z + HudAnchorRelZ);
 }
 
 FVector AEnemyCharacter::GetVisualBoundsCenter() const
@@ -553,6 +745,10 @@ FVector AEnemyCharacter::GetVisualBoundsCenter() const
 
 void AEnemyCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse)
 {
+	if (Damage > 0.f)
+	{
+		OutOfCombatSeconds = 0.f;
+	}
 	if (Health)
 	{
 		Health->ApplyDamage(Damage, DamageCauser, DamageLocation, DamageImpulse);
@@ -583,11 +779,19 @@ void AEnemyCharacter::HandleDied()
 	}
 	bDeathSequence = true;
 
-	if (Objective)
+	if (UWorld* World = GetWorld())
 	{
-		Objective->TryContribute();
+		World->GetTimerManager().ClearTimer(PhantomLifeTimer);
 	}
-	DropSouvenirReward();
+
+	if (!bPhantomInstance)
+	{
+		if (Objective)
+		{
+			Objective->TryContribute();
+		}
+		DropSouvenirReward();
+	}
 
 	if (HealthBar)
 	{
@@ -613,6 +817,24 @@ void AEnemyCharacter::HandleDied()
 				Brain->StopLogic(TEXT("Death"));
 			}
 		}
+	}
+
+	if (bDevouredDeath)
+	{
+		SetActorEnableCollision(false);
+		SetActorHiddenInGame(true);
+		if (bPresenceRegistered)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UEnemyPresenceSubsystem* PresenceSys = World->GetSubsystem<UEnemyPresenceSubsystem>())
+				{
+					PresenceSys->UnregisterEnemy(this);
+				}
+			}
+			bPresenceRegistered = false;
+		}
+		return;
 	}
 
 	PlayDeathMontageThenDissolve();
@@ -806,6 +1028,10 @@ void AEnemyCharacter::ApplyDeathDissolveVisual(float Alpha)
 
 	FadeMesh(GetMesh());
 	FadeMesh(PlaceholderMesh);
+	for (USceneComponent* Part : GeneratedParts)
+	{
+		FadeMesh(Cast<UMeshComponent>(Part));
+	}
 }
 
 void AEnemyCharacter::FinishDeathSequence()
@@ -941,5 +1167,123 @@ void AEnemyCharacter::SetEnemyPresence(EEnemyPresence NewPresence)
 	{
 		SetActorHiddenInGame(Presence == EEnemyPresence::Despawned);
 		SetActorEnableCollision(Presence != EEnemyPresence::Despawned);
+	}
+}
+
+bool AEnemyCharacter::IsDevourableNow() const
+{
+	if (!bDevourable || bPhantomInstance || bDeathSequence)
+	{
+		return false;
+	}
+	if (Cast<AEnemyTower>(this))
+	{
+		return false;
+	}
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		if (Skel->GetSkeletalMeshAsset())
+		{
+			return true;
+		}
+	}
+	if (GeneratedParts.Num() > 0)
+	{
+		return true;
+	}
+	if (PlaceholderMesh && PlaceholderMesh->GetStaticMesh())
+	{
+		return true;
+	}
+	return false;
+}
+
+void AEnemyCharacter::InitAsPhantom(float LifeSeconds, AActor* Master)
+{
+	bPhantomInstance = true;
+	bDevourable = false;
+	PhantomLifeSeconds = LifeSeconds;
+	PhantomMaster = Master;
+	AIControllerClass = AEnemyAllyAIController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+	if (AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
+	{
+		Fighter->bPassive = false;
+		Fighter->bWanderWhenIdle = false;
+		Fighter->LeashRange = 10000.f;
+		Fighter->DetectRange = 2000.f;
+	}
+}
+
+void AEnemyCharacter::BeginDevouredDeath(AActor* Devourer)
+{
+	if (bDeathSequence || !Health)
+	{
+		return;
+	}
+	bDevouredDeath = true;
+	Health->ApplyDamage(FMath::Max(Health->CurrentHP, 1.f), Devourer, GetActorLocation(), FVector::ZeroVector);
+}
+
+void AEnemyCharacter::BeginPhantomExpire()
+{
+	if (bDeathSequence)
+	{
+		return;
+	}
+	if (Health && Health->IsAlive())
+	{
+		Health->ApplyDamage(FMath::Max(Health->CurrentHP, 1.f), this, GetActorLocation(), FVector::ZeroVector);
+	}
+	else if (!bDeathSequence)
+	{
+		PlayDeathMontageThenDissolve();
+	}
+}
+
+FLinearColor AEnemyCharacter::ResolveDevourWheelTint() const
+{
+	const uint32 Hash = GetTypeHash(GetClass()->GetName());
+	static const FLinearColor Palette[] = {
+		FLinearColor(0.45f, 0.32f, 0.18f),
+		FLinearColor(0.35f, 0.42f, 0.22f),
+		FLinearColor(0.50f, 0.38f, 0.22f),
+		FLinearColor(0.28f, 0.30f, 0.22f),
+		FLinearColor(0.42f, 0.28f, 0.20f),
+		FLinearColor(0.38f, 0.34f, 0.28f)
+	};
+	return Palette[Hash % 6];
+}
+
+void AEnemyCharacter::ApplyPhantomVisuals()
+{
+	auto Ghost = [](UMeshComponent* Comp)
+	{
+		if (!Comp)
+		{
+			return;
+		}
+		const int32 Mats = Comp->GetNumMaterials();
+		for (int32 Index = 0; Index < Mats; ++Index)
+		{
+			UMaterialInterface* Base = Comp->GetMaterial(Index);
+			if (!Base)
+			{
+				continue;
+			}
+			UMaterialInstanceDynamic* MID = Comp->CreateAndSetMaterialInstanceDynamic(Index);
+			if (MID)
+			{
+				MID->SetScalarParameterValue(TEXT("Opacity"), 0.55f);
+				MID->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.8f);
+				MID->SetVectorParameterValue(TEXT("EmissiveColor"), FLinearColor(0.55f, 0.72f, 0.42f));
+			}
+		}
+	};
+	Ghost(GetMesh());
+	Ghost(PlaceholderMesh);
+	for (USceneComponent* Part : GeneratedParts)
+	{
+		Ghost(Cast<UMeshComponent>(Part));
 	}
 }

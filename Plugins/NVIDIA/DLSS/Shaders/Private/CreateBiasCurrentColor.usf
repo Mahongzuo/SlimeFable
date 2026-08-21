@@ -1,0 +1,64 @@
+/*
+* Copyright (c) 2020 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+*
+* NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+* property and proprietary rights in and to this material, related
+* documentation and any modifications thereto. Any use, reproduction,
+* disclosure or distribution of this material and related documentation
+* without an express license agreement from NVIDIA CORPORATION or
+* its affiliates is strictly prohibited.
+*/
+
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/FastMath.ush"
+#include "/Engine/Private/ScreenPass.ush"
+
+#ifndef THREADGROUP_SIZEX
+#define THREADGROUP_SIZEX		8
+#endif
+#ifndef THREADGROUP_SIZEY
+#define THREADGROUP_SIZEY		8
+#endif
+#define THREADGROUP_TOTALSIZE	(THREADGROUP_SIZEX * THREADGROUP_SIZEY)
+
+// Instruct DLSS-SR to bias the incoming color buffer over the colors from previous frames.
+// We create a 2D binary mask that flags the non-occluded pixels that represent the 
+// problematic asset and send it to DLSS' evaluate call as the BiasCurrentColor parameter. 
+// The DLSS model then uses an alternate technique for pixels flagged by the mask.
+Texture2D<uint2> StencilTexture;
+SCREEN_PASS_TEXTURE_VIEWPORT(DepthStencil)
+
+int CustomOffset;
+
+RWTexture2D<float>	OutBiasCurrentColorTexture;
+SCREEN_PASS_TEXTURE_VIEWPORT(BiasCurrentColor)
+
+#ifndef	STENCIL_MASK
+#define STENCIL_MASK 1 << 3 //currently set to match responsive aa mask
+#endif
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void CreateBiasCurrentColorMain(
+	uint2 GroupId : SV_GroupID,
+	uint2 DispatchThreadId : SV_DispatchThreadID,
+	uint2 GroupThreadId : SV_GroupThreadID,
+	uint GroupIndex : SV_GroupIndex)
+{
+
+	uint2 PixelPos = min(DispatchThreadId + DepthStencil_ViewportMin, DepthStencil_ViewportMax - 1);
+	uint2 OutputPixelPos = BiasCurrentColor_ViewportMin + DispatchThreadId;
+	const bool bInsideViewport = all(PixelPos.xy < DepthStencil_ViewportMax);
+
+	BRANCH
+	if (!bInsideViewport)
+		return;
+
+	const uint kResponsiveStencilMask = CustomOffset;
+	
+	int2 SceneStencilUV = (int2)PixelPos;
+	uint SceneStencilRef = StencilTexture.Load(int3(SceneStencilUV, 0)) STENCIL_COMPONENT_SWIZZLE;
+	float bIsResponsiveDLSSPixel = (SceneStencilRef == kResponsiveStencilMask) ? 1.f : 0.f;
+
+	OutBiasCurrentColorTexture[OutputPixelPos] = bIsResponsiveDLSSPixel;
+}

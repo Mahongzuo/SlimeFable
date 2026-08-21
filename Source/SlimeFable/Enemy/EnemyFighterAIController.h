@@ -41,8 +41,8 @@ public:
 	float PathRefreshInterval = 0.25f;
 
 protected:
-	APawn* FindPlayerPawn() const;
-	void TickIdle(float DeltaSeconds, float Dist);
+	virtual APawn* FindCombatFocus() const;
+	virtual void TickIdle(float DeltaSeconds, float Dist);
 	void TickWander(float DeltaSeconds);
 	void StartWanderTo(const FVector& Dest);
 	void TickDirectWander();

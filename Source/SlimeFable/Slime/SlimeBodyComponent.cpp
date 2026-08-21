@@ -15,8 +15,15 @@
 #include "ProceduralMeshComponent.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "SlimeFable.h"
+#include "HAL/IConsoleManager.h"
 
 using namespace SlimeSim;
+
+static TAutoConsoleVariable<int32> CVarSlimeBodyVisualScaleOnly(
+	TEXT("slime.BodyVisualScaleOnly"),
+	0,
+	TEXT("If 1, devour body scale only inflates the isosurface (no solver SizeScale)."),
+	ECVF_Default);
 
 namespace SlimeBodyPrivate
 {
@@ -52,6 +59,7 @@ void USlimeBodyComponent::BeginPlay()
 		{
 			DefaultStepHeight = Movement->MaxStepHeight;
 			DefaultWalkSpeed = Movement->MaxWalkSpeed;
+			DefaultJumpZ = Movement->JumpZVelocity;
 		}
 	}
 
@@ -125,6 +133,12 @@ void USlimeBodyComponent::GetActiveShotCenters(TArray<FVector>& OutCenters) cons
 {
 	const_cast<FSlimeSolver&>(Solver).RefreshShotStates();
 	Solver.GetShotCenters(OutCenters);
+}
+
+FVector USlimeBodyComponent::GetShotCenter(uint8 ShotId) const
+{
+	const_cast<FSlimeSolver&>(Solver).RefreshShotStates();
+	return Solver.GetShotCenterWorld(ShotId);
 }
 
 void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -238,12 +252,16 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		RecallElapsed += StepDelta;
 		Solver.SetSkipWorldCollision(true);
 		const FVector Home = Solver.GetBodyCenter();
-		Solver.RecallFragments(StepDelta, Home, RecallPullSpeed);
+		Solver.RecallFragments(StepDelta, Home, GetEffectiveRecallPullSpeed());
 		if (RecallElapsed >= RecallTimeout)
 		{
 			Solver.SnapFragmentsHome(Home);
 			SetRecalling(false);
 		}
+	}
+	else if (Solver.HasShotTargets())
+	{
+		Solver.SetSkipWorldCollision(true);
 	}
 	else
 	{
@@ -254,7 +272,7 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 	Solver.SetFragmentFloorZ(FragmentFloorZ);
 	Solver.SetCeilingZ(CeilingZ);
 	Solver.SetSqueeze(SqueezeAmount, SqueezeFreeDirection);
-	Solver.SetLaunchFraction(LaunchFraction);
+	Solver.SetLaunchFraction(LaunchFractionOverride > KINDA_SMALL_NUMBER ? LaunchFractionOverride : LaunchFraction);
 	if (bClingVisual && !bSpread)
 	{
 		Solver.SetClingPlane(true, ClingPoint, ClingNormal);
@@ -861,10 +879,11 @@ void USlimeBodyComponent::ApplyCapsuleSize(float NewRadius, float NewHalfHeight)
 	{
 		const float BaseStep = StepHeightBoost > KINDA_SMALL_NUMBER ? StepHeightBoost : DefaultStepHeight;
 		Movement->MaxStepHeight = BaseStep;
-		const float Scaled = DefaultWalkSpeed * FMath::Lerp(1.f, SqueezeSpeedScale, SqueezeAmount);
+		const float Scaled = DefaultWalkSpeed * FMath::Lerp(1.f, SqueezeSpeedScale, SqueezeAmount) * ExternalMoveSpeedScale;
 		Movement->MaxWalkSpeed = SqueezeAmount >= 0.55f
-			? FMath::Max(Scaled, DefaultWalkSpeed * 0.35f)
+			? FMath::Max(Scaled, DefaultWalkSpeed * 0.35f * ExternalMoveSpeedScale)
 			: Scaled;
+		Movement->JumpZVelocity = DefaultJumpZ * ExternalJumpScale;
 	}
 }
 
@@ -933,6 +952,46 @@ void USlimeBodyComponent::ApplyHitJolt()
 	Solver.ApplyHitJolt();
 }
 
+void USlimeBodyComponent::SetBodyScale(float NewScale, bool bIgnoreSqueeze)
+{
+	RequestedBodyScale = FMath::Max(NewScale, 0.05f);
+
+	const float Squeeze = bIgnoreSqueeze ? 0.f : FMath::Clamp(SqueezeAmount, 0.f, 1.f);
+	const float Attenuated = 1.f + (RequestedBodyScale - 1.f) * (1.f - Squeeze);
+	const bool bVisualOnly = bVisualOnlyBodyScale || CVarSlimeBodyVisualScaleOnly.GetValueOnGameThread() != 0;
+	const float SolverScale = bVisualOnly ? 1.f : Attenuated;
+	const bool bWantBudget = RequestedBodyScale > 1.2f || Attenuated > 1.2f;
+
+	if (bWantBudget && !bEnlargedSurfaceBudget)
+	{
+		SavedSurfaceMaxVertices = SurfaceParams.MaxVertices;
+		SavedSurfaceMaxGridDim = SurfaceParams.MaxGridDim;
+		SurfaceParams.MaxVertices = FMath::Min(16000, FMath::Max(SurfaceParams.MaxVertices, 14000));
+		SurfaceParams.MaxGridDim = FMath::Min(64, FMath::Max(SurfaceParams.MaxGridDim, 56));
+		bMeshSectionCreated = false;
+		bShadowMeshSectionCreated = false;
+		bXRayMeshSectionCreated = false;
+		bEnlargedSurfaceBudget = true;
+		bWarnedTruncation = false;
+	}
+	else if (!bWantBudget && bEnlargedSurfaceBudget)
+	{
+		SurfaceParams.MaxVertices = SavedSurfaceMaxVertices;
+		SurfaceParams.MaxGridDim = SavedSurfaceMaxGridDim;
+		bMeshSectionCreated = false;
+		bShadowMeshSectionCreated = false;
+		bXRayMeshSectionCreated = false;
+		bEnlargedSurfaceBudget = false;
+	}
+
+	bFreezeQualityLod = SolverScale > 1.05f || Attenuated > 1.05f || RequestedBodyScale > 1.05f;
+	Solver.SetSizeScale(SolverScale);
+	if (RequestedBodyScale <= 1.05f)
+	{
+		VisualZLift = 0.f;
+	}
+}
+
 void USlimeBodyComponent::RebuildSurface()
 {
 	if (!SurfaceMesh)
@@ -966,8 +1025,29 @@ void USlimeBodyComponent::RebuildSurface()
 		ActiveSurface.CellSizeMultiplier = FMath::Min(ActiveSurface.CellSizeMultiplier, 0.75f);
 	}
 
+	const float SurfaceScale = FMath::Max(
+		bVisualOnlyBodyScale || CVarSlimeBodyVisualScaleOnly.GetValueOnGameThread() != 0
+			? RequestedBodyScale
+			: Solver.GetSizeScale(),
+		0.05f);
+	const bool bVisualOnly = bVisualOnlyBodyScale || CVarSlimeBodyVisualScaleOnly.GetValueOnGameThread() != 0;
+	if (bVisualOnly && RequestedBodyScale > 1.f)
+	{
+		ActiveSurface.IsoThreshold = FMath::Max(0.08f, ActiveSurface.IsoThreshold / FMath::Max(RequestedBodyScale, 1.f));
+	}
+
+	VisualZLift = 0.f;
+	float ClipZ = -1.e9f;
+	if (bVisualOnly && RequestedBodyScale > 1.05f && FloorZ > -1.e8f)
+	{
+		const float VisualR = SolverParams.RestRadius * RequestedBodyScale;
+		VisualZLift = FMath::Max(0.f, VisualR - (RebuildBodyCOM.Z - FloorZ));
+		ClipZ = FloorZ;
+	}
+
+	const float ConfigureSpacing = SolverParams.ParticleSpacing * SurfaceScale;
 	const bool bNeedConfigure = !Surface.IsConfigured()
-		|| !FMath::IsNearlyEqual(Surface.GetParticleSpacing(), SolverParams.ParticleSpacing)
+		|| !FMath::IsNearlyEqual(Surface.GetParticleSpacing(), ConfigureSpacing)
 		|| !FMath::IsNearlyEqual(Surface.GetParams().SplatRadiusMultiplier, ActiveSurface.SplatRadiusMultiplier)
 		|| !FMath::IsNearlyEqual(Surface.GetParams().SplatZScale, ActiveSurface.SplatZScale)
 		|| !FMath::IsNearlyEqual(Surface.GetParams().IsoThreshold, ActiveSurface.IsoThreshold)
@@ -977,12 +1057,12 @@ void USlimeBodyComponent::RebuildSurface()
 		|| !FMath::IsNearlyEqual(Surface.GetParams().CellSizeMultiplier, ActiveSurface.CellSizeMultiplier);
 	if (bNeedConfigure)
 	{
-		Surface.Configure(ActiveSurface, SolverParams.ParticleSpacing);
+		Surface.Configure(ActiveSurface, ConfigureSpacing);
 	}
 
 	TArray<uint8> MergingIds;
 	Solver.GetMergingShotIds(MergingIds);
-	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter(), MergingIds);
+	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter(), MergingIds, VisualZLift, ClipZ);
 
 	if (Surface.WasTruncated() && !bWarnedTruncation)
 	{
@@ -1130,7 +1210,7 @@ void USlimeBodyComponent::PushMeshSection()
 
 void USlimeBodyComponent::UpdateQuality()
 {
-	if (!bAutoQuality)
+	if (!bAutoQuality || bFreezeQualityLod)
 	{
 		return;
 	}
@@ -1320,6 +1400,68 @@ int32 USlimeBodyComponent::LaunchTendril(const FVector& LaunchVelocity, float Fr
 	return Launched;
 }
 
+int32 USlimeBodyComponent::LaunchDevourShot(const FVector& LaunchVelocity, float Fraction, float Life, uint8& OutShotId)
+{
+	OutShotId = 0;
+	constexpr int32 DevourShotCap = 8;
+	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, Fraction, Life, DevourShotCap, nullptr, &OutShotId);
+	if (Launched > 0)
+	{
+		SetRecalling(false);
+	}
+	return Launched;
+}
+
+void USlimeBodyComponent::SetShotTarget(uint8 ShotId, const FVector& Target, float PullSpeed)
+{
+	Solver.SetShotTarget(ShotId, Target, PullSpeed);
+}
+
+void USlimeBodyComponent::ClearShotTargets()
+{
+	Solver.ClearShotTargets();
+}
+
+void USlimeBodyComponent::AddIgnoreWorldShot(uint8 ShotId)
+{
+	Solver.AddIgnoreWorldShot(ShotId);
+}
+
+void USlimeBodyComponent::ClearIgnoreWorldShots()
+{
+	Solver.ClearIgnoreWorldShots();
+}
+
+void USlimeBodyComponent::SetRecallPullSpeedOverride(float Speed)
+{
+	RecallPullSpeedOverride = Speed > KINDA_SMALL_NUMBER ? Speed : 0.f;
+}
+
+void USlimeBodyComponent::ClearRecallPullSpeedOverride()
+{
+	RecallPullSpeedOverride = 0.f;
+}
+
+float USlimeBodyComponent::GetEffectiveRecallPullSpeed() const
+{
+	return RecallPullSpeedOverride > KINDA_SMALL_NUMBER ? RecallPullSpeedOverride : RecallPullSpeed;
+}
+
+void USlimeBodyComponent::ClearFragments()
+{
+	Solver.SnapFragmentsHome(Solver.GetBodyCenter());
+	SetRecalling(false);
+}
+
+void USlimeBodyComponent::SetLaunchFractionOverride(float Fraction)
+{
+	LaunchFractionOverride = Fraction > KINDA_SMALL_NUMBER ? FMath::Clamp(Fraction, 0.05f, 0.6f) : 0.f;
+	if (LaunchFractionOverride > KINDA_SMALL_NUMBER)
+	{
+		Solver.SetLaunchFraction(LaunchFractionOverride);
+	}
+}
+
 void USlimeBodyComponent::SweepKinematicShots()
 {
 	UWorld* World = GetWorld();
@@ -1361,4 +1503,8 @@ void USlimeBodyComponent::SetRecalling(bool bInRecalling)
 	}
 	bRecalling = bInRecalling;
 	RecallElapsed = 0.f;
+	if (!bRecalling)
+	{
+		ClearRecallPullSpeedOverride();
+	}
 }

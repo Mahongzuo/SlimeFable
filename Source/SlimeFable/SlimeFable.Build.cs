@@ -28,7 +28,12 @@ public class SlimeFable : ModuleRules
 			"AssetRegistry"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"RHI",
+			"RenderCore",
+			"PixelStreaming2",
+			"DLSSBlueprint"
+		});
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SlimeFable",

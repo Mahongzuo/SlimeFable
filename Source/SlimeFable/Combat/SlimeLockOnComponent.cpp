@@ -165,6 +165,13 @@ void USlimeLockOnComponent::ClearLockOn()
 	LockedTarget.Reset();
 	RestoreMovement();
 	RestoreCameraBoom();
+	if (APlayerController* PC = GetPlayerController())
+	{
+		FRotator Rot = PC->GetControlRotation();
+		Rot.Pitch = 0.f;
+		Rot.Roll = 0.f;
+		PC->SetControlRotation(Rot);
+	}
 }
 
 void USlimeLockOnComponent::RestoreCameraBoom()
@@ -278,22 +285,22 @@ void USlimeLockOnComponent::ApplyLockCamera(float DeltaTime)
 				SavedBoomSocketOffset = Boom->SocketOffset;
 				bHaveSavedBoom = true;
 			}
-			Boom->SocketOffset = FVector(SavedBoomSocketOffset.X, SavedBoomSocketOffset.Y, 110.f);
+			Boom->SocketOffset = SavedBoomSocketOffset;
 		}
 	}
 
 	UCameraComponent* Cam = Character->FindComponentByClass<UCameraComponent>();
 	const FVector From = Cam
 		? Cam->GetComponentLocation()
-		: Character->GetActorLocation() + FVector(0.f, 0.f, 110.f);
-	const FVector Focus = (Character->GetActorLocation() + Target->GetActorLocation()) * 0.5f + FVector(0.f, 0.f, 90.f);
+		: Character->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+	const FVector Focus = (Character->GetActorLocation() + Target->GetActorLocation()) * 0.5f + FVector(0.f, 0.f, 40.f);
 	FRotator Desired = (Focus - From).Rotation();
-	Desired.Pitch = FMath::Clamp(Desired.Pitch, -18.f, -8.f);
+	Desired.Pitch = FMath::Clamp(Desired.Pitch, -8.f, 10.f);
 	Desired.Roll = 0.f;
 
 	FRotator Current = PC->GetControlRotation();
 	Current = FMath::RInterpTo(Current, Desired, DeltaTime, 8.f);
-	Current.Pitch = FMath::Clamp(Current.Pitch, -18.f, -8.f);
+	Current.Pitch = FMath::Clamp(Current.Pitch, -8.f, 10.f);
 	Current.Roll = 0.f;
 	PC->SetControlRotation(Current);
 

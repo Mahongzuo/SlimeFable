@@ -114,6 +114,18 @@ public:
 	/** Light jolt used for hit reactions — milder than a landing squash. */
 	void ApplyHitJolt();
 
+	/**
+	 *  Uniform body scale without rebuilding the particle dome.
+	 *  Scales attached (non-ballistic) particles about COM, then rebuilds derived kernel
+	 *  lengths. Never writes Params.RestRadius / ParticleSpacing.
+	 */
+	void SetSizeScale(float NewScale);
+
+	float GetSizeScale() const { return SizeScale; }
+
+	/** RestRadius as used by the membrane / shell this step. */
+	float GetScaledRestRadius() const { return Params.RestRadius * SizeScale; }
+
 	// ---- Queries ---------------------------------------------------------------------
 
 	const TArray<SlimeSim::FSlimeParticle>& GetParticles() const { return Particles; }
@@ -148,6 +160,8 @@ public:
 	/** Fills OutCenters with each active shot COM. */
 	void GetShotCenters(TArray<FVector>& OutCenters) const;
 
+	FVector GetShotCenterWorld(uint8 ShotId) const;
+
 	int32 GetNumBallistic() const { return NumBallistic; }
 
 	bool HasFragments() const { return NumBallistic > 0; }
@@ -163,7 +177,23 @@ public:
 	 *  Clones ~Fraction of body particles into a ballistic mini-slime without shrinking the body.
 	 *  Honours MaxActiveShots. Returns how many clone particles were spawned.
 	 */
-	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path = nullptr);
+	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path = nullptr, uint8* OutShotId = nullptr);
+
+	/** Steer a flying clone toward a world point. Call every tick to keep it pinned. */
+	void SetShotTarget(uint8 ShotId, const FVector& Target, float PullSpeed);
+
+	void ClearShotTarget(uint8 ShotId);
+
+	void ClearShotTargets();
+
+	void AddIgnoreWorldShot(uint8 ShotId);
+	void ClearIgnoreWorldShot(uint8 ShotId);
+	void ClearIgnoreWorldShots();
+	bool IsIgnoreWorldShot(uint8 ShotId) const { return ShotId != 0 && IgnoreWorldShotIds.Contains(ShotId); }
+
+	bool HasShotTargets() const { return ShotTargets.Num() > 0; }
+
+	bool IsShotTargeted(uint8 ShotId) const { return ShotId != 0 && ShotTargets.Contains(ShotId); }
 
 	void ClearKinematicPaths();
 	void GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMotions) const;
@@ -196,9 +226,9 @@ private:
 	void ClampToShotShell(FVector3f& InOutPoint, const FVector3f& ShotCenter) const;
 	void LiftShotCentersAboveFloor();
 	void AdvanceKinematicShots(float Dt);
+	void ApplyShotTargets(float Dt);
 	void EndKinematicShot(uint8 ShotId);
 	bool IsShotKinematic(uint8 ShotId) const;
-	FVector GetShotCenterWorld(uint8 ShotId) const;
 	void BuildGrid();
 	void SolveDensity();
 	void ResolveCollisions();
@@ -288,6 +318,15 @@ private:
 
 	TMap<uint8, FShotPathFollow> ShotPaths;
 
+	struct FShotTarget
+	{
+		FVector Location = FVector::ZeroVector;
+		float PullSpeed = 2500.f;
+	};
+
+	TMap<uint8, FShotTarget> ShotTargets;
+	TSet<uint8> IgnoreWorldShotIds;
+
 	int32 NumBallistic = 0;
 	int32 ActiveShotCount = 0;
 	uint8 NextShotId = 1;
@@ -307,4 +346,7 @@ private:
 	float LandingSettleDuration = 2.5f;
 
 	FSlimeCombatPoseState CombatPose;
+
+	/** Visual / membrane size multiplier. 1 = authored RestRadius. */
+	float SizeScale = 1.f;
 };

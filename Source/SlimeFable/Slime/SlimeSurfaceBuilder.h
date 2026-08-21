@@ -30,8 +30,10 @@ public:
 	/**
 	 *  Same as Build, but ShotIds in MergingShotIds are splatted into the body density field
 	 *  (metaball fusion) instead of getting their own cluster.
+	 *  VisualZLift raises body splats so a visual-only scale stays glued to the floor.
+	 *  ClipFloorZ (world Z) zeros density below the plane after blur; pass a very low value to skip.
 	 */
-	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds);
+	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift = 0.f, float InClipFloorZ = -1.e9f);
 
 	/** World space positions, MaxVertices long. */
 	const TArray<FVector>& GetVertices() const { return Vertices; }
@@ -56,6 +58,7 @@ private:
 	/** ShotFilter selects one flying shot; MergingShots (when non-null) are included in the body splat. */
 	void SplatDensity(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, uint8 ShotFilter, const TSet<uint8>* MergingShots);
 	void BlurDensity();
+	void ClipDensityBelowFloor();
 	void Triangulate();
 
 	TSet<uint8> ActiveMergingShots;
@@ -92,6 +95,9 @@ private:
 	float SplatRadius = 8.5f;
 	float SplatZScale = 1.f;
 	float InvInteriorValue = 1.f;
+	float VisualZLift = 0.f;
+	float ClipFloorZ = -1.e9f;
+	bool bClipFloorThisCluster = false;
 
 	/** Truncation coarsening multiplier (body cluster). */
 	float CellScale = 1.f;

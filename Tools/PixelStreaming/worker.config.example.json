@@ -1,0 +1,27 @@
+{
+  "target": "local",
+  "token": "change-me",
+  "heartbeat_seconds": 10,
+  "launch_game": false,
+  "game_exe": "E:/UE/SlimeFable/Windows/SlimeFable.exe",
+  "local": {
+    "status_url": "http://127.0.0.1:8091/play/api/status",
+    "signalling_url": "ws://127.0.0.1:18888"
+  },
+  "cloud": {
+    "status_url": "https://been.chat/play/api/status",
+    "signalling_url": "wss://been.chat/ps/streamer"
+  },
+  "seats": [
+    {
+      "id": 0,
+      "streamer_id": "slime-0",
+      "gpu": 0
+    },
+    {
+      "id": 1,
+      "streamer_id": "slime-1",
+      "gpu": 1
+    }
+  ]
+}

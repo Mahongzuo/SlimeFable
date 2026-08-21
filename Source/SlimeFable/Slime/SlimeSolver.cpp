@@ -59,7 +59,7 @@ void FSlimeSolver::SetParams(const FSlimeSolverParams& InParams)
 
 void FSlimeSolver::RebuildDerived()
 {
-	SmoothingRadius = FMath::Max(Params.GetSmoothingRadius(), 1.f);
+	SmoothingRadius = FMath::Max(Params.GetSmoothingRadius() * SizeScale, 1.f);
 	SmoothingRadiusSq = SmoothingRadius * SmoothingRadius;
 
 	const float H3 = SmoothingRadius * SmoothingRadius * SmoothingRadius;
@@ -74,7 +74,8 @@ void FSlimeSolver::RebuildDerived()
 	const float DeltaQ = 0.2f * SmoothingRadius;
 	ArtificialPressureDenom = FMath::Max(KernelPoly6(DeltaQ * DeltaQ, SmoothingRadiusSq, Poly6Norm), KINDA_SMALL_NUMBER);
 
-	ContactRadius = Params.ParticleSpacing * 0.5f;
+	ContactRadius = Params.ParticleSpacing * 0.5f * SizeScale;
+	MiniMembraneRadius = GetScaledRestRadius() * FMath::Pow(LaunchFractionCached, 1.f / 3.f);
 }
 
 float FSlimeSolver::ComputeLatticeRestDensity() const
@@ -184,7 +185,31 @@ void FSlimeSolver::EnsureScratchCapacity(int32 Count)
 void FSlimeSolver::SetLaunchFraction(float Fraction)
 {
 	LaunchFractionCached = FMath::Clamp(Fraction, 0.05f, 0.6f);
-	MiniMembraneRadius = Params.RestRadius * FMath::Pow(LaunchFractionCached, 1.f / 3.f);
+	MiniMembraneRadius = GetScaledRestRadius() * FMath::Pow(LaunchFractionCached, 1.f / 3.f);
+}
+
+void FSlimeSolver::SetSizeScale(float NewScale)
+{
+	NewScale = FMath::Max(NewScale, 0.05f);
+	if (FMath::IsNearlyEqual(SizeScale, NewScale, 0.0005f))
+	{
+		return;
+	}
+
+	const float Ratio = NewScale / FMath::Max(SizeScale, KINDA_SMALL_NUMBER);
+	const FVector3f Com = FVector3f(GetBodyCenter());
+	for (FSlimeParticle& Particle : Particles)
+	{
+		if (Particle.IsBallistic())
+		{
+			continue;
+		}
+		Particle.Position = Com + (Particle.Position - Com) * Ratio;
+		Particle.PredictedPosition = Com + (Particle.PredictedPosition - Com) * Ratio;
+	}
+
+	SizeScale = NewScale;
+	RebuildDerived();
 }
 
 void FSlimeSolver::SetShotFloorZ(uint8 ShotId, float InFloorZ)
@@ -310,8 +335,12 @@ void FSlimeSolver::LiftShotCentersAboveFloor()
 		Counts.FindOrAdd(Particle.ShotId) += 1;
 	}
 
-	for (TPair<uint8, FVector3f>& Pair : Centers)
+		for (TPair<uint8, FVector3f>& Pair : Centers)
 	{
+		if (ShotTargets.Contains(Pair.Key) || IgnoreWorldShotIds.Contains(Pair.Key))
+		{
+			continue;
+		}
 		const int32 Count = Counts.FindRef(Pair.Key);
 		if (Count <= 0)
 		{
@@ -363,8 +392,12 @@ void FSlimeSolver::GetMergingShotIds(TArray<uint8>& OutIds) const
 
 void FSlimeSolver::Reset(const FVector& RestCenter)
 {
+	SizeScale = 1.f;
+	RebuildDerived();
 	BuildDome(RestCenter);
 	Colliders.Reset();
+	ShotTargets.Reset();
+	IgnoreWorldShotIds.Reset();
 	bSkipWorldCollision = false;
 	bCling = false;
 	SpreadRadius = 0.f;
@@ -375,7 +408,7 @@ void FSlimeSolver::Reset(const FVector& RestCenter)
 	InertiaAmount = 0.f;
 	ShellBackShift = 0.f;
 	LandingSettleRemaining = 0.f;
-	ShellAxes = FVector3f(Params.RestRadius);
+	ShellAxes = FVector3f(GetScaledRestRadius());
 }
 
 void FSlimeSolver::ApplyLandingSquash(float ImpactSpeed)
@@ -484,7 +517,7 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 	if (bSpread)
 	{
 		// Thin pancake disk: deform into a puddle, never leave the disk.
-		const float Radius = FMath::Max(SpreadRadius, Params.RestRadius) * Params.TetherSlack;
+		const float Radius = FMath::Max(SpreadRadius, GetScaledRestRadius()) * Params.TetherSlack;
 		const float HalfH = FMath::Max(SpreadHalfHeight, 0.5f);
 		FVector3f Local = InOutPoint - Center;
 		FVector3f Radial(Local.X, Local.Y, 0.f);
@@ -716,8 +749,8 @@ void FSlimeSolver::Step(float Dt)
 
 	// A gap displaces volume, so let the membrane stretch instead of fighting it.
 	const float MembraneRadius = bSpread
-		? FMath::Max(SpreadRadius, Params.RestRadius)
-		: Params.RestRadius * (1.f + SqueezeAmount * Params.MembraneSqueezeStretch);
+		? FMath::Max(SpreadRadius, GetScaledRestRadius())
+		: GetScaledRestRadius() * (1.f + SqueezeAmount * Params.MembraneSqueezeStretch);
 
 	// Build the single-blob hard shell (ellipsoid or flat disk). Never larger than needed.
 	const float Slack = Params.TetherSlack;
@@ -789,15 +822,22 @@ void FSlimeSolver::Step(float Dt)
 	// Shot COM lookup for ballistic cohesion (copied out of ParallelFor for thread safety).
 	TMap<uint8, FVector3f> ShotCenters;
 	ShotCenters.Reserve(ShotStates.Num());
+	TSet<uint8> TargetedShotIds;
+	TargetedShotIds.Reserve(ShotTargets.Num());
 	for (const FShotState& Shot : ShotStates)
 	{
 		ShotCenters.Add(Shot.Id, Shot.Center);
+		if (ShotTargets.Contains(Shot.Id))
+		{
+			TargetedShotIds.Add(Shot.Id);
+		}
 	}
 
-	ParallelFor(Count, [this, Dt, &AnchorAccel, &BodyCenter, MembraneRadius, MembraneK, GripRadius, Concentration, UpwardRestore, Gravity, DampingFactor, MiniRadius, MiniGrip, MiniConcentration, MiniMembraneK, &ShotCenters](int32 Index)
+	ParallelFor(Count, [this, Dt, &AnchorAccel, &BodyCenter, MembraneRadius, MembraneK, GripRadius, Concentration, UpwardRestore, Gravity, DampingFactor, MiniRadius, MiniGrip, MiniConcentration, MiniMembraneK, &ShotCenters, &TargetedShotIds](int32 Index)
 	{
 		FSlimeParticle& Particle = Particles[Index];
-		FVector3f Accel(0.f, 0.f, Gravity);
+		const bool bTargetedShot = Particle.IsBallistic() && TargetedShotIds.Contains(Particle.ShotId);
+		FVector3f Accel = bTargetedShot ? FVector3f::ZeroVector : FVector3f(0.f, 0.f, Gravity);
 		if (bCling && !Particle.IsBallistic())
 		{
 			// Pull into the wall the way ground gravity pulls into the floor.
@@ -1021,8 +1061,9 @@ void FSlimeSolver::Step(float Dt)
 		Particle.Position = Particle.PredictedPosition;
 	}, Count < GParallelMinBatch ? EParallelForFlags::ForceSingleThread : EParallelForFlags::None);
 
-	ApplyViscosity();
+			ApplyViscosity();
 	AdvanceKinematicShots(Dt);
+	ApplyShotTargets(Dt);
 
 	// ---- Fragment lifetime ------------------------------------------------------------
 
@@ -1070,12 +1111,13 @@ void FSlimeSolver::Step(float Dt)
 						break;
 					}
 				}
-				if (!bStillAlive)
+					if (!bStillAlive)
 				{
 					ShotMergeElapsed.Remove(ShotId);
 					ShotImpactApplied.Remove(ShotId);
 					ShotFloorOverrides.Remove(ShotId);
 					ShotPaths.Remove(ShotId);
+					ShotTargets.Remove(ShotId);
 				}
 			}
 			RebuildShotStates();
@@ -1111,7 +1153,7 @@ void FSlimeSolver::BuildGrid()
 	}
 
 	const FVector3f ApproxBodyCenter = BodyCount > 0 ? (BodyCenterAccum / float(BodyCount)) : AnchorCenter;
-	const float NearSq = FMath::Square(Params.RestRadius * 5.f);
+	const float NearSq = FMath::Square(GetScaledRestRadius() * 5.f);
 	for (const FSlimeParticle& Particle : Particles)
 	{
 		if (!Particle.IsBallistic())
@@ -1400,7 +1442,9 @@ void FSlimeSolver::ResolveCollisions()
 			FVector3f Accumulated = FVector3f::ZeroVector;
 			float Load = 0.f;
 
-			if (!bSkipWorldCollision)
+			const bool bIgnoreWorldShot = Particle.IsBallistic()
+				&& (ShotTargets.Contains(Particle.ShotId) || IgnoreWorldShotIds.Contains(Particle.ShotId));
+			if (!bSkipWorldCollision && !bIgnoreWorldShot)
 			{
 				for (const FSlimeCollider& Collider : Colliders)
 				{
@@ -1431,7 +1475,7 @@ void FSlimeSolver::ResolveCollisions()
 					PlaneZ = *ShotFloor;
 				}
 			}
-			if (!bBodyCling && Point.Z - LocalContactRadius < PlaneZ)
+			if (!bBodyCling && !bIgnoreWorldShot && Point.Z - LocalContactRadius < PlaneZ)
 			{
 				Load += PlaneZ + LocalContactRadius - Point.Z;
 				Point.Z = PlaneZ + LocalContactRadius;
@@ -1450,7 +1494,7 @@ void FSlimeSolver::ResolveCollisions()
 				}
 			}
 
-			if (Point.Z + LocalContactRadius > CeilingZ)
+			if (!bIgnoreWorldShot && Point.Z + LocalContactRadius > CeilingZ)
 			{
 				Load += Point.Z + LocalContactRadius - CeilingZ;
 				Point.Z = CeilingZ - LocalContactRadius;
@@ -1543,6 +1587,8 @@ void FSlimeSolver::RemoveShotParticles(uint8 ShotId)
 	ShotImpactApplied.Remove(ShotId);
 	ShotFloorOverrides.Remove(ShotId);
 	ShotPaths.Remove(ShotId);
+	ShotTargets.Remove(ShotId);
+	IgnoreWorldShotIds.Remove(ShotId);
 	RebuildShotStates();
 	EnsureScratchCapacity(Particles.Num());
 }
@@ -1564,6 +1610,8 @@ void FSlimeSolver::RemoveAllClones()
 	ShotImpactApplied.Reset();
 	ShotFloorOverrides.Reset();
 	ShotPaths.Reset();
+	ShotTargets.Reset();
+	IgnoreWorldShotIds.Reset();
 	EnsureScratchCapacity(Particles.Num());
 }
 
@@ -1594,8 +1642,12 @@ void FSlimeSolver::ApplyMergeImpact(const FShotState& Shot)
 	LandingSettleRemaining = FMath::Max(LandingSettleRemaining, 1.1f);
 }
 
-int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path)
+int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path, uint8* OutShotId)
 {
+	if (OutShotId)
+	{
+		*OutShotId = 0;
+	}
 	SetLaunchFraction(Fraction);
 
 	const int32 BodyCount = Params.NumParticles;
@@ -1656,7 +1708,7 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 	const FVector3f Away = Direction.IsNearlyZero() ? FVector3f::ForwardVector : Direction;
 	const bool bUsePath = Path && Path->bValid && Path->Points.Num() >= 2;
 	const FVector3f PathStart = bUsePath ? FVector3f(Path->Points[0]) : FVector3f::ZeroVector;
-	const float MiniScale = MiniMembraneRadius / FMath::Max(Params.RestRadius, KINDA_SMALL_NUMBER);
+	const float MiniScale = MiniMembraneRadius / FMath::Max(GetScaledRestRadius(), KINDA_SMALL_NUMBER);
 
 	Particles.Reserve(Particles.Num() + Launched);
 	for (int32 I = 0; I < Launched; ++I)
@@ -1674,7 +1726,7 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 		else
 		{
 			// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
-			Clone.Position = Template.Position + Away * (Params.RestRadius * 2.4f);
+			Clone.Position = Template.Position + Away * (GetScaledRestRadius() * 2.4f);
 		}
 		Clone.PredictedPosition = Clone.Position;
 		Particles.Add(Clone);
@@ -1695,6 +1747,10 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 	ShotMergeElapsed.Remove(ShotId);
 	ShotImpactApplied.Remove(ShotId);
 	RebuildShotStates();
+	if (OutShotId)
+	{
+		*OutShotId = ShotId;
+	}
 	return Launched;
 }
 
@@ -1709,8 +1765,8 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 
 	const FVector BodyCenter = GetBodyCenter();
 	const float ApproachSq = FMath::Square(ApproachRadius);
-	const float SurfaceStandoff = Params.RestRadius * 0.85f;
-	const float CommitR = FMath::Max(CommitRadius, Params.RestRadius * 0.55f);
+	const float SurfaceStandoff = GetScaledRestRadius() * 0.85f;
+	const float CommitR = FMath::Max(CommitRadius, GetScaledRestRadius() * 0.55f);
 	const float CommitSq = FMath::Square(CommitR);
 	const float Hold = FMath::Max(HoldDuration, 0.1f);
 	const FVector3f Home(BodyCenter);
@@ -1721,6 +1777,10 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 
 	for (FShotState& Shot : ShotStates)
 	{
+		if (ShotTargets.Contains(Shot.Id))
+		{
+			continue;
+		}
 		const float DistSq = FVector3f::DistSquared(Shot.Center, Home);
 		float& MergeTime = ShotMergeElapsed.FindOrAdd(Shot.Id, -1.f);
 
@@ -1820,7 +1880,7 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 	ClearKinematicPaths();
 
 	const FVector3f Home(Target);
-	const float ArriveRadius = Params.RestRadius * 0.8f;
+	const float ArriveRadius = GetScaledRestRadius() * 0.8f;
 	const float ArriveSq = FMath::Square(ArriveRadius);
 	int32 StillOut = 0;
 
@@ -1880,6 +1940,106 @@ void FSlimeSolver::SnapFragmentsHome(const FVector& Target)
 {
 	(void)Target;
 	RemoveAllClones();
+}
+
+void FSlimeSolver::SetShotTarget(uint8 ShotId, const FVector& Target, float PullSpeed)
+{
+	if (ShotId == 0)
+	{
+		return;
+	}
+	FShotTarget& Entry = ShotTargets.FindOrAdd(ShotId);
+	Entry.Location = Target;
+	Entry.PullSpeed = FMath::Max(PullSpeed, 1.f);
+}
+
+void FSlimeSolver::ClearShotTarget(uint8 ShotId)
+{
+	ShotTargets.Remove(ShotId);
+}
+
+void FSlimeSolver::ClearShotTargets()
+{
+	ShotTargets.Reset();
+}
+
+void FSlimeSolver::AddIgnoreWorldShot(uint8 ShotId)
+{
+	if (ShotId != 0)
+	{
+		IgnoreWorldShotIds.Add(ShotId);
+	}
+}
+
+void FSlimeSolver::ClearIgnoreWorldShot(uint8 ShotId)
+{
+	IgnoreWorldShotIds.Remove(ShotId);
+}
+
+void FSlimeSolver::ClearIgnoreWorldShots()
+{
+	IgnoreWorldShotIds.Reset();
+}
+
+void FSlimeSolver::ApplyShotTargets(float Dt)
+{
+	if (ShotTargets.Num() == 0 || Dt <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	RebuildShotStates();
+
+	for (const TPair<uint8, FShotTarget>& Pair : ShotTargets)
+	{
+		const uint8 ShotId = Pair.Key;
+		bool bFound = false;
+		FVector Center = FVector::ZeroVector;
+		for (const FShotState& Shot : ShotStates)
+		{
+			if (Shot.Id == ShotId)
+			{
+				Center = FVector(Shot.Center);
+				bFound = true;
+				break;
+			}
+		}
+		if (!bFound)
+		{
+			continue;
+		}
+
+		const FVector Home = Pair.Value.Location;
+		const float Speed = Pair.Value.PullSpeed;
+		const FVector Delta = Home - Center;
+		const float Distance = Delta.Size();
+		FVector Move = FVector::ZeroVector;
+		if (Distance <= 8.f)
+		{
+			Move = Delta;
+		}
+		else
+		{
+			const float Step = Speed * Dt;
+			Move = Delta * (FMath::Min(Step, Distance) / Distance);
+		}
+
+		const FVector3f Shift(Move);
+		const FVector3f Vel = (Dt > KINDA_SMALL_NUMBER) ? Shift / Dt : FVector3f::ZeroVector;
+		for (FSlimeParticle& Particle : Particles)
+		{
+			if (!Particle.IsBallistic() || Particle.ShotId != ShotId)
+			{
+				continue;
+			}
+			Particle.Position += Shift;
+			Particle.PredictedPosition = Particle.Position;
+			Particle.Velocity = Vel;
+			Particle.BallisticLife = FMath::Max(Particle.BallisticLife, 1.f);
+		}
+	}
+
+	RebuildShotStates();
 }
 
 void FSlimeSolver::ClearKinematicPaths()

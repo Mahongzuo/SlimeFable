@@ -110,6 +110,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> Skill3Action;
 
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	float GetSkill1HoldFraction() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	bool bPollCombatKeys = true;
 
@@ -130,7 +133,7 @@ private:
 	void AwardResources(const FSlimeSkillDef& Def, int32 HitCount);
 	void TickCooldowns(float DeltaTime);
 	void TickDamageBuff(float DeltaTime);
-	void PollCombatKeys();
+	void PollCombatKeys(float DeltaTime);
 	int32 SkillCdIndex(ESlimeElement InElement, ESlimeSkillSlot Slot) const;
 	APlayerController* GetPlayerController() const;
 	FVector GetBlobOrigin() const;
@@ -185,4 +188,6 @@ private:
 	bool bPollSkill1Down = false;
 	bool bPollSkill2Down = false;
 	bool bPollSkill3Down = false;
+	bool bPhantomWheelOpenedThisHold = false;
+	float Skill1HoldSeconds = 0.f;
 };

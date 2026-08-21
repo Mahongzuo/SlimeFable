@@ -29,6 +29,7 @@ AEnemyTower::AEnemyTower()
 	FireMode = EEnemyTowerFireMode::Beam;
 	bShowFallbackBeamMesh = false;
 	bDrawDebugBeam = true;
+	bDevourable = false;
 
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
@@ -408,14 +409,17 @@ void AEnemyTower::FireBeam(AActor* Target)
 	if (!bBlockedByWorld)
 	{
 		BeamEnd = EndAim;
-		const FVector Impulse = (EndAim - Start).GetSafeNormal() * 180.f;
-		if (ICombatDamageable* Damageable = Cast<ICombatDamageable>(Target))
+		if (!bHarmless)
 		{
-			Damageable->ApplyDamage(BeamDamage, this, BeamEnd, Impulse);
-		}
-		else if (USlimeHealthComponent* TargetHealth = Target->FindComponentByClass<USlimeHealthComponent>())
-		{
-			TargetHealth->ApplyDamage(BeamDamage, this, BeamEnd, Impulse);
+			const FVector Impulse = (EndAim - Start).GetSafeNormal() * 180.f;
+			if (ICombatDamageable* Damageable = Cast<ICombatDamageable>(Target))
+			{
+				Damageable->ApplyDamage(BeamDamage, this, BeamEnd, Impulse);
+			}
+			else if (USlimeHealthComponent* TargetHealth = Target->FindComponentByClass<USlimeHealthComponent>())
+			{
+				TargetHealth->ApplyDamage(BeamDamage, this, BeamEnd, Impulse);
+			}
 		}
 	}
 

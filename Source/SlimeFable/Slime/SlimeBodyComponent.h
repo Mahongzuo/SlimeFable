@@ -291,6 +291,34 @@ public:
 	/** Combat tendrils: short-lived clone blobs that peel then get recalled. */
 	int32 LaunchTendril(const FVector& LaunchVelocity, float Fraction, float Life);
 
+	/** Devour latch: clone a mini-slime that ignores the G-key shot cap. */
+	int32 LaunchDevourShot(const FVector& LaunchVelocity, float Fraction, float Life, uint8& OutShotId);
+
+	void SetShotTarget(uint8 ShotId, const FVector& Target, float PullSpeed);
+
+	void ClearShotTargets();
+
+	void AddIgnoreWorldShot(uint8 ShotId);
+	void ClearIgnoreWorldShots();
+
+	void SetRecallPullSpeedOverride(float Speed);
+	void ClearRecallPullSpeedOverride();
+
+	float GetEffectiveRecallPullSpeed() const;
+
+	/** Instantly destroy every flying clone (used before a devour latch). */
+	void ClearFragments();
+
+	/** While > 0, FixedStep uses this instead of LaunchFraction (devour half-volume minis). 0 = off. */
+	void SetLaunchFractionOverride(float Fraction);
+
+	void ClearLaunchFractionOverride() { LaunchFractionOverride = 0.f; }
+
+	FVector GetShotCenter(uint8 ShotId) const;
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	float GetRecallPullSpeed() const { return RecallPullSpeed; }
+
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetRecalling(bool bInRecalling);
 
@@ -308,6 +336,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	FVector GetBlobCenter() const { return Solver.GetBodyCenter(); }
+
+	/** Particle COM plus visual-only Z lift so devour inner mesh tracks the inflated ball. */
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	FVector GetVisualBlobCenter() const { return GetBlobCenter() + FVector(0.f, 0.f, VisualZLift); }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool GetFragmentCenter(FVector& OutCenter) const { return Solver.GetFragmentCenter(OutCenter); }
@@ -339,6 +371,33 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ApplyHitJolt();
+
+	/**
+	 *  Uniform blob scale (devour gulp). Capsule is left alone.
+	 *  @param bIgnoreSqueeze 吞噬时勾上：不要被间隙挤压把 3x 压回 1x。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void SetBodyScale(float NewScale, bool bIgnoreSqueeze = false);
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	float GetBodyScale() const { return RequestedBodyScale; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	float GetAppliedBodyScale() const { return Solver.GetSizeScale(); }
+
+	/** Extra walk-speed multiplier applied after squeeze. 1 = unchanged. */
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void SetExternalMoveSpeedScale(float Scale) { ExternalMoveSpeedScale = FMath::Clamp(Scale, 0.1f, 1.5f); }
+
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void SetExternalJumpScale(float Scale) { ExternalJumpScale = FMath::Clamp(Scale, 0.1f, 1.5f); }
+
+	/**
+	 *  If true (or slime.BodyVisualScaleOnly=1), SetBodyScale only inflates the isosurface
+	 *  and leaves particle positions at 1x.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Scale")
+	bool bVisualOnlyBodyScale = false;
 
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetQuality(ESlimeSimQuality InQuality);
@@ -423,8 +482,19 @@ private:
 
 	float DefaultStepHeight = 45.f;
 	float DefaultWalkSpeed = 500.f;
+	float DefaultJumpZ = 620.f;
 	float StepHeightBoost = 0.f;
 	float HeightSqueezeSuppressRemaining = 0.f;
+	float ExternalMoveSpeedScale = 1.f;
+	float ExternalJumpScale = 1.f;
+	float RequestedBodyScale = 1.f;
+	float VisualZLift = 0.f;
+	float LaunchFractionOverride = 0.f;
+	float RecallPullSpeedOverride = 0.f;
+	int32 SavedSurfaceMaxVertices = 9000;
+	int32 SavedSurfaceMaxGridDim = 36;
+	bool bEnlargedSurfaceBudget = false;
+	bool bFreezeQualityLod = false;
 
 	bool bSpread = false;
 	bool bRecalling = false;

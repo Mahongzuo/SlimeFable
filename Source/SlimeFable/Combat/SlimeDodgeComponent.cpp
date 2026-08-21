@@ -13,6 +13,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "SlimeAIController.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeDevourComponent.h"
 #include "SlimeDodgeAfterimage.h"
 #include "SlimeEnemyCharacter.h"
 #include "SlimeHealthComponent.h"
@@ -188,6 +189,13 @@ void USlimeDodgeComponent::PollRightMouse()
 
 void USlimeDodgeComponent::TryHandleRightClick()
 {
+	if (const USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr)
+	{
+		if (Devour->IsCombatLocked() || Devour->IsPhantomWheelOpen())
+		{
+			return;
+		}
+	}
 	if (!IsInEnemyThreatRange())
 	{
 		OnBlinkDashRequested.Broadcast();

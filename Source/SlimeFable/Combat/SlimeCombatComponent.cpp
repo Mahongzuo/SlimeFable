@@ -19,6 +19,8 @@
 #include "SlimeCombatCatalog.h"
 #include "SlimeCombatHUDWidget.h"
 #include "SlimeElementComponent.h"
+#include "SlimeDevourComponent.h"
+#include "SlimeDodgeComponent.h"
 #include "SlimeHitProbe.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockOnComponent.h"
@@ -102,7 +104,14 @@ void USlimeCombatComponent::BindInput(UEnhancedInputComponent* EnhancedInput)
 }
 
 void USlimeCombatComponent::HandleAttack() { TryComboAttack(); }
-void USlimeCombatComponent::HandleSkill1() { TrySkill(ESlimeSkillSlot::Skill1); }
+void USlimeCombatComponent::HandleSkill1()
+{
+	if (bPollCombatKeys)
+	{
+		return;
+	}
+	TrySkill(ESlimeSkillSlot::Skill1);
+}
 void USlimeCombatComponent::HandleSkill2() { TrySkill(ESlimeSkillSlot::Skill2); }
 void USlimeCombatComponent::HandleSkill3() { TrySkill(ESlimeSkillSlot::Skill3); }
 
@@ -308,6 +317,13 @@ bool USlimeCombatComponent::CanStartAction() const
 	}
 	if (const AActor* Owner = GetOwner())
 	{
+		if (const USlimeDevourComponent* Devour = Owner->FindComponentByClass<USlimeDevourComponent>())
+		{
+			if (Devour->IsCombatLocked() || Devour->IsPhantomWheelOpen())
+			{
+				return false;
+			}
+		}
 		if (const USlimePlacementComponent* Placement = Owner->FindComponentByClass<USlimePlacementComponent>())
 		{
 			if (Placement->IsPlacing())
@@ -344,7 +360,7 @@ void USlimeCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	APawn* Pawn = Cast<APawn>(GetOwner());
 	if (bPollCombatKeys && Pawn && Pawn->IsPlayerControlled())
 	{
-		PollCombatKeys();
+		PollCombatKeys(DeltaTime);
 	}
 
 	if (bAttacking)
@@ -353,7 +369,7 @@ void USlimeCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 }
 
-void USlimeCombatComponent::PollCombatKeys()
+void USlimeCombatComponent::PollCombatKeys(float DeltaTime)
 {
 	APlayerController* PC = GetPlayerController();
 	if (!PC)
@@ -378,15 +394,71 @@ void USlimeCombatComponent::PollCombatKeys()
 		}
 		return PC->WasInputKeyJustPressed(Fallback);
 	};
+	auto IsDown = [PC, InputSettings](ESlimeInputAction Action, const FKey& Fallback) -> bool
+	{
+		if (InputSettings)
+		{
+			return InputSettings->IsKeyDown(PC, Action);
+		}
+		return PC->IsInputKeyDown(Fallback);
+	};
 
 	if (WasPressed(ESlimeInputAction::Attack, EKeys::LeftMouseButton))
 	{
 		TryComboAttack();
 	}
-	if (WasPressed(ESlimeInputAction::Skill1, EKeys::Q))
+
+	USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr;
+	bool bBlockSkill1Hold = false;
+	if (const AActor* Owner = GetOwner())
 	{
-		TrySkill(ESlimeSkillSlot::Skill1);
+		if (const USlimeVehicleComponent* Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>())
+		{
+			bBlockSkill1Hold = Vehicle->IsUsingVehicle();
+		}
 	}
+	if (Abilities && (Abilities->IsWheelOpen() || Abilities->IsChargingLaunch()))
+	{
+		bBlockSkill1Hold = true;
+	}
+
+	const bool bSkill1Down = !bBlockSkill1Hold && IsDown(ESlimeInputAction::Skill1, EKeys::Q);
+	if (bSkill1Down)
+	{
+		if (!bPollSkill1Down)
+		{
+			bPollSkill1Down = true;
+			Skill1HoldSeconds = 0.f;
+			bPhantomWheelOpenedThisHold = false;
+		}
+		Skill1HoldSeconds += DeltaTime;
+		if (Devour && !bPhantomWheelOpenedThisHold && Skill1HoldSeconds >= Devour->PhantomWheelHoldSeconds)
+		{
+			if (Devour->TryOpenPhantomWheel())
+			{
+				bPhantomWheelOpenedThisHold = true;
+			}
+		}
+		if (Devour && bPhantomWheelOpenedThisHold)
+		{
+			Devour->TickPhantomWheelInput();
+		}
+	}
+	else if (bPollSkill1Down)
+	{
+		bPollSkill1Down = false;
+		if (Devour && bPhantomWheelOpenedThisHold)
+		{
+			Devour->ClosePhantomWheel(true);
+		}
+		else
+		{
+			TrySkill(ESlimeSkillSlot::Skill1);
+		}
+		Skill1HoldSeconds = 0.f;
+		bPhantomWheelOpenedThisHold = false;
+	}
+
 	if (WasPressed(ESlimeInputAction::Skill2, EKeys::E))
 	{
 		TrySkill(ESlimeSkillSlot::Skill2);
@@ -395,6 +467,27 @@ void USlimeCombatComponent::PollCombatKeys()
 	{
 		TrySkill(ESlimeSkillSlot::Skill3);
 	}
+}
+
+float USlimeCombatComponent::GetSkill1HoldFraction() const
+{
+	if (!bPollSkill1Down || bPhantomWheelOpenedThisHold)
+	{
+		return 0.f;
+	}
+	float Hold = 0.35f;
+	if (const AActor* Owner = GetOwner())
+	{
+		if (const USlimeDevourComponent* Devour = Owner->FindComponentByClass<USlimeDevourComponent>())
+		{
+			Hold = FMath::Max(Devour->PhantomWheelHoldSeconds, 0.05f);
+			if (Devour->GetPhantomSlotCount() <= 0)
+			{
+				return 0.f;
+			}
+		}
+	}
+	return FMath::Clamp(Skill1HoldSeconds / Hold, 0.f, 1.f);
 }
 
 bool USlimeCombatComponent::TryComboAttack()

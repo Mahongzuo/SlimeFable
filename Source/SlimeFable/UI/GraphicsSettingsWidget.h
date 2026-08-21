@@ -9,6 +9,8 @@
 class UButton;
 class UTextBlock;
 class UImage;
+class USlimeGraphicsSettings;
+
 UCLASS()
 class SLIMEFABLE_API UGraphicsSettingsWidget : public UUserWidget
 {
@@ -25,6 +27,8 @@ protected:
 	void BuildLayoutIfNeeded();
 	void ApplyLook();
 	void ApplyQuality(int32 Level);
+	void SetButtonLabel(UButton* Button, const FText& Label, bool bSelected, float FontSize);
+	USlimeGraphicsSettings* GetGraphicsSettings() const;
 
 	UFUNCTION()
 	void OnBackClicked();
@@ -40,6 +44,21 @@ protected:
 
 	UFUNCTION()
 	void OnQuality3Clicked();
+
+	UFUNCTION()
+	void OnUpscalerClicked();
+
+	UFUNCTION()
+	void OnDLSSQualityClicked();
+
+	UFUNCTION()
+	void OnFrameGenClicked();
+
+	UFUNCTION()
+	void OnAutoDetectClicked();
+
+	UFUNCTION()
+	void OnPixelStreamingClicked();
 
 	UPROPERTY()
 	TWeakObjectPtr<UUserWidget> ReturnTarget;
@@ -67,6 +86,21 @@ protected:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> Quality3Button;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> UpscalerButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> DLSSQualityButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> FrameGenButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> AutoDetectButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PixelStreamingButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BackButton;

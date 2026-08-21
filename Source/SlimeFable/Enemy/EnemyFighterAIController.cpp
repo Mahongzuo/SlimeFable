@@ -15,6 +15,7 @@
 #include "NiagaraSystem.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeHitProbe.h"
 
 AEnemyFighterAIController::AEnemyFighterAIController()
 {
@@ -57,7 +58,7 @@ void AEnemyFighterAIController::OnPossess(APawn* InPawn)
 		: 1.5f;
 }
 
-APawn* AEnemyFighterAIController::FindPlayerPawn() const
+APawn* AEnemyFighterAIController::FindCombatFocus() const
 {
 	return UGameplayStatics::GetPlayerPawn(this, 0);
 }
@@ -68,6 +69,11 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 
 	if (!Fighter || !Combat)
 	{
+		return;
+	}
+	if (Fighter->IsDevourLocked())
+	{
+		StopMovement();
 		return;
 	}
 	if (Fighter->GetEnemyPresence() == EEnemyPresence::Sleep
@@ -93,7 +99,7 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 		Cd = FMath::Max(Cd - DeltaSeconds, 0.f);
 	}
 
-	APawn* Player = FindPlayerPawn();
+	APawn* Player = FindCombatFocus();
 	const float Dist = Player
 		? FVector::Dist(Fighter->GetActorLocation(), Player->GetActorLocation())
 		: TNumericLimits<float>::Max();
@@ -150,7 +156,18 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 
 void AEnemyFighterAIController::TickIdle(float DeltaSeconds, float Dist)
 {
-	if (Dist <= Fighter->DetectRange && Fighter->GetEnemyPresence() == EEnemyPresence::Active)
+	if (Fighter->bPassive)
+	{
+		if (Fighter->bWanderWhenIdle)
+		{
+			TickWander(DeltaSeconds);
+		}
+		return;
+	}
+
+	APawn* Focus = FindCombatFocus();
+	const bool bHostile = Focus && USlimeHitProbe::IsHostile(Fighter, Focus);
+	if (bHostile && Dist <= Fighter->DetectRange && Fighter->GetEnemyPresence() == EEnemyPresence::Active)
 	{
 		StopIdleMontage();
 		StopMovement();
@@ -541,7 +558,7 @@ int32 AEnemyFighterAIController::FindMoveIndexById(FName MoveId) const
 
 void AEnemyFighterAIController::FacePlayer()
 {
-	APawn* Player = FindPlayerPawn();
+	APawn* Player = FindCombatFocus();
 	APawn* MyPawn = GetPawn();
 	if (!Player || !MyPawn)
 	{
@@ -557,7 +574,7 @@ void AEnemyFighterAIController::FacePlayer()
 
 void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 {
-	APawn* Player = FindPlayerPawn();
+	APawn* Player = FindCombatFocus();
 	if (!Player || !Fighter)
 	{
 		return;
