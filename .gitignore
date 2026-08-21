@@ -62,16 +62,16 @@ __pycache__/
 *.dmp
 *.mdmp
 
-# Vendor upscaler plugins: keep .uplugin / source, ignore cooked binaries
+# Vendor upscaler: extract locally, do not commit
 /Plugins/*.zip
-/Plugins/NVIDIA/**/Binaries/
-/Plugins/NVIDIA/**/Intermediate/
-/Plugins/AMD/**/Binaries/
-/Plugins/AMD/**/Intermediate/
+/Plugins/NVIDIA/**
+!/Plugins/NVIDIA/enable_nvidia_dlss.py
 
-# Pixel Streaming local secrets (copy from *.example.json)
-/Tools/PixelStreaming/worker.config.json
-/Tools/PixelStreaming/cloud/.env
+/Plugins/**/Binaries/
+/Plugins/**/Intermediate/
 
-# Official Epic Pixel Streaming infra (clone locally, do not commit)
-/Tools/PixelStreaming/PixelStreamingInfrastructure/
+# Pixel Streaming tooling (clone / zip / worker locally)
+/Tools/PixelStreaming/
+
+# Editor per-user layout (machine-local)
+/Config/DefaultEditorPerProjectUserSettings.ini
