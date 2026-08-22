@@ -23,6 +23,7 @@ class USlimeInteractComponent;
 class USlimeDodgeComponent;
 class USlimeVehicleComponent;
 class USlimeDevourComponent;
+class USlimeMorphComponent;
 class UStaticMeshComponent;
 
 /**
@@ -120,6 +121,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
 	USlimeVehicleComponent* GetSlimeVehicle() const { return SlimeVehicle; }
 
+	UFUNCTION(BlueprintPure, Category = "Slime|Morph")
+	USlimeMorphComponent* GetSlimeMorph() const { return SlimeMorph; }
+
 	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
 	UStaticMeshComponent* GetVehicleMesh() const { return VehicleMesh; }
 
@@ -135,6 +139,19 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UProceduralMeshComponent* GetXRayMesh() const { return XRayMesh; }
+
+	/**
+	 *  Parks the slime out of the world while the player drives a morph body: hides it, kills
+	 *  its collision and movement, and — critically — stops the shadow proxy from casting.
+	 *  ShadowMesh sets bCastHiddenShadow, so SetActorHiddenInGame alone still leaves a dark
+	 *  puddle stamped on the ground where the morph started.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Slime|Morph")
+	void SetMorphParked(bool bParked);
+
+	/** Applies one or more mouse-wheel zoom steps and returns the new target arm length. */
+	float AdjustCameraZoom(int32 WheelSteps);
+	float GetDesiredCameraArmLength() const { return DesiredCameraArmLength; }
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
@@ -218,6 +235,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Vehicle")
 	TObjectPtr<USlimeVehicleComponent> SlimeVehicle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Morph")
+	TObjectPtr<USlimeMorphComponent> SlimeMorph;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

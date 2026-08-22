@@ -1,5 +1,7 @@
 # Unreal MCP 运维（SlimeFable）
 
+本机编辑器 / UBT 绝对路径见 spec [toolchain.md](../../slimefable-spec/references/toolchain.md)。Agent 改代码时编辑器默认关着：C++ 走 UBT；MCP 需先拉起 GUI 再 `StartServer 8010`。
+
 ## 端口与配置
 
 | 位置 | 值 |
@@ -35,6 +37,14 @@ LogHttpListener: Error: HttpListener unable to bind to 127.0.0.1:8000
 ```
 
 处理：改用 8010，或释放端口后 `ModelContextProtocol.StartServer`。
+
+## 启动 GUI 编辑器（MCP 需要）
+
+```powershell
+& "D:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe" "E:\UE\SlimeFable\SlimeFable.uproject"
+```
+
+加载完成后控制台：`ModelContextProtocol.StartServer 8010`（或 `py E:/UE/SlimeFable/Content/Python/start_mcp_8010.py`）。
 
 ## 插件
 

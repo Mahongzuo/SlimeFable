@@ -15,6 +15,7 @@ class UInputMappingContext;
 class USlimeBodyComponent;
 class USlimeElementComponent;
 class USlimeElementWheelWidget;
+class USlimeMorphComponent;
 struct FInputActionValue;
 
 /**
@@ -201,5 +202,8 @@ private:
 	bool bPollAbsorbDown = false;
 	bool bPollLaunchDown = false;
 	bool bPollWheelDown = false;
+	bool bPollMorphDown = false;
+	float MorphHoldSeconds = 0.f;
+	bool bMorphWheelOpenedThisHold = false;
 	bool bLoggedMissingMappingContext = false;
 };

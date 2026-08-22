@@ -47,6 +47,17 @@ void AEnemyFighter::EnsureMoveKit()
 		{
 			EnemyCombat::FillWatchdogBiteMoves(Moves);
 		}
+		for (FEnemyMoveDef& Move : Moves)
+		{
+			if (Move.MoveId == FName(TEXT("BiteLunge")))
+			{
+				// Existing watchdog Blueprints serialize their move array. Normalize the old
+				// non-moving lunge at runtime without replacing its bound montage or tuning.
+				Move.Skill.Exec = EEnemySkillExec::Dash;
+				Move.Skill.DashDistance = FMath::Max(Move.Skill.DashDistance, 180.f);
+				Move.bGapCloser = true;
+			}
+		}
 		return;
 	}
 	if (Moves.Num() == 0)

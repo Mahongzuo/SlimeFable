@@ -34,6 +34,7 @@ public:
 		const FVector& Origin,
 		const FVector& Forward,
 		TSet<TWeakObjectPtr<AActor>>& AlreadyHit,
+		AActor* RestrictTarget = nullptr,
 		TArray<FSlimeHitResult>* OutHits = nullptr);
 
 	static bool IsHostile(const AActor* A, const AActor* B);
@@ -54,7 +55,8 @@ private:
 		const FSlimeHitSpec& Spec,
 		const FVector& Origin,
 		const FVector& Forward,
-		TArray<FOverlapResult>& OutOverlaps);
+		TArray<FOverlapResult>& OutOverlaps,
+		AActor* RestrictTarget = nullptr);
 
 	static void ApplyToActor(
 		AActor* Instigator,

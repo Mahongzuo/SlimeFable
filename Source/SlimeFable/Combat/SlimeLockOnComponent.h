@@ -9,6 +9,7 @@
 class APlayerController;
 class UInputAction;
 class UEnhancedInputComponent;
+class USlimeHealthComponent;
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
 class SLIMEFABLE_API USlimeLockOnComponent : public UActorComponent
@@ -59,6 +60,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<AActor> LockedTarget;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<USlimeHealthComponent> LockedHealth;
 
 	bool bSavedOrientToMovement = true;
 	bool bHaveSavedMovement = false;

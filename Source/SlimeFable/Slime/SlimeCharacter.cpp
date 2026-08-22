@@ -20,6 +20,7 @@
 #include "SlimeDodgeComponent.h"
 #include "SlimeDevourComponent.h"
 #include "SlimeLockOnComponent.h"
+#include "SlimeMorphComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
@@ -156,6 +157,7 @@ ASlimeCharacter::ASlimeCharacter()
 	SlimeDodge = CreateDefaultSubobject<USlimeDodgeComponent>(TEXT("SlimeDodge"));
 	SlimeDevour = CreateDefaultSubobject<USlimeDevourComponent>(TEXT("SlimeDevour"));
 	SlimeVehicle = CreateDefaultSubobject<USlimeVehicleComponent>(TEXT("SlimeVehicle"));
+	SlimeMorph = CreateDefaultSubobject<USlimeMorphComponent>(TEXT("SlimeMorph"));
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(RootComponent);
@@ -261,17 +263,11 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 			{
 				if (PC->WasInputKeyJustPressed(EKeys::MouseScrollUp))
 				{
-					DesiredCameraArmLength = FMath::Clamp(
-						DesiredCameraArmLength - CameraZoomStep,
-						CameraArmLengthMin,
-						CameraArmLengthMax);
+					AdjustCameraZoom(-1);
 				}
 				else if (PC->WasInputKeyJustPressed(EKeys::MouseScrollDown))
 				{
-					DesiredCameraArmLength = FMath::Clamp(
-						DesiredCameraArmLength + CameraZoomStep,
-						CameraArmLengthMin,
-						CameraArmLengthMax);
+					AdjustCameraZoom(1);
 				}
 			}
 		}
@@ -282,6 +278,15 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 		DesiredCameraArmLength,
 		DeltaSeconds,
 		CameraZoomInterpSpeed);
+}
+
+float ASlimeCharacter::AdjustCameraZoom(int32 WheelSteps)
+{
+	DesiredCameraArmLength = FMath::Clamp(
+		DesiredCameraArmLength + CameraZoomStep * WheelSteps,
+		CameraArmLengthMin,
+		CameraArmLengthMax);
+	return DesiredCameraArmLength;
 }
 
 void ASlimeCharacter::NotifyControllerChanged()
@@ -374,6 +379,34 @@ void ASlimeCharacter::Jump()
 		return;
 	}
 	Super::Jump();
+}
+
+void ASlimeCharacter::SetMorphParked(bool bParked)
+{
+	SetActorHiddenInGame(bParked);
+	SetActorEnableCollision(!bParked);
+
+	// The shadow proxy is already hidden-in-game and casts anyway (bCastHiddenShadow), so the
+	// actor-level hide does not stop it. This has to go through the body component: its surface
+	// rebuild re-asserts the cast flags every frame and would stomp a direct write here.
+	if (SlimeBody)
+	{
+		SlimeBody->SetShadowCastSuppressed(bParked);
+	}
+
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		if (bParked)
+		{
+			// Otherwise the hidden capsule keeps coasting on whatever velocity it had.
+			Movement->DisableMovement();
+		}
+		else
+		{
+			Movement->SetMovementMode(MOVE_Walking);
+		}
+	}
 }
 
 void ASlimeCharacter::Unstuck()

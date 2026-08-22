@@ -8,7 +8,12 @@
 - Blueprint 可调用的查询放在 `UDayLevelSubsystem`（GameInstanceSubsystem），避免在 Actor 上散落重复逻辑。
 - Soft 引用日关卡：Registry 用 `FSoftObjectPath`；运行时查询用 `TSoftObjectPtr<UWorld>`。
 - 新加模块依赖时同步改 `SlimeFable.Build.cs`。
-- Live Coding 开启时完整 UBT 可能被拒；新增 UCLASS/UFUNCTION 通常需要关编辑器编译或重启编辑器。
+- Live Coding 开启时完整 UBT 可能被拒；新增 UCLASS/UFUNCTION 用下面的 `Build.bat` 关编辑器编译。本机路径见 [toolchain.md](toolchain.md)，**不要满盘搜引擎**。
+
+```powershell
+& "D:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" SlimeFableEditor Win64 Development -Project="E:\UE\SlimeFable\SlimeFable.uproject" -WaitMutex
+```
+
 - 关卡摆件根 `StaticMesh`（以及会点到的占位子网格）必须 `SetMobility(Movable)`，否则视口能选中、无移动/缩放 gizmo。
 - 构造 / Construction 用 `SetRelativeScale3D`，禁止 `SetWorldScale3D`（会和编辑器变换抢、缩放像锁死）。
 - 敌人网格与 AnimBP **不要**写死在 C++ 默认值；建该日 BP 时用 Python 绑到 CDO（`PrimarySkeletalMesh` / `PrimaryAnimClass` / 攻击与死亡 Montage）。只建空壳会永远显示占位立方体。细则见 `slimefable-day-levels` 的 `placeable-actors.md`。
@@ -77,10 +82,10 @@ int32 PortalStyle = 1;
 ## 编辑器 Python
 
 - 脚本放 `Content/Python/`。
-- 需要编辑器子系统时，优先在已打开的编辑器内执行；无头批处理可用：
+- 需要编辑器子系统时：改代码场景下编辑器默认关着，用无头批处理；要 MCP 再主动开 GUI（路径见 [toolchain.md](toolchain.md)）。
 
-```text
-UnrealEditor-Cmd.exe SlimeFable.uproject -ExecutePythonScript="E:/UE/SlimeFable/Content/Python/create_day_levels.py" -unattended -nop4 -nullrhi -nosound
+```powershell
+& "D:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "E:\UE\SlimeFable\SlimeFable.uproject" -ExecutePythonScript="E:/UE/SlimeFable/Content/Python/create_day_levels.py" -unattended -nop4 -nullrhi -nosound
 ```
 
 与已开编辑器抢 GPU 时务必加 `-nullrhi`。

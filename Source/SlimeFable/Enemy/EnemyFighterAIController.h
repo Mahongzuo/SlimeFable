@@ -49,7 +49,11 @@ protected:
 	void TryPlayRandomIdleMontage();
 	void StopIdleMontage();
 	void PlayWalkAnim();
+	void PlayRunAnim();
+	void StopLocomotionAnim();
 	void ClearDirectWander();
+	void ApplyLocomotionMaxSpeed(bool bChasing);
+	void UpdateWalkPlayRate();
 	void TickCombat(float DeltaSeconds, float Dist);
 	void EnterTelegraph(int32 MoveIndex);
 	void TickTelegraph(float DeltaSeconds);
@@ -60,6 +64,7 @@ protected:
 	int32 FindMoveIndexById(FName MoveId) const;
 	void FacePlayer();
 	void RequestMoveToPreferred(float Dist);
+	void ResetChaseFallback();
 	void ClearTelegraphFx();
 
 	UPROPERTY(Transient)
@@ -76,7 +81,13 @@ protected:
 	bool bWasWanderMoving = false;
 	bool bDirectWander = false;
 	bool bPlayingWalk = false;
+	bool bPlayingRun = false;
 	FVector WanderDirectDest = FVector::ZeroVector;
+	float WanderStuckTime = 0.f;
+	FVector WanderLastPos = FVector::ZeroVector;
+	float ChaseStalledSeconds = 0.f;
+	FVector ChaseLastPos = FVector::ZeroVector;
+	bool bDirectChaseFallback = false;
 	TArray<float> MoveCooldowns;
 	TWeakObjectPtr<UNiagaraComponent> TelegraphFx;
 	TWeakObjectPtr<UAnimMontage> PlayingIdleMontage;

@@ -15,7 +15,8 @@ alwaysApply: true
 
 ## 硬约束（摘要）
 
-- 引擎 UE 5.8；默认地图 `/Game/Maps/Main`；日关卡 `/Game/Maps/Days/MM/MMDD`。
+- 引擎 UE 5.8，根目录 `D:\Program Files\Epic Games\UE_5.8`；UBT / 无头 / GUI 路径见 `.cursor/skills/slimefable-spec/references/toolchain.md`，不要满盘搜 `Build.bat`。
+- 改代码时编辑器默认关：C++ 走 UBT；刷资产走 `UnrealEditor-Cmd.exe`；MCP 需主动开 GUI 后 `StartServer 8010`。
 - MCP 使用 `http://127.0.0.1:8010/mcp`；Tool 串行调用，禁止并行叠 MCP。
 - 批量日关卡用 `Content/Python/create_day_levels.py`，禁止 MCP 逐关创建 366 张图。
 - UI 遵循 `slimefable-ui`：土色 NPR 底、墨迹按钮、Marker+KuaiLe 字体，禁用 Halftone 霓虹默认皮。

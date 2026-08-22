@@ -22,6 +22,7 @@
 #include "SlimeDevourComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeFable.h"
+#include "SlimeMorphComponent.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "UI/SlimeElementWheelWidget.h"
@@ -174,6 +175,19 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		return;
 	}
 
+	// Lock all slime abilities while morphing or morphed. The unmorph key is polled by
+	// USlimeMorphComponent itself, because once the player possesses the morph body the slime
+	// has no controller and this function would bail out at the check above.
+	// NOTE: an open morph wheel is handled by the hold logic at the bottom of this function
+	// (same pattern as Q/phantom wheel in SlimeCombatComponent) — no early return for it.
+	if (const USlimeMorphComponent* MorphComp = GetOwner() ? GetOwner()->FindComponentByClass<USlimeMorphComponent>() : nullptr)
+	{
+		if (MorphComp->IsMorphing() || MorphComp->IsMorphed())
+		{
+			return;
+		}
+	}
+
 	const USlimeInputSettings* InputSettings = nullptr;
 	if (const UWorld* World = GetWorld())
 	{
@@ -306,6 +320,45 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 				AdjustLaunchRange(Step);
 			}
 		}
+	}
+
+	// Morph (Z). Hold to open the morph wheel, release to commit. Short tap while morphed
+	// triggers unmorph. Same pattern as Q/phantom wheel in SlimeCombatComponent.
+	const bool bMorph = IsDown(ESlimeInputAction::Morph, EKeys::Z);
+	USlimeMorphComponent* MorphComp = GetOwner() ? GetOwner()->FindComponentByClass<USlimeMorphComponent>() : nullptr;
+	if (bMorph)
+	{
+		if (!bPollMorphDown)
+		{
+			bPollMorphDown = true;
+			MorphHoldSeconds = 0.f;
+			bMorphWheelOpenedThisHold = false;
+		}
+		MorphHoldSeconds += DeltaTime;
+		if (MorphComp && !bMorphWheelOpenedThisHold && MorphHoldSeconds >= MorphComp->MorphWheelHoldSeconds)
+		{
+			if (!bCombatLocked && !bPhantomWheelOpen)
+			{
+				if (MorphComp->TryOpenMorphWheel())
+				{
+					bMorphWheelOpenedThisHold = true;
+				}
+			}
+		}
+		if (MorphComp && bMorphWheelOpenedThisHold)
+		{
+			MorphComp->TickMorphWheelInput();
+		}
+	}
+	else if (bPollMorphDown)
+	{
+		bPollMorphDown = false;
+		if (MorphComp && bMorphWheelOpenedThisHold)
+		{
+			MorphComp->CloseMorphWheel(true);  // commit → BeginMorph
+		}
+		MorphHoldSeconds = 0.f;
+		bMorphWheelOpenedThisHold = false;
 	}
 
 	(void)DeltaTime;

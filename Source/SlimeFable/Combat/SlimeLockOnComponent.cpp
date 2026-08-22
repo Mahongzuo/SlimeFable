@@ -4,6 +4,9 @@
 
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -109,9 +112,13 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		bKeep = LockTarget->CanBeLockedOn();
 	}
-	if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+	if (const USlimeHealthComponent* CachedHealth = LockedHealth.Get())
 	{
-		bKeep = bKeep && Health->IsAlive();
+		bKeep = bKeep && CachedHealth->IsAlive();
+	}
+	else if (const USlimeHealthComponent* TargetHealth = Target->FindComponentByClass<USlimeHealthComponent>())
+	{
+		bKeep = bKeep && TargetHealth->IsAlive();
 	}
 	const float Dist = FVector::Dist(OwnerPawn->GetActorLocation(), Target->GetActorLocation());
 	if (!bKeep || Dist > BreakRange)
@@ -145,6 +152,7 @@ void USlimeLockOnComponent::ToggleLockOn()
 	if (AActor* Target = FindBestTarget())
 	{
 		LockedTarget = Target;
+		LockedHealth = Target->FindComponentByClass<USlimeHealthComponent>();
 		if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 		{
 			if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
@@ -163,6 +171,7 @@ void USlimeLockOnComponent::ToggleLockOn()
 void USlimeLockOnComponent::ClearLockOn()
 {
 	LockedTarget.Reset();
+	LockedHealth.Reset();
 	RestoreMovement();
 	RestoreCameraBoom();
 	if (APlayerController* PC = GetPlayerController())
@@ -224,14 +233,22 @@ AActor* USlimeLockOnComponent::FindBestTarget() const
 		ViewDir = ViewRot.Vector();
 	}
 
-	TArray<AActor*> Candidates;
-	UGameplayStatics::GetAllActorsWithInterface(World, USlimeLockTarget::StaticClass(), Candidates);
+	const FVector OwnerLoc = OwnerPawn->GetActorLocation();
+	TArray<FOverlapResult> Overlaps;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeLockOn), false, OwnerPawn);
+	World->OverlapMultiByObjectType(
+		Overlaps,
+		OwnerLoc,
+		FQuat::Identity,
+		FCollisionObjectQueryParams(ECC_Pawn),
+		FCollisionShape::MakeSphere(AcquireRange),
+		Params);
 
 	AActor* Best = nullptr;
 	float BestScore = -1.f;
-	const FVector OwnerLoc = OwnerPawn->GetActorLocation();
-	for (AActor* Candidate : Candidates)
+	for (const FOverlapResult& Overlap : Overlaps)
 	{
+		AActor* Candidate = Overlap.GetActor();
 		if (!Candidate || Candidate == OwnerPawn)
 		{
 			continue;

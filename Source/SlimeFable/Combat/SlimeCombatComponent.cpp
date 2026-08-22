@@ -24,6 +24,7 @@
 #include "SlimeHitProbe.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockOnComponent.h"
+#include "SlimeMorphComponent.h"
 #include "SlimeSkillProjectile.h"
 #include "Blueprint/UserWidget.h"
 #include "Settings/SlimeInputSettings.h"
@@ -50,6 +51,9 @@ void USlimeCombatComponent::BeginPlay()
 		Element = Owner->FindComponentByClass<USlimeElementComponent>();
 		Abilities = Owner->FindComponentByClass<USlimeAbilityComponent>();
 		LockOn = Owner->FindComponentByClass<USlimeLockOnComponent>();
+		Devour = Owner->FindComponentByClass<USlimeDevourComponent>();
+		Placement = Owner->FindComponentByClass<USlimePlacementComponent>();
+		Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>();
 	}
 
 	APawn* Pawn = Cast<APawn>(GetOwner());
@@ -188,7 +192,28 @@ FVector USlimeCombatComponent::GetAimForward() const
 	return FVector::ForwardVector;
 }
 
-AActor* USlimeCombatComponent::FindNearestHostile(float MaxRange) const
+AActor* USlimeCombatComponent::GetLockedRestrictTarget() const
+{
+	if (!LockOn || !LockOn->IsLockedOn())
+	{
+		return nullptr;
+	}
+	AActor* Target = LockOn->GetLockedTarget();
+	if (!Target)
+	{
+		return nullptr;
+	}
+	if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+	{
+		if (!Health->IsAlive())
+		{
+			return nullptr;
+		}
+	}
+	return Target;
+}
+
+AActor* USlimeCombatComponent::FindNearestHostile(float MaxRange, float MinFacingDot) const
 {
 	UWorld* World = GetWorld();
 	AActor* Owner = GetOwner();
@@ -198,6 +223,7 @@ AActor* USlimeCombatComponent::FindNearestHostile(float MaxRange) const
 	}
 
 	const FVector Origin = GetBlobOrigin();
+	const FVector Forward = GetAimForward();
 	TArray<FOverlapResult> Overlaps;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeSeekHostile), false, Owner);
 	World->OverlapMultiByObjectType(
@@ -220,6 +246,15 @@ AActor* USlimeCombatComponent::FindNearestHostile(float MaxRange) const
 		if (const USlimeHealthComponent* Health = Actor->FindComponentByClass<USlimeHealthComponent>())
 		{
 			if (!Health->IsAlive())
+			{
+				continue;
+			}
+		}
+		if (MinFacingDot > -1.f)
+		{
+			FVector ToTarget = Actor->GetActorLocation() - Origin;
+			ToTarget.Z = 0.f;
+			if (ToTarget.IsNearlyZero() || FVector::DotProduct(Forward, ToTarget.GetSafeNormal()) < MinFacingDot)
 			{
 				continue;
 			}
@@ -266,7 +301,11 @@ FVector USlimeCombatComponent::ResolveGroundPoint(float ForwardCm) const
 
 FVector USlimeCombatComponent::ResolveFinisherLocation(float SeekRange) const
 {
-	if (AActor* Target = FindNearestHostile(SeekRange))
+	if (AActor* Locked = GetLockedRestrictTarget())
+	{
+		return Locked->GetActorLocation();
+	}
+	if (AActor* Target = FindNearestHostile(SeekRange, 0.25f))
 	{
 		return Target->GetActorLocation();
 	}
@@ -275,6 +314,11 @@ FVector USlimeCombatComponent::ResolveFinisherLocation(float SeekRange) const
 
 FVector USlimeCombatComponent::ResolveSkillHitOrigin(const FSlimeSkillDef& Def) const
 {
+	if (AActor* Locked = GetLockedRestrictTarget())
+	{
+		return Locked->GetActorLocation();
+	}
+
 	const bool bTargetedStrike =
 		(Def.Element == ESlimeElement::Lightning && Def.Exec == ESlimeSkillExec::AoE
 			&& (Def.Slot == ESlimeSkillSlot::Skill1 || Def.Slot == ESlimeSkillSlot::Skill3))
@@ -283,19 +327,12 @@ FVector USlimeCombatComponent::ResolveSkillHitOrigin(const FSlimeSkillDef& Def) 
 
 	if (bTargetedStrike)
 	{
-		return ResolveFinisherLocation(1000.f);
+		return ResolveFinisherLocation(FinisherSeekRange);
 	}
 
 	if (Def.Exec == ESlimeSkillExec::AoE)
 	{
-		if (LockOn && LockOn->IsLockedOn())
-		{
-			if (AActor* Target = LockOn->GetLockedTarget())
-			{
-				return Target->GetActorLocation();
-			}
-		}
-		if (AActor* Near = FindNearestHostile(FMath::Max(Def.Hit.Radius, 400.f)))
+		if (AActor* Near = FindNearestHostile(FMath::Max(Def.Hit.Radius, 400.f), 0.15f))
 		{
 			return Near->GetActorLocation();
 		}
@@ -315,22 +352,13 @@ bool USlimeCombatComponent::CanStartAction() const
 	{
 		return false;
 	}
-	if (const AActor* Owner = GetOwner())
+	if (Devour && (Devour->IsCombatLocked() || Devour->IsPhantomWheelOpen()))
 	{
-		if (const USlimeDevourComponent* Devour = Owner->FindComponentByClass<USlimeDevourComponent>())
-		{
-			if (Devour->IsCombatLocked() || Devour->IsPhantomWheelOpen())
-			{
-				return false;
-			}
-		}
-		if (const USlimePlacementComponent* Placement = Owner->FindComponentByClass<USlimePlacementComponent>())
-		{
-			if (Placement->IsPlacing())
-			{
-				return false;
-			}
-		}
+		return false;
+	}
+	if (Placement && Placement->IsPlacing())
+	{
+		return false;
 	}
 	return true;
 }
@@ -377,6 +405,15 @@ void USlimeCombatComponent::PollCombatKeys(float DeltaTime)
 		return;
 	}
 
+	// Lock combat inputs while a morph sequence is running or the player is morphed.
+	if (USlimeMorphComponent* MorphComp = GetOwner() ? GetOwner()->FindComponentByClass<USlimeMorphComponent>() : nullptr)
+	{
+		if (MorphComp->IsMorphing() || MorphComp->IsMorphed())
+		{
+			return;
+		}
+	}
+
 	const USlimeInputSettings* InputSettings = nullptr;
 	if (const UWorld* World = GetWorld())
 	{
@@ -408,14 +445,11 @@ void USlimeCombatComponent::PollCombatKeys(float DeltaTime)
 		TryComboAttack();
 	}
 
-	USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr;
+	USlimeDevourComponent* DevourComp = Devour.Get();
 	bool bBlockSkill1Hold = false;
-	if (const AActor* Owner = GetOwner())
+	if (Vehicle && Vehicle->IsUsingVehicle())
 	{
-		if (const USlimeVehicleComponent* Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>())
-		{
-			bBlockSkill1Hold = Vehicle->IsUsingVehicle();
-		}
+		bBlockSkill1Hold = true;
 	}
 	if (Abilities && (Abilities->IsWheelOpen() || Abilities->IsChargingLaunch()))
 	{
@@ -432,24 +466,24 @@ void USlimeCombatComponent::PollCombatKeys(float DeltaTime)
 			bPhantomWheelOpenedThisHold = false;
 		}
 		Skill1HoldSeconds += DeltaTime;
-		if (Devour && !bPhantomWheelOpenedThisHold && Skill1HoldSeconds >= Devour->PhantomWheelHoldSeconds)
+		if (DevourComp && !bPhantomWheelOpenedThisHold && Skill1HoldSeconds >= DevourComp->PhantomWheelHoldSeconds)
 		{
-			if (Devour->TryOpenPhantomWheel())
+			if (DevourComp->TryOpenPhantomWheel())
 			{
 				bPhantomWheelOpenedThisHold = true;
 			}
 		}
-		if (Devour && bPhantomWheelOpenedThisHold)
+		if (DevourComp && bPhantomWheelOpenedThisHold)
 		{
-			Devour->TickPhantomWheelInput();
+			DevourComp->TickPhantomWheelInput();
 		}
 	}
 	else if (bPollSkill1Down)
 	{
 		bPollSkill1Down = false;
-		if (Devour && bPhantomWheelOpenedThisHold)
+		if (DevourComp && bPhantomWheelOpenedThisHold)
 		{
-			Devour->ClosePhantomWheel(true);
+			DevourComp->ClosePhantomWheel(true);
 		}
 		else
 		{
@@ -476,15 +510,12 @@ float USlimeCombatComponent::GetSkill1HoldFraction() const
 		return 0.f;
 	}
 	float Hold = 0.35f;
-	if (const AActor* Owner = GetOwner())
+	if (const USlimeDevourComponent* DevourComp = Devour.Get())
 	{
-		if (const USlimeDevourComponent* Devour = Owner->FindComponentByClass<USlimeDevourComponent>())
+		Hold = FMath::Max(DevourComp->PhantomWheelHoldSeconds, 0.05f);
+		if (DevourComp->GetPhantomSlotCount() <= 0)
 		{
-			Hold = FMath::Max(Devour->PhantomWheelHoldSeconds, 0.05f);
-			if (Devour->GetPhantomSlotCount() <= 0)
-			{
-				return 0.f;
-			}
+			return 0.f;
 		}
 	}
 	return FMath::Clamp(Skill1HoldSeconds / Hold, 0.f, 1.f);
@@ -532,15 +563,9 @@ bool USlimeCombatComponent::TrySkill(ESlimeSkillSlot Slot)
 	{
 		return false;
 	}
-	if (const AActor* Owner = GetOwner())
+	if (Vehicle && Vehicle->IsUsingVehicle())
 	{
-		if (const USlimeVehicleComponent* Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>())
-		{
-			if (Vehicle->IsUsingVehicle())
-			{
-				return false;
-			}
-		}
+		return false;
 	}
 	if (!CanStartAction())
 	{
@@ -680,7 +705,7 @@ bool USlimeCombatComponent::StartAction(const FSlimeSkillDef& Def, bool bFromCom
 		ApplyComboLunge();
 		if (Def.Slot == ESlimeSkillSlot::Combo4)
 		{
-			ActiveHitOrigin = ResolveFinisherLocation(1000.f);
+			ActiveHitOrigin = ResolveFinisherLocation(FinisherSeekRange);
 			bUseExplicitHitOrigin = true;
 		}
 	}
@@ -759,7 +784,19 @@ void USlimeCombatComponent::ApplyComboLunge()
 	const FVector Origin = GetBlobOrigin();
 	ComboLungeDistance = ActiveDef.DashDistance > 0.f ? ActiveDef.DashDistance : 100.f;
 
-	if (AActor* Near = FindNearestHostile(300.f))
+	if (AActor* Locked = GetLockedRestrictTarget())
+	{
+		FVector ToEnemy = Locked->GetActorLocation() - Origin;
+		ToEnemy.Z = 0.f;
+		const float Dist = ToEnemy.Size();
+		if (!ToEnemy.IsNearlyZero() && Dist <= ComboLungeSeekRange)
+		{
+			ActiveForward = ToEnemy.GetSafeNormal();
+			ActiveAim = (Locked->GetActorLocation() + FVector(0.f, 0.f, 30.f) - Origin).GetSafeNormal();
+			ComboLungeDistance = FMath::Clamp(Dist * 0.55f, 90.f, 120.f);
+		}
+	}
+	else if (AActor* Near = FindNearestHostile(ComboLungeSeekRange, 0.15f))
 	{
 		FVector ToEnemy = Near->GetActorLocation() - Origin;
 		ToEnemy.Z = 0.f;
@@ -847,6 +884,7 @@ void USlimeCombatComponent::FireHit()
 		? ActiveHitOrigin
 		: USlimeHitProbe::ResolveOrigin(GetOwner(), ActiveDef.Hit, ActiveForward);
 	int32 Hits = 0;
+	AActor* Restrict = (ActiveDef.Exec == ESlimeSkillExec::AoE) ? nullptr : GetLockedRestrictTarget();
 	if (ActiveDef.Exec == ESlimeSkillExec::Chain)
 	{
 		ExecuteChain(ActiveDef, Origin, ActiveForward);
@@ -863,7 +901,7 @@ void USlimeCombatComponent::FireHit()
 			HitDef.Hit.OriginForwardOffset = 0.f;
 			HitDef.Hit.Radius = FMath::Max(HitDef.Hit.Radius, 100.f);
 		}
-		Hits = USlimeHitProbe::PerformHit(GetOwner(), HitDef, Origin, ActiveForward, AlreadyHit);
+		Hits = USlimeHitProbe::PerformHit(GetOwner(), HitDef, Origin, ActiveForward, AlreadyHit, Restrict);
 	}
 	AwardResources(ActiveDef, Hits);
 }
@@ -907,16 +945,21 @@ void USlimeCombatComponent::ExecuteProjectile(const FSlimeSkillDef& Def, const F
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	if (ASlimeSkillProjectile* Projectile = World->SpawnActor<ASlimeSkillProjectile>(Origin, Aim.Rotation(), Params))
 	{
-		Projectile->InitProjectile(GetOwner(), Def, Aim * Def.ProjectileSpeed);
+		Projectile->InitProjectile(GetOwner(), Def, Aim * Def.ProjectileSpeed, GetLockedRestrictTarget());
 	}
 }
 
 void USlimeCombatComponent::ExecuteChain(const FSlimeSkillDef& Def, const FVector& Origin, const FVector& Forward)
 {
-	USlimeHitProbe::PerformHit(GetOwner(), Def, Origin, Forward, AlreadyHit);
+	AActor* Restrict = GetLockedRestrictTarget();
+	USlimeHitProbe::PerformHit(GetOwner(), Def, Origin, Forward, AlreadyHit, Restrict);
 
 	UWorld* World = GetWorld();
 	if (!World)
+	{
+		return;
+	}
+	if (Restrict && !bChainIgnoresLock)
 	{
 		return;
 	}

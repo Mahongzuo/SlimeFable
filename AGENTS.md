@@ -17,13 +17,14 @@ Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefab
 
 | 项 | 值 |
 |----|-----|
-| 引擎 | UE 5.8 |
+| 引擎 | UE 5.8（`D:\Program Files\Epic Games\UE_5.8`） |
 | 模块 | `SlimeFable` |
 | 默认地图 | `/Game/Maps/Main.Main` |
 | 日关卡 | `/Game/Maps/Days/MM/MMDD`（366，含 0229） |
 | 每日内容 | `/Game/_Slime/Days/MM/MMDD`（Quests / Actors / NPCs / Enemies / Audio / FX） |
 | Registry | `/Game/Data/DayLevels/DA_DayLevelRegistry` |
-| MCP | `http://127.0.0.1:8010/mcp`（见 `.mcp.json`） |
+| UBT | `D:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat`（完整命令见 spec `references/toolchain.md`） |
+| MCP | `http://127.0.0.1:8010/mcp`（见 `.mcp.json`；改代码时编辑器默认关，要 MCP 再开 GUI） |
 | 批量脚本 | `create_day_levels.py`（地图）/ `create_day_content_folders.py`（内容目录）/ `apply_operahouse_lobby.py`（共用剧院大厅；已套范围见 week-cycle） |
 
 ## Cursor 用法

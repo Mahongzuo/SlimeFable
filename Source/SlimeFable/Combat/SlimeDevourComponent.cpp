@@ -61,6 +61,10 @@ void USlimeDevourComponent::BeginPlay()
 	{
 		HoldSeconds = 1.2f;
 	}
+	if (FMath::IsNearlyEqual(DevourHealthThreshold, 0.1f, 0.001f))
+	{
+		DevourHealthThreshold = 0.2f;
+	}
 	if (FMath::IsNearlyEqual(LatchSeconds, 0.4f, 0.01f))
 	{
 		LatchSeconds = 0.9f;
@@ -160,7 +164,10 @@ bool USlimeDevourComponent::CanDevourTarget(const AEnemyCharacter* Enemy) const
 		return false;
 	}
 	const USlimeHealthComponent* Health = Enemy->GetEnemyHealth();
-	if (!Health || !Health->IsAlive() || Health->GetHealthPercent() > DevourHealthThreshold)
+	const float Threshold = Enemy->DevourHealthThreshold > KINDA_SMALL_NUMBER
+		? Enemy->DevourHealthThreshold
+		: DevourHealthThreshold;
+	if (!Health || !Health->IsAlive() || Health->GetHealthPercent() > Threshold)
 	{
 		return false;
 	}
@@ -1533,4 +1540,17 @@ bool USlimeDevourComponent::TryPhantom(int32 Slot)
 		SelectedPhantomSlot = 0;
 	}
 	return true;
+}
+
+void USlimeDevourComponent::ConsumePhantomSlot(int32 Slot)
+{
+	if (!PhantomSlots.IsValidIndex(Slot))
+	{
+		return;
+	}
+	PhantomSlots.RemoveAt(Slot);
+	if (SelectedPhantomSlot >= PhantomSlots.Num())
+	{
+		SelectedPhantomSlot = 0;
+	}
 }

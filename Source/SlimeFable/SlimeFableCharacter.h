@@ -92,5 +92,11 @@ public:
 
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+	/** Input action accessors (used by the morph system to copy bindings onto enemy pawns). */
+	UInputAction* GetMoveAction() const { return MoveAction; }
+	UInputAction* GetLookAction() const { return LookAction; }
+	UInputAction* GetMouseLookAction() const { return MouseLookAction; }
+	UInputAction* GetJumpAction() const { return JumpAction; }
 };
 

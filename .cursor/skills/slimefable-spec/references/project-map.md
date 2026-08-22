@@ -4,13 +4,13 @@
 
 | 路径 | 说明 |
 |------|------|
-| `SlimeFable.uproject` | UE 5.8 工程；模块 `SlimeFable` |
+| `SlimeFable.uproject` | UE 5.8 工程；模块 `SlimeFable`；引擎根 `D:\Program Files\Epic Games\UE_5.8` |
 | `Source/SlimeFable/` | 游戏 C++ |
 | `Content/` | 资产（地图、蓝图、模板变体） |
 | `Config/` | 默认 ini（含 GameplayTags、AssetManager） |
 | `Content/Python/` | 编辑器批处理脚本 |
 | `.mcp.json` | Cursor → Unreal MCP（8010） |
-| `.cursor/skills/` | 本仓库 Agent Skills |
+| `.cursor/skills/` | 本仓库 Agent Skills（工具链路径：`slimefable-spec/references/toolchain.md`） |
 | `.cursor/rules/` | alwaysApply 等规则 |
 | `AGENTS.md` | 任意 agent 的入口说明 |
 

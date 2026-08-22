@@ -1172,9 +1172,12 @@ void USlimeBodyComponent::PushMeshSection()
 		// Hidden from view; only casts a ground shadow. Create/Update can reset flags.
 		ShadowMesh->SetHiddenInGame(true);
 		ShadowMesh->SetVisibility(false);
-		ShadowMesh->bCastHiddenShadow = true;
-		ShadowMesh->SetCastShadow(true);
-		ShadowMesh->bCastDynamicShadow = true;
+		// Honour the suppression flag: while morphed the slime is parked out of the world and
+		// must not keep stamping a shadow on the ground where the morph started.
+		const bool bShouldCast = !bShadowCastSuppressed;
+		ShadowMesh->bCastHiddenShadow = bShouldCast;
+		ShadowMesh->SetCastShadow(bShouldCast);
+		ShadowMesh->bCastDynamicShadow = bShouldCast;
 		ShadowMesh->bCastVolumetricTranslucentShadow = false;
 		ShadowMesh->bCastContactShadow = false;
 	}
@@ -1349,6 +1352,26 @@ void USlimeBodyComponent::SetClingVisual(bool bInCling, const FVector& Point, co
 void USlimeBodyComponent::SuppressHeightSqueeze(float Duration)
 {
 	HeightSqueezeSuppressRemaining = FMath::Max(HeightSqueezeSuppressRemaining, Duration);
+}
+
+void USlimeBodyComponent::SetShadowCastSuppressed(bool bSuppressed)
+{
+	if (bShadowCastSuppressed == bSuppressed)
+	{
+		return;
+	}
+	bShadowCastSuppressed = bSuppressed;
+
+	// Apply immediately — the next surface rebuild would otherwise be a frame late, and if the
+	// body has stopped rebuilding it would never arrive at all.
+	if (ShadowMesh)
+	{
+		const bool bShouldCast = !bShadowCastSuppressed;
+		ShadowMesh->bCastHiddenShadow = bShouldCast;
+		ShadowMesh->SetCastShadow(bShouldCast);
+		ShadowMesh->bCastDynamicShadow = bShouldCast;
+		ShadowMesh->MarkRenderStateDirty();
+	}
 }
 
 void USlimeBodyComponent::ResetBody()

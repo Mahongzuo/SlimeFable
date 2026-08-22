@@ -125,6 +125,10 @@ struct SLIMEFABLE_API FEnemySkillDef
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Move", meta = (ClampMin = "0.0", Units = "cm"))
 	float DashDistance = 0.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Move",
+		meta = (ToolTip = "勾选后冲刺允许离地（LaunchCharacter，不覆盖竖直速度）。默认关：地面冲刺保持走路模式，不会飘起来。"))
+	bool bAirDash = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Projectile", meta = (ClampMin = "0.0", Units = "cm/s"))
 	float ProjectileSpeed = 1600.f;
 

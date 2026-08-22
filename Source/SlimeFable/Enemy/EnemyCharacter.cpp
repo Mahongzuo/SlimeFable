@@ -20,6 +20,13 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraComponent.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputActionValue.h"
+#include "SlimeFableCharacter.h"
+#include "Slime/SlimeMorphComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "NiagaraFunctionLibrary.h"
@@ -199,6 +206,20 @@ void AEnemyCharacter::ApplyHealthBarOffset()
 
 void AEnemyCharacter::RefreshWorldHealthBarVisibility()
 {
+	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+	AActor* Locked = nullptr;
+	if (Player)
+	{
+		if (const USlimeLockOnComponent* Lock = Player->FindComponentByClass<USlimeLockOnComponent>())
+		{
+			Locked = Lock->GetLockedTarget();
+		}
+	}
+	RefreshWorldHealthBarVisibility(Player, Locked);
+}
+
+void AEnemyCharacter::RefreshWorldHealthBarVisibility(const APawn* Player, const AActor* LockedTarget)
+{
 	if (!HealthBar)
 	{
 		return;
@@ -206,7 +227,7 @@ void AEnemyCharacter::RefreshWorldHealthBarVisibility()
 
 	ApplyHealthBarOffset();
 
-	if (bDevourLocked || bDevouredDeath)
+	if (bDevourLocked || bDevouredDeath || bDeathSequence)
 	{
 		HealthBar->SetHiddenInGame(true);
 		HealthBar->SetVisibility(false);
@@ -216,11 +237,11 @@ void AEnemyCharacter::RefreshWorldHealthBarVisibility()
 	bool bShow = Health && Health->IsAlive()
 		&& Presence != EEnemyPresence::Sleep
 		&& Presence != EEnemyPresence::Despawned
-		&& !USlimeLockOnComponent::IsLockedByLocalPlayer(this, this);
+		&& LockedTarget != this;
 
 	if (bShow)
 	{
-		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+		if (Player)
 		{
 			bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
 				<= FMath::Square(HealthBarVisibleRange);
@@ -238,8 +259,33 @@ void AEnemyCharacter::RefreshWorldHealthBarVisibility()
 void AEnemyCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	RefreshWorldHealthBarVisibility();
+	if (bMorphTarget)
+	{
+		UpdateMorphSafeTransform();
+		return;
+	}
 	TickOutOfCombatReset(DeltaSeconds);
+}
+
+void AEnemyCharacter::UpdateMorphSafeTransform()
+{
+	if (!bMorphTarget)
+	{
+		return;
+	}
+
+	const UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (!Move || !Move->IsMovingOnGround())
+	{
+		return;
+	}
+
+	const FTransform CurrentTransform = GetActorTransform();
+	if (!CurrentTransform.GetLocation().ContainsNaN())
+	{
+		MorphSafeTransform = CurrentTransform;
+		bHasMorphSafeTransform = true;
+	}
 }
 
 bool AEnemyCharacter::IsInCombat() const
@@ -253,6 +299,25 @@ void AEnemyCharacter::OnRestoredToSpawn()
 
 void AEnemyCharacter::FellOutOfWorld(const UDamageType& DmgType)
 {
+	if (bMorphTarget && Health && Health->IsAlive())
+	{
+		const FTransform RecoveryTransform = bHasMorphSafeTransform ? MorphSafeTransform : SpawnTransform;
+		if (UCharacterMovementComponent* Move = GetCharacterMovement())
+		{
+			Move->StopMovementImmediately();
+			Move->Velocity = FVector::ZeroVector;
+		}
+		TeleportTo(RecoveryTransform.GetLocation(), RecoveryTransform.Rotator(), false, true);
+
+		if (USlimeMorphComponent* MorphComp = MorphMaster.Get()
+				? MorphMaster->FindComponentByClass<USlimeMorphComponent>()
+				: nullptr)
+		{
+			MorphComp->ForceUnmorph(false);
+		}
+		return;
+	}
+
 	if (Health && Health->IsAlive())
 	{
 		RestoreToSpawn();
@@ -297,6 +362,11 @@ void AEnemyCharacter::RestoreToSpawn()
 
 void AEnemyCharacter::TickOutOfCombatReset(float DeltaSeconds)
 {
+	if (bMorphTarget)
+	{
+		return;
+	}
+
 	if (Health && !Health->IsAlive())
 	{
 		return;
@@ -339,10 +409,15 @@ void AEnemyCharacter::TickOutOfCombatReset(float DeltaSeconds)
 void AEnemyCharacter::BeginPlay()
 {
 	SpawnTransform = GetActorTransform();
+	if (bMorphTarget)
+	{
+		MorphSafeTransform = SpawnTransform;
+		bHasMorphSafeTransform = true;
+	}
 
 	if (Health)
 	{
-		Health->Team = bPhantomInstance ? ESlimeTeam::Player : ESlimeTeam::Enemy;
+		Health->Team = (bPhantomInstance || bMorphTarget) ? ESlimeTeam::Player : ESlimeTeam::Enemy;
 		Health->bDestroyOnDeath = false;
 		Health->bRegenOnDeath = false;
 		Health->MaxHP = MaxHP;
@@ -400,6 +475,10 @@ void AEnemyCharacter::BeginPlay()
 			HealthBar->SetVisibility(false);
 			HealthBar->SetHiddenInGame(true);
 		}
+		else
+		{
+			RefreshWorldHealthBarVisibility();
+		}
 	}
 
 	if (bPhantomInstance)
@@ -411,12 +490,15 @@ void AEnemyCharacter::BeginPlay()
 				PhantomLifeTimer, this, &AEnemyCharacter::BeginPhantomExpire, FMath::Max(PhantomLifeSeconds, 0.2f), false);
 		}
 	}
-	else if (UWorld* World = GetWorld())
+	else if (!bMorphTarget)
 	{
-		if (UEnemyPresenceSubsystem* PresenceSys = World->GetSubsystem<UEnemyPresenceSubsystem>())
+		if (UWorld* World = GetWorld())
 		{
-			PresenceSys->RegisterEnemy(this);
-			bPresenceRegistered = true;
+			if (UEnemyPresenceSubsystem* PresenceSys = World->GetSubsystem<UEnemyPresenceSubsystem>())
+			{
+				PresenceSys->RegisterEnemy(this);
+				bPresenceRegistered = true;
+			}
 		}
 	}
 
@@ -534,6 +616,35 @@ void AEnemyCharacter::ApplyPlaceholderVisual()
 	}
 }
 
+void AEnemyCharacter::FitCapsuleToMesh()
+{
+	if (!bAutoFitCapsuleToMesh)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Skel = GetMesh();
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!Skel || !Capsule)
+	{
+		return;
+	}
+	USkeletalMesh* MeshAsset = Skel->GetSkeletalMeshAsset();
+	if (!MeshAsset)
+	{
+		return;
+	}
+
+	const FBoxSphereBounds Bounds = MeshAsset->GetBounds();
+	const float Height = FMath::Max(Bounds.BoxExtent.Z * 2.f, 80.f);
+	const float Radius = FMath::Clamp(FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y), 18.f, 80.f);
+	const float HalfHeight = FMath::Clamp(Height * 0.5f, Radius + 8.f, 180.f);
+	Capsule->SetCapsuleSize(Radius, HalfHeight);
+	FVector Rel = Skel->GetRelativeLocation();
+	Rel.Z = -HalfHeight;
+	Skel->SetRelativeLocation(Rel);
+	bHudAnchorCached = false;
+}
+
 void AEnemyCharacter::RebuildMeshParts()
 {
 	ClearGeneratedParts();
@@ -606,6 +717,7 @@ void AEnemyCharacter::RebuildMeshParts()
 	}
 
 	ApplyPlaceholderVisual();
+	FitCapsuleToMesh();
 }
 
 bool AEnemyCharacter::CanBeLockedOn() const
@@ -777,7 +889,23 @@ void AEnemyCharacter::HandleDied()
 	{
 		return;
 	}
+
+	// Morph target death: force the slime back without killing it. The morph component
+	// owns the unpossess + cleanup; we must not run the normal death dissolve because the
+	// player controller is still on this pawn and needs to be handed back first.
+	if (bMorphTarget)
+	{
+		if (USlimeMorphComponent* MorphComp = MorphMaster.Get()
+				? MorphMaster->FindComponentByClass<USlimeMorphComponent>()
+				: nullptr)
+		{
+			MorphComp->ForceUnmorph(true);
+		}
+		return;
+	}
+
 	bDeathSequence = true;
+	SetActorTickEnabled(false);
 
 	if (UWorld* World = GetWorld())
 	{
@@ -810,6 +938,7 @@ void AEnemyCharacter::HandleDied()
 	if (AController* AI = GetController())
 	{
 		AI->StopMovement();
+		AI->SetActorTickEnabled(false);
 		if (AAIController* AIC = Cast<AAIController>(AI))
 		{
 			if (UBrainComponent* Brain = AIC->GetBrainComponent())
@@ -897,7 +1026,6 @@ void AEnemyCharacter::PlayDeathMontageThenDissolve()
 {
 	UAnimMontage* Montage = DeathMontage.LoadSynchronous();
 	USkeletalMeshComponent* Skel = GetMesh();
-	UAnimInstance* Anim = Skel ? Skel->GetAnimInstance() : nullptr;
 	if (Montage && UsesSingleNodeAnims())
 	{
 		PlayMeshAnimation(Montage, false);
@@ -906,42 +1034,47 @@ void AEnemyCharacter::PlayDeathMontageThenDissolve()
 			World->GetTimerManager().SetTimer(
 				DeathMontageFallbackTimer,
 				this,
-				&AEnemyCharacter::StartDeathDissolve,
+				&AEnemyCharacter::FreezeDeathPoseAndDissolve,
 				Montage->GetPlayLength() + 0.05f,
 				false);
 		}
 		return;
 	}
-	if (Montage && Anim)
+	if (Montage && Skel)
 	{
-		const float Played = Anim->Montage_Play(Montage);
-		FOnMontageBlendingOutStarted BlendOut;
-		BlendOut.BindUObject(this, &AEnemyCharacter::HandleDeathMontageEnded);
-		Anim->Montage_SetBlendingOutDelegate(BlendOut, Montage);
-		if (UWorld* World = GetWorld())
+		if (UAnimInstance* Anim = Skel->GetAnimInstance())
 		{
-			const float Wait = FMath::Max(Played, Montage->GetPlayLength()) + 0.05f;
-			World->GetTimerManager().SetTimer(
-				DeathMontageFallbackTimer,
-				this,
-				&AEnemyCharacter::StartDeathDissolve,
-				Wait,
-				false);
+			const float Played = Anim->Montage_Play(Montage);
+			const float BlendOut = Montage->GetDefaultBlendOutTime();
+			const float Wait = FMath::Max((Played > 0.f ? Played : Montage->GetPlayLength()) - BlendOut - 0.03f, 0.08f);
+			if (UWorld* World = GetWorld())
+			{
+				World->GetTimerManager().SetTimer(
+					DeathMontageFallbackTimer,
+					this,
+					&AEnemyCharacter::FreezeDeathPoseAndDissolve,
+					Wait,
+					false);
+			}
+			return;
 		}
-		return;
 	}
 	StartDeathDissolve();
 }
 
-void AEnemyCharacter::HandleDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+void AEnemyCharacter::FreezeDeathPoseAndDissolve()
 {
-	if (UAnimInstance* Anim = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	if (USkeletalMeshComponent* Skel = GetMesh())
 	{
-		if (Montage)
+		if (UAnimInstance* Anim = Skel->GetAnimInstance())
 		{
-			Anim->Montage_Pause(Montage);
-			Anim->Montage_SetPosition(Montage, Montage->GetPlayLength());
+			if (UAnimMontage* Montage = DeathMontage.Get())
+			{
+				Anim->Montage_Pause(Montage);
+				Anim->Montage_SetPosition(Montage, Montage->GetPlayLength());
+			}
 		}
+		Skel->bPauseAnims = true;
 	}
 	StartDeathDissolve();
 }
@@ -959,18 +1092,37 @@ void AEnemyCharacter::StartDeathDissolve()
 
 	if (UNiagaraSystem* FX = DeathDissolveNiagara.LoadSynchronous())
 	{
-		const FVector Head = GetMesh()
-			? GetMesh()->GetSocketLocation(TEXT("head"))
-			: GetActorLocation() + FVector(0.f, 0.f, 90.f);
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, FX, Head, GetActorRotation());
+		FVector FxLoc = GetVisualBoundsCenter();
+		if (USkeletalMeshComponent* Skel = GetMesh())
+		{
+			static const FName HeadSocket(TEXT("head"));
+			if (Skel->DoesSocketExist(HeadSocket))
+			{
+				FxLoc = Skel->GetSocketLocation(HeadSocket);
+			}
+		}
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, FX, FxLoc, GetActorRotation());
 	}
 
 	if (UMaterialInterface* DissolveMat = DeathDissolveMaterial.LoadSynchronous())
 	{
 		if (USkeletalMeshComponent* Skel = GetMesh())
 		{
-			Skel->SetOverlayMaterial(DissolveMat);
+			DeathDissolveMID = UMaterialInstanceDynamic::Create(DissolveMat, this);
+			if (DeathDissolveMID)
+			{
+				Skel->SetOverlayMaterial(DeathDissolveMID);
+			}
+			else
+			{
+				Skel->SetOverlayMaterial(DissolveMat);
+			}
 		}
+	}
+
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		Skel->bPauseAnims = true;
 	}
 
 	DeathDissolveElapsed = 0.01f;
@@ -998,7 +1150,31 @@ void AEnemyCharacter::TickDeathDissolve()
 
 void AEnemyCharacter::ApplyDeathDissolveVisual(float Alpha)
 {
-	auto FadeMesh = [Alpha](UMeshComponent* Comp)
+	auto HasScalar = [](UMaterialInterface* Mat, FName ParamName) -> bool
+	{
+		if (!Mat)
+		{
+			return false;
+		}
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		Mat->GetAllScalarParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			if (Info.Name == ParamName)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	if (DeathDissolveMID)
+	{
+		DeathDissolveMID->SetScalarParameterValue(TEXT("DissolveAmount"), 1.f - Alpha);
+	}
+
+	auto FadeMesh = [Alpha, &HasScalar](UMeshComponent* Comp)
 	{
 		if (!Comp)
 		{
@@ -1012,6 +1188,10 @@ void AEnemyCharacter::ApplyDeathDissolveVisual(float Alpha)
 			{
 				continue;
 			}
+			if (!HasScalar(Base, TEXT("DissolveLine")) && !HasScalar(Base, TEXT("Opacity")))
+			{
+				continue;
+			}
 			UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Base);
 			if (!MID)
 			{
@@ -1019,8 +1199,14 @@ void AEnemyCharacter::ApplyDeathDissolveVisual(float Alpha)
 			}
 			if (MID)
 			{
-				MID->SetScalarParameterValue(TEXT("DissolveLine"), 1.f - Alpha);
-				MID->SetScalarParameterValue(TEXT("Opacity"), Alpha);
+				if (HasScalar(MID, TEXT("DissolveLine")))
+				{
+					MID->SetScalarParameterValue(TEXT("DissolveLine"), 1.f - Alpha);
+				}
+				if (HasScalar(MID, TEXT("Opacity")))
+				{
+					MID->SetScalarParameterValue(TEXT("Opacity"), Alpha);
+				}
 			}
 		}
 		Comp->SetVisibility(Alpha > 0.05f);
@@ -1153,11 +1339,14 @@ void AEnemyCharacter::SetEnemyPresence(EEnemyPresence NewPresence)
 		if (bSleeping)
 		{
 			Move->StopMovementImmediately();
-			Move->DisableMovement();
+			if (!Move->IsFalling())
+			{
+				Move->DisableMovement();
+			}
 		}
 		else
 		{
-			Move->SetMovementMode(MOVE_Walking);
+			Move->SetMovementMode(Move->IsFalling() ? MOVE_Falling : MOVE_Walking);
 		}
 	}
 
@@ -1212,6 +1401,140 @@ void AEnemyCharacter::InitAsPhantom(float LifeSeconds, AActor* Master)
 		Fighter->bWanderWhenIdle = false;
 		Fighter->LeashRange = 10000.f;
 		Fighter->DetectRange = 2000.f;
+	}
+}
+
+void AEnemyCharacter::InitAsMorphTarget(AActor* Master)
+{
+	bMorphTarget = true;
+	bDevourable = false;
+	MorphMaster = Master;
+
+	// No AI — the player will possess this pawn.
+	AutoPossessAI = EAutoPossessAI::Disabled;
+	AIControllerClass = nullptr;
+
+	// The presence subsystem may Destroy() enemies it considers far away. This pawn is the
+	// one the player is driving, so it must never be culled out from under them.
+	bAllowDespawn = false;
+
+	// Morph targets bypass every spawn-based enemy reset. Actual KillZ recovery uses their
+	// most recent grounded transform and unmorphs without consuming the capture.
+	bSuppressOutOfCombatReset = true;
+
+	// Player team so hostile enemies can damage the morph body.
+	if (Health)
+	{
+		Health->Team = ESlimeTeam::Player;
+		Health->bDestroyOnDeath = false;
+		Health->bRegenOnDeath = false;
+	}
+
+	// Match the slime's movement feel: orient to movement, not to controller yaw.
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->bOrientRotationToMovement = true;
+		Movement->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+	}
+
+	// Copy InputAction assets from the slime so Enhanced Input bindings work.
+	if (ASlimeFableCharacter* Slime = Cast<ASlimeFableCharacter>(Master))
+	{
+		MorphMoveAction = Slime->GetMoveAction();
+		MorphLookAction = Slime->GetLookAction();
+		MorphMouseLookAction = Slime->GetMouseLookAction();
+		MorphJumpAction = Slime->GetJumpAction();
+	}
+
+	// Temporary third-person camera (enemies don't have one by default).
+	MorphCameraBoom = NewObject<USpringArmComponent>(this, TEXT("MorphCameraBoom"));
+	MorphCameraBoom->SetupAttachment(RootComponent);
+	MorphCameraBoom->TargetArmLength = 300.f;
+	MorphCameraBoom->bUsePawnControlRotation = true;
+	MorphCameraBoom->RegisterComponent();
+
+	MorphFollowCamera = NewObject<UCameraComponent>(this, TEXT("MorphFollowCamera"));
+	MorphFollowCamera->SetupAttachment(MorphCameraBoom, USpringArmComponent::SocketName);
+	MorphFollowCamera->bUsePawnControlRotation = false;
+	MorphFollowCamera->RegisterComponent();
+
+	// Play an initial idle animation so single-node-anim enemies (e.g. watchdog) don't
+	// stand in T-pose or stuck in a prone pose when the morph body first appears.
+	if (UsesSingleNodeAnims())
+	{
+		if (const AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
+		{
+			if (Fighter->IdleMontages.Num() > 0)
+			{
+				if (UAnimMontage* Idle = Fighter->IdleMontages[0].LoadSynchronous())
+				{
+					PlayMeshAnimation(Idle, false);
+				}
+			}
+			else if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
+			{
+				// No idle montages — fall back to a looping walk so at least the model is posed standing.
+				PlayMeshAnimation(Walk, true);
+			}
+		}
+	}
+}
+
+void AEnemyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+	if (!bMorphTarget || !PlayerInputComponent)
+	{
+		return;
+	}
+
+	if (UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+	{
+		if (MorphJumpAction)
+		{
+			EnhancedInput->BindAction(MorphJumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+			EnhancedInput->BindAction(MorphJumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+		}
+		if (MorphMoveAction)
+		{
+			EnhancedInput->BindAction(MorphMoveAction, ETriggerEvent::Triggered, this, &AEnemyCharacter::MorphMove);
+		}
+		if (MorphMouseLookAction)
+		{
+			EnhancedInput->BindAction(MorphMouseLookAction, ETriggerEvent::Triggered, this, &AEnemyCharacter::MorphLook);
+		}
+		if (MorphLookAction)
+		{
+			EnhancedInput->BindAction(MorphLookAction, ETriggerEvent::Triggered, this, &AEnemyCharacter::MorphLook);
+		}
+	}
+}
+
+void AEnemyCharacter::MorphMove(const FInputActionValue& Value)
+{
+	const FVector2D MovementVector = Value.Get<FVector2D>();
+	if (GetController())
+	{
+		const FRotator Rotation = GetController()->GetControlRotation();
+		const FRotator YawRotation(0, Rotation.Yaw, 0);
+		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+		AddMovementInput(ForwardDirection, MovementVector.Y);
+		AddMovementInput(RightDirection, MovementVector.X);
+	}
+}
+
+void AEnemyCharacter::MorphLook(const FInputActionValue& Value)
+{
+	const FVector2D LookAxisVector = Value.Get<FVector2D>();
+	if (GetController())
+	{
+		AddControllerYawInput(LookAxisVector.X);
+		AddControllerPitchInput(LookAxisVector.Y);
 	}
 }
 

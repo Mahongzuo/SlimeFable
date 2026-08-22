@@ -64,6 +64,8 @@ void UEnemyPresenceSubsystem::ProcessHeartbeat()
 		return;
 	}
 	const FVector PlayerLoc = Player->GetActorLocation();
+	const USlimeLockOnComponent* Lock = Player->FindComponentByClass<USlimeLockOnComponent>();
+	AActor* LockedTarget = Lock ? Lock->GetLockedTarget() : nullptr;
 
 	Enemies.RemoveAll([](const TWeakObjectPtr<AEnemyCharacter>& Ptr) { return !Ptr.IsValid(); });
 
@@ -72,8 +74,6 @@ void UEnemyPresenceSubsystem::ProcessHeartbeat()
 		AEnemyCharacter* Enemy = nullptr;
 		float DistSq = 0.f;
 	};
-	TArray<FCandidate> Near;
-	Near.Reserve(Enemies.Num());
 
 	const int32 Count = Enemies.Num();
 	if (Count == 0)
@@ -82,12 +82,13 @@ void UEnemyPresenceSubsystem::ProcessHeartbeat()
 		return;
 	}
 
-	const int32 Batch = FMath::Max(1, (Count + 4) / 5);
-	for (int32 i = 0; i < Batch; ++i)
+	TArray<FCandidate> ActivePool;
+	ActivePool.Reserve(Count);
+
+	for (int32 Index = Enemies.Num() - 1; Index >= 0; --Index)
 	{
-		Cursor = (Cursor + 1) % Count;
-		AEnemyCharacter* Enemy = Enemies[Cursor].Get();
-		if (!Enemy)
+		AEnemyCharacter* Enemy = Enemies[Index].Get();
+		if (!Enemy || Enemy->IsInDeathSequence())
 		{
 			continue;
 		}
@@ -95,19 +96,8 @@ void UEnemyPresenceSubsystem::ProcessHeartbeat()
 		const float DistSq = FVector::DistSquared(PlayerLoc, Enemy->GetActorLocation());
 		EEnemyPresence Desired = EvaluatePresence(Enemy, DistSq, Enemy->GetEnemyPresence());
 
-		// Force Active while locked or mid-attack.
-		bool bForceActive = false;
-		if (Enemy->GetEnemyCombat() && Enemy->GetEnemyCombat()->IsAttacking())
-		{
-			bForceActive = true;
-		}
-		if (USlimeLockOnComponent* Lock = Player->FindComponentByClass<USlimeLockOnComponent>())
-		{
-			if (Lock->GetLockedTarget() == Enemy)
-			{
-				bForceActive = true;
-			}
-		}
+		const bool bForceActive = (Enemy->GetEnemyCombat() && Enemy->GetEnemyCombat()->IsAttacking())
+			|| (LockedTarget == Enemy);
 		if (bForceActive)
 		{
 			Desired = EEnemyPresence::Active;
@@ -126,57 +116,30 @@ void UEnemyPresenceSubsystem::ProcessHeartbeat()
 			Despawned.Add(Rec);
 			UnregisterEnemy(Enemy);
 			Enemy->Destroy();
-			if (Count > 0)
-			{
-				Cursor = Cursor % FMath::Max(Enemies.Num(), 1);
-			}
 			continue;
 		}
 
 		if (Desired == EEnemyPresence::Active)
 		{
-			Near.Add({Enemy, DistSq});
+			ActivePool.Add({Enemy, DistSq});
 		}
 		else
 		{
 			Enemy->SetEnemyPresence(Desired);
 		}
-	}
 
-	// Re-scan near candidates for budget among all currently wanting Active.
-	TArray<FCandidate> ActivePool;
-	for (const TWeakObjectPtr<AEnemyCharacter>& Weak : Enemies)
-	{
-		AEnemyCharacter* Enemy = Weak.Get();
-		if (!Enemy)
-		{
-			continue;
-		}
-		const float DistSq = FVector::DistSquared(PlayerLoc, Enemy->GetActorLocation());
-		const EEnemyPresence Eval = EvaluatePresence(Enemy, DistSq, Enemy->GetEnemyPresence());
-		if (Eval == EEnemyPresence::Active
-			|| (Enemy->GetEnemyCombat() && Enemy->GetEnemyCombat()->IsAttacking()))
-		{
-			ActivePool.Add({Enemy, DistSq});
-		}
-		else if (Eval != EEnemyPresence::Despawned)
-		{
-			Enemy->SetEnemyPresence(Eval);
-		}
+		Enemy->RefreshWorldHealthBarVisibility(Player, LockedTarget);
 	}
 
 	ActivePool.Sort([](const FCandidate& A, const FCandidate& B) { return A.DistSq < B.DistSq; });
 	for (int32 Index = 0; Index < ActivePool.Num(); ++Index)
 	{
 		AEnemyCharacter* Enemy = ActivePool[Index].Enemy;
-		if (Index < MaxActiveCombat)
+		if (!Enemy)
 		{
-			Enemy->SetEnemyPresence(EEnemyPresence::Active);
+			continue;
 		}
-		else
-		{
-			Enemy->SetEnemyPresence(EEnemyPresence::Idle);
-		}
+		Enemy->SetEnemyPresence(Index < MaxActiveCombat ? EEnemyPresence::Active : EEnemyPresence::Idle);
 	}
 
 	ProcessDespawnRecords(PlayerLoc);

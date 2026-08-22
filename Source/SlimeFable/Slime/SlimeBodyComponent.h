@@ -415,6 +415,17 @@ public:
 	/** Skip ceiling height-squeeze for a short time after mantling onto a lip. */
 	void SuppressHeightSqueeze(float Duration);
 
+	/**
+	 *  Stops the shadow proxy from casting. The proxy is hidden-in-game but casts anyway
+	 *  (bCastHiddenShadow), so hiding the owning actor is not enough — and the surface rebuild
+	 *  re-asserts the cast flags every frame, so the suppression has to live here.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void SetShadowCastSuppressed(bool bSuppressed);
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	bool IsShadowCastSuppressed() const { return bShadowCastSuppressed; }
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsClingingVisual() const { return bClingVisual; }
 
@@ -499,6 +510,7 @@ private:
 	bool bSpread = false;
 	bool bRecalling = false;
 	bool bClingVisual = false;
+	bool bShadowCastSuppressed = false;
 	bool bMeshSectionCreated = false;
 	bool bShadowMeshSectionCreated = false;
 	bool bXRayMeshSectionCreated = false;

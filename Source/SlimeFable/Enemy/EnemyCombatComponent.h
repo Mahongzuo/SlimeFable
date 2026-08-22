@@ -29,6 +29,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy|Combat")
 	bool IsAttacking() const { return bAttacking; }
 
+	/** When true, Tick polls player combat keys instead of waiting for AI. Set by the morph system. */
+	void SetPlayerMorphed(bool bIn) { bPlayerMorphed = bIn; }
+	bool IsPlayerMorphed() const { return bPlayerMorphed; }
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.0"))
 	float AttackPower = 12.f;
 
@@ -48,10 +52,14 @@ protected:
 	FVector GetMuzzleLocation() const;
 	float ResolveDamage(const FEnemySkillDef& Skill) const;
 
+	/** Player combat key polling while morphed (mirrors USlimeCombatComponent::PollCombatKeys). */
+	void PollPlayerCombatKeys(float DeltaTime);
+
 	FEnemySkillDef ActiveDef;
 	FVector ActiveForward = FVector::ForwardVector;
 	float ActionElapsed = 0.f;
 	bool bAttacking = false;
 	bool bHitFired = false;
+	bool bPlayerMorphed = false;
 	TSet<TWeakObjectPtr<AActor>> AlreadyHit;
 };

@@ -7,6 +7,8 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInterface.h"
@@ -114,7 +116,8 @@ bool USlimeHitProbe::GatherOverlaps(
 	const FSlimeHitSpec& Spec,
 	const FVector& Origin,
 	const FVector& Forward,
-	TArray<FOverlapResult>& OutOverlaps)
+	TArray<FOverlapResult>& OutOverlaps,
+	AActor* RestrictTarget)
 {
 	if (!World)
 	{
@@ -139,7 +142,8 @@ bool USlimeHitProbe::GatherOverlaps(
 			break;
 		}
 	case ESlimeHitShape::Sphere:
-		Shape = FCollisionShape::MakeSphere(FMath::Max(Spec.Radius + Spec.Range, 1.f));
+		QueryOrigin = Origin + Dir * (Spec.Range * 0.5f);
+		Shape = FCollisionShape::MakeSphere(FMath::Max(Spec.Radius + Spec.Range * 0.5f, 1.f));
 		break;
 	case ESlimeHitShape::Cone:
 	case ESlimeHitShape::ProjectileSweep:
@@ -170,6 +174,14 @@ bool USlimeHitProbe::GatherOverlaps(
 		Shape,
 		Params);
 
+	if (RestrictTarget && bHit)
+	{
+		OutOverlaps.RemoveAll([RestrictTarget](const FOverlapResult& Overlap)
+		{
+			return Overlap.GetActor() != RestrictTarget;
+		});
+	}
+
 	if (CVarSlimeHitDebug.GetValueOnGameThread() > 0)
 	{
 		const FColor Color = bHit ? FColor::Red : FColor::Yellow;
@@ -193,7 +205,21 @@ void USlimeHitProbe::ApplyToActor(
 	const FVector& HitLocation,
 	const FVector& Forward)
 {
-	const FVector Impulse = Forward.GetSafeNormal() * Skill.Knockback + FVector::UpVector * Skill.LaunchZ;
+	FVector Impulse = Forward.GetSafeNormal() * Skill.Knockback + FVector::UpVector * Skill.LaunchZ;
+	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Target))
+	{
+		Impulse *= (1.f - FMath::Clamp(Enemy->KnockbackResistance, 0.f, 1.f));
+	}
+	if (const ACharacter* Character = Cast<ACharacter>(Target))
+	{
+		if (const UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+		{
+			if (Movement->IsFalling())
+			{
+				Impulse.Z = 0.f;
+			}
+		}
+	}
 
 	float DamageAmount = Skill.Damage;
 	if (Instigator)
@@ -315,6 +341,7 @@ int32 USlimeHitProbe::PerformHit(
 	const FVector& Origin,
 	const FVector& Forward,
 	TSet<TWeakObjectPtr<AActor>>& AlreadyHit,
+	AActor* RestrictTarget,
 	TArray<FSlimeHitResult>* OutHits)
 {
 	if (!Instigator)
@@ -324,7 +351,7 @@ int32 USlimeHitProbe::PerformHit(
 
 	UWorld* World = Instigator->GetWorld();
 	TArray<FOverlapResult> Overlaps;
-	GatherOverlaps(World, Instigator, Skill.Hit, Origin, Forward, Overlaps);
+	GatherOverlaps(World, Instigator, Skill.Hit, Origin, Forward, Overlaps, RestrictTarget);
 
 	int32 Count = 0;
 	const FVector Dir = Forward.GetSafeNormal();
@@ -332,6 +359,10 @@ int32 USlimeHitProbe::PerformHit(
 	{
 		AActor* Target = Overlap.GetActor();
 		if (!Target || Target == Instigator || AlreadyHit.Contains(Target))
+		{
+			continue;
+		}
+		if (RestrictTarget && Target != RestrictTarget)
 		{
 			continue;
 		}

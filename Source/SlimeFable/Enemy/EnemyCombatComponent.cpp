@@ -5,13 +5,18 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "EnemyCharacter.h"
+#include "EnemyFighter.h"
 #include "EnemyProjectile.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeHitProbe.h"
+#include "Engine/GameInstance.h"
 
 UEnemyCombatComponent::UEnemyCombatComponent()
 {
@@ -32,6 +37,13 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			return;
 		}
 	}
+
+	// Player morph path: poll combat keys instead of waiting for AI.
+	if (bPlayerMorphed)
+	{
+		PollPlayerCombatKeys(DeltaTime);
+	}
+
 	if (bAttacking)
 	{
 		TickAction(DeltaTime);
@@ -215,12 +227,41 @@ void UEnemyCombatComponent::ExecuteDash(const FEnemySkillDef& Def, const FVector
 	{
 		return;
 	}
+	UCharacterMovementComponent* Move = Character->GetCharacterMovement();
+	if (!Move)
+	{
+		return;
+	}
 	const FVector Dir = Forward.GetSafeNormal2D();
 	if (Dir.IsNearlyZero())
 	{
 		return;
 	}
-	Character->LaunchCharacter(Dir * (Def.DashDistance / FMath::Max(Def.HitEnd - Def.HitStart, 0.08f)), true, true);
+
+	const float Duration = FMath::Max(Def.HitEnd - Def.HitStart, 0.08f);
+	const float DesiredSpeed = Def.DashDistance / Duration;
+	const float MaxDashSpeed = FMath::Max(Move->MaxWalkSpeed * 2.5f, 900.f);
+	const float Speed = FMath::Min(DesiredSpeed, MaxDashSpeed);
+
+	if (Def.bAirDash)
+	{
+		Character->LaunchCharacter(Dir * Speed, true, false);
+		return;
+	}
+
+	if (Move->IsFalling())
+	{
+		FVector Vel = Move->Velocity;
+		Vel.X = Dir.X * Speed;
+		Vel.Y = Dir.Y * Speed;
+		Move->Velocity = Vel;
+		return;
+	}
+
+	Move->SetMovementMode(MOVE_Walking);
+	FVector Vel = Dir * Speed;
+	Vel.Z = Move->Velocity.Z;
+	Move->Velocity = Vel;
 }
 
 void UEnemyCombatComponent::ExecuteProjectile(const FEnemySkillDef& Def, const FVector& Forward)
@@ -301,4 +342,76 @@ float UEnemyCombatComponent::ResolveDamage(const FEnemySkillDef& Skill) const
 		}
 	}
 	return FMath::Max(Skill.Damage + AttackPower * 0.35f, 0.f);
+}
+
+void UEnemyCombatComponent::PollPlayerCombatKeys(float DeltaTime)
+{
+	APlayerController* PC = nullptr;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const ACharacter* EnemyChar = Cast<ACharacter>(GetOwner()))
+		{
+			PC = Cast<APlayerController>(EnemyChar->GetController());
+		}
+		if (!PC)
+		{
+			PC = World->GetFirstPlayerController();
+		}
+	}
+	if (!PC)
+	{
+		return;
+	}
+
+	const USlimeInputSettings* InputSettings = nullptr;
+	if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		InputSettings = GI->GetSubsystem<USlimeInputSettings>();
+	}
+
+	auto WasPressed = [PC, InputSettings](ESlimeInputAction Action, const FKey& Fallback) -> bool
+	{
+		if (InputSettings)
+		{
+			return InputSettings->WasKeyPressed(PC, Action);
+		}
+		return PC->WasInputKeyJustPressed(Fallback);
+	};
+
+	// Resolve the move list from an EnemyFighter. Non-fighter enemies have no Moves array
+	// and simply cannot attack while morphed — that is acceptable for now.
+	const AEnemyFighter* Fighter = Cast<AEnemyFighter>(GetOwner());
+	if (!Fighter)
+	{
+		return;
+	}
+	const TArray<FEnemyMoveDef>& Moves = Fighter->GetMoves();
+	if (Moves.Num() == 0)
+	{
+		return;
+	}
+
+	// Left mouse = first move (basic attack).
+	if (WasPressed(ESlimeInputAction::Attack, EKeys::LeftMouseButton))
+	{
+		TryExecute(Moves[0].Skill);
+		return;
+	}
+
+	// Skill keys map to subsequent moves.
+	if (Moves.Num() > 1 && WasPressed(ESlimeInputAction::Skill1, EKeys::Q))
+	{
+		TryExecute(Moves[1].Skill);
+		return;
+	}
+	if (Moves.Num() > 2 && WasPressed(ESlimeInputAction::Skill2, EKeys::E))
+	{
+		TryExecute(Moves[2].Skill);
+		return;
+	}
+	if (Moves.Num() > 3 && WasPressed(ESlimeInputAction::Skill3, EKeys::R))
+	{
+		TryExecute(Moves[3].Skill);
+		return;
+	}
 }

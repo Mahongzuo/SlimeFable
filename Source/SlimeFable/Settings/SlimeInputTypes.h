@@ -32,6 +32,7 @@ enum class ESlimeInputAction : uint8
 	Hotbar4 UMETA(DisplayName = "放置品快捷1"),
 	Hotbar5 UMETA(DisplayName = "放置品快捷2"),
 	Hotbar6 UMETA(DisplayName = "放置品快捷3"),
+	Morph UMETA(DisplayName = "幻形"),
 	Dodge UMETA(DisplayName = "闪避"),
 	ShowCursor UMETA(DisplayName = "显示鼠标"),
 	COUNT UMETA(Hidden)

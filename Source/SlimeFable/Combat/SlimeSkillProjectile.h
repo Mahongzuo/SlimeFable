@@ -18,7 +18,7 @@ class SLIMEFABLE_API ASlimeSkillProjectile : public AActor
 public:
 	ASlimeSkillProjectile();
 
-	void InitProjectile(AActor* InInstigator, const FSlimeSkillDef& InSkill, const FVector& InVelocity);
+	void InitProjectile(AActor* InInstigator, const FSlimeSkillDef& InSkill, const FVector& InVelocity, AActor* InRestrictTarget = nullptr);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -46,4 +46,5 @@ protected:
 	bool bHoming = false;
 	TSet<TWeakObjectPtr<AActor>> AlreadyHit;
 	TWeakObjectPtr<AActor> Source;
+	TWeakObjectPtr<AActor> RestrictTarget;
 };

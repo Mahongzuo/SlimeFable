@@ -153,14 +153,20 @@ UDayQuestBook* UQuestSubsystem::ResolveBookForWorld(UWorld* World) const
 		return nullptr;
 	}
 	const FString Month = Day.Left(2);
+	const FString PackagePath = FString::Printf(
+		TEXT("/Game/_Slime/Days/%s/%s/Quests/DA_Quest_%s"),
+		*Month, *Day, *Day);
 	const FString Path = FString::Printf(
-		TEXT("/Game/_Slime/Days/%s/%s/Quests/DA_Quest_%s.DA_Quest_%s"),
-		*Month, *Day, *Day, *Day);
-	if (UDayQuestBook* Loaded = LoadObject<UDayQuestBook>(nullptr, *Path))
+		TEXT("%s.DA_Quest_%s"),
+		*PackagePath, *Day);
+	if (FPackageName::DoesPackageExist(PackagePath))
 	{
-		if (Loaded->Chapters.Num() > 0)
+		if (UDayQuestBook* Loaded = LoadObject<UDayQuestBook>(nullptr, *Path))
 		{
-			return Loaded;
+			if (Loaded->Chapters.Num() > 0)
+			{
+				return Loaded;
+			}
 		}
 	}
 	if (DayId == FName(TEXT("0815")))

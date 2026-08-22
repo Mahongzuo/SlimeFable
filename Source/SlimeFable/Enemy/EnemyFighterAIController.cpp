@@ -8,6 +8,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "EnemyCombatComponent.h"
 #include "EnemyFighter.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NiagaraComponent.h"
@@ -35,7 +36,9 @@ void AEnemyFighterAIController::ReturnToIdle()
 	ActiveMoveIndex = INDEX_NONE;
 	StateTime = 0.f;
 	ClearDirectWander();
+	ResetChaseFallback();
 	WanderPauseRemaining = 0.f;
+	ApplyLocomotionMaxSpeed(false);
 	TryPlayRandomIdleMontage();
 }
 
@@ -53,6 +56,7 @@ void AEnemyFighterAIController::OnPossess(APawn* InPawn)
 	ActiveMoveIndex = INDEX_NONE;
 	StateTime = 0.f;
 	ClearDirectWander();
+	ResetChaseFallback();
 	WanderPauseRemaining = Fighter
 		? FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax)
 		: 1.5f;
@@ -82,6 +86,8 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 		StopMovement();
 		ClearTelegraphFx();
 		State = EEnemyFighterState::Idle;
+		ResetChaseFallback();
+		ApplyLocomotionMaxSpeed(false);
 		return;
 	}
 	if (USlimeHealthComponent* Health = Fighter->GetEnemyHealth())
@@ -124,6 +130,8 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 		Combat->InterruptCombat();
 		State = EEnemyFighterState::Idle;
 		ActiveMoveIndex = INDEX_NONE;
+		ResetChaseFallback();
+		ApplyLocomotionMaxSpeed(false);
 		return;
 	}
 
@@ -131,6 +139,7 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	{
 		// Budgeted out of Active: hold position, don't chase or attack.
 		StopMovement();
+		ResetChaseFallback();
 		return;
 	}
 
@@ -174,6 +183,8 @@ void AEnemyFighterAIController::TickIdle(float DeltaSeconds, float Dist)
 		ClearDirectWander();
 		State = EEnemyFighterState::Combat;
 		StateTime = 0.f;
+		ResetChaseFallback();
+		ApplyLocomotionMaxSpeed(true);
 		return;
 	}
 
@@ -196,10 +207,31 @@ void AEnemyFighterAIController::TickWander(float DeltaSeconds)
 	{
 		TryPlayRandomIdleMontage();
 		WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+		WanderStuckTime = 0.f;
 	}
 	bWasWanderMoving = bMoving;
 	if (bMoving)
 	{
+		// 卡住检测：导航移动中长时间没位移则中止，避免撞墙原地走。
+		const float MovedSq = FVector::DistSquared2D(Fighter->GetActorLocation(), WanderLastPos);
+		if (MovedSq < FMath::Square(30.f))
+		{
+			WanderStuckTime += DeltaSeconds;
+			if (WanderStuckTime >= 2.f)
+			{
+				StopMovement();
+				StopLocomotionAnim();
+				TryPlayRandomIdleMontage();
+				WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+				WanderStuckTime = 0.f;
+				bWasWanderMoving = false;
+			}
+		}
+		else
+		{
+			WanderStuckTime = 0.f;
+		}
+		WanderLastPos = Fighter->GetActorLocation();
 		return;
 	}
 
@@ -249,6 +281,8 @@ void AEnemyFighterAIController::StartWanderTo(const FVector& Dest)
 	WanderDirectDest = Dest;
 	bDirectWander = true;
 	bWasWanderMoving = true;
+	WanderStuckTime = 0.f;
+	WanderLastPos = Fighter->GetActorLocation();
 	PlayWalkAnim();
 }
 
@@ -270,6 +304,27 @@ void AEnemyFighterAIController::TickDirectWander()
 		return;
 	}
 
+	// 卡住检测：如果 1.5 秒内位移不足 30 单位，视为撞墙，放弃当前目标。
+	const float DeltaSec = GetWorld()->GetDeltaSeconds();
+	const float MovedSq = FVector::DistSquared2D(Fighter->GetActorLocation(), WanderLastPos);
+	if (MovedSq < FMath::Square(30.f))
+	{
+		WanderStuckTime += DeltaSec;
+		if (WanderStuckTime >= 1.5f)
+		{
+			ClearDirectWander();
+			StopLocomotionAnim();
+			TryPlayRandomIdleMontage();
+			WanderPauseRemaining = FMath::FRandRange(Fighter->WanderPauseMin, Fighter->WanderPauseMax);
+			return;
+		}
+	}
+	else
+	{
+		WanderStuckTime = 0.f;
+	}
+	WanderLastPos = Fighter->GetActorLocation();
+
 	const FVector Dir = To.GetSafeNormal();
 	Fighter->AddMovementInput(Dir, 1.f);
 	Fighter->SetActorRotation(Dir.Rotation());
@@ -280,11 +335,73 @@ void AEnemyFighterAIController::ClearDirectWander()
 	bDirectWander = false;
 	bWasWanderMoving = false;
 	bPlayingWalk = false;
+	bPlayingRun = false;
+}
+
+void AEnemyFighterAIController::ApplyLocomotionMaxSpeed(bool bChasing)
+{
+	if (!Fighter || !Fighter->bABPDrivenLocomotion)
+	{
+		return;
+	}
+	if (UCharacterMovementComponent* Move = Fighter->GetCharacterMovement())
+	{
+		Move->MaxWalkSpeed = bChasing ? Fighter->ChaseSpeed : Fighter->WalkSpeed;
+	}
+	// 追逐时切 Run 蒙太奇，闲逛时切 Walk 蒙太奇。
+	if (bChasing)
+	{
+		PlayRunAnim();
+	}
+	else if (bPlayingWalk && bPlayingRun)
+	{
+		// 从 Run 切回 Walk
+		PlayWalkAnim();
+	}
+}
+
+void AEnemyFighterAIController::UpdateWalkPlayRate()
+{
+	if (!Fighter)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Skel = Fighter->GetMesh();
+	if (!Skel || !Fighter->bABPDrivenLocomotion)
+	{
+		return;
+	}
+	const float CurrentMaxSpeed = Fighter->GetCharacterMovement()
+		? Fighter->GetCharacterMovement()->MaxWalkSpeed
+		: Fighter->WalkSpeed;
+	const float BaseSpeed = FMath::Max(Fighter->WalkSpeed, 1.f);
+	const float Rate = FMath::Clamp(CurrentMaxSpeed / BaseSpeed, 0.1f, 5.f);
+	Skel->SetPlayRate(Rate);
 }
 
 void AEnemyFighterAIController::PlayWalkAnim()
 {
-	if (!Fighter || bPlayingWalk)
+	if (!Fighter)
+	{
+		return;
+	}
+	// ABP 驱动模式：闲逛播 Walk，追逐播 Run（由 ApplyLocomotionMaxSpeed 切换）。
+	if (Fighter->bABPDrivenLocomotion)
+	{
+		if (bPlayingWalk && !bPlayingRun)
+		{
+			return; // 已在播 Walk，不重复播放
+		}
+		if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
+		{
+			Fighter->PlayMeshAnimation(Walk, true);
+			bPlayingWalk = true;
+			bPlayingRun = false;
+			PlayingIdleMontage.Reset();
+		}
+		return;
+	}
+	if (bPlayingWalk)
 	{
 		return;
 	}
@@ -292,7 +409,64 @@ void AEnemyFighterAIController::PlayWalkAnim()
 	{
 		Fighter->PlayMeshAnimation(Walk, true);
 		bPlayingWalk = true;
+		bPlayingRun = false;
 		PlayingIdleMontage.Reset();
+	}
+}
+
+void AEnemyFighterAIController::PlayRunAnim()
+{
+	if (!Fighter)
+	{
+		return;
+	}
+	// 非 ABP 驱动模式不切 Run（走旧 PlayRate 加速路径）。
+	if (!Fighter->bABPDrivenLocomotion)
+	{
+		if (bPlayingWalk)
+		{
+			UpdateWalkPlayRate();
+		}
+		else
+		{
+			PlayWalkAnim();
+			UpdateWalkPlayRate();
+		}
+		return;
+	}
+	// ABP 驱动模式：有 Run 蒙太奇就播 Run，没有就回退 Walk+PlayRate。
+	if (UAnimMontage* Run = Fighter->RunMontage.LoadSynchronous())
+	{
+		if (bPlayingWalk && bPlayingRun)
+		{
+			return; // 已在播 Run，不重复播放
+		}
+		Fighter->PlayMeshAnimation(Run, true);
+		bPlayingWalk = true;
+		bPlayingRun = true;
+		PlayingIdleMontage.Reset();
+	}
+	else
+	{
+		PlayWalkAnim();
+		UpdateWalkPlayRate();
+	}
+}
+
+void AEnemyFighterAIController::StopLocomotionAnim()
+{
+	if (!Fighter)
+	{
+		return;
+	}
+	if (bPlayingWalk || bPlayingRun)
+	{
+		if (Fighter->UsesSingleNodeAnims())
+		{
+			Fighter->StopMeshAnimation();
+		}
+		bPlayingWalk = false;
+		bPlayingRun = false;
 	}
 }
 
@@ -303,6 +477,7 @@ void AEnemyFighterAIController::TryPlayRandomIdleMontage()
 		return;
 	}
 	bPlayingWalk = false;
+	bPlayingRun = false;
 	if (Fighter->UsesSingleNodeAnims())
 	{
 		const int32 Index = FMath::RandRange(0, Fighter->IdleMontages.Num() - 1);
@@ -342,6 +517,7 @@ void AEnemyFighterAIController::StopIdleMontage()
 	{
 		PlayingIdleMontage.Reset();
 		bPlayingWalk = false;
+		bPlayingRun = false;
 		return;
 	}
 	if (Fighter->UsesSingleNodeAnims())
@@ -349,6 +525,7 @@ void AEnemyFighterAIController::StopIdleMontage()
 		Fighter->StopMeshAnimation();
 		PlayingIdleMontage.Reset();
 		bPlayingWalk = false;
+		bPlayingRun = false;
 		return;
 	}
 	USkeletalMeshComponent* Mesh = Fighter->GetMesh();
@@ -362,6 +539,7 @@ void AEnemyFighterAIController::StopIdleMontage()
 	}
 	PlayingIdleMontage.Reset();
 	bPlayingWalk = false;
+	bPlayingRun = false;
 }
 
 void AEnemyFighterAIController::TickCombat(float DeltaSeconds, float Dist)
@@ -406,6 +584,7 @@ void AEnemyFighterAIController::EnterTelegraph(int32 MoveIndex)
 	State = EEnemyFighterState::Telegraph;
 	StateTime = 0.f;
 	StopMovement();
+	StopLocomotionAnim();
 	FacePlayer();
 	ClearTelegraphFx();
 
@@ -451,6 +630,7 @@ void AEnemyFighterAIController::BeginExecute()
 	const FEnemyMoveDef& Move = Fighter->GetMoves()[ActiveMoveIndex];
 	FacePlayer();
 	bPlayingWalk = false;
+	bPlayingRun = false;
 	if (!Combat->TryExecute(Move.Skill))
 	{
 		State = EEnemyFighterState::Combat;
@@ -478,6 +658,11 @@ void AEnemyFighterAIController::TickExecute()
 void AEnemyFighterAIController::TickRecover(float DeltaSeconds)
 {
 	StateTime += DeltaSeconds;
+	// 恢复期间播 idle，避免攻击结束后画面凝滞。
+	if (!PlayingIdleMontage.IsValid())
+	{
+		TryPlayRandomIdleMontage();
+	}
 	const float RecoverTime = Fighter->GetMoves().IsValidIndex(ActiveMoveIndex)
 		? Fighter->GetMoves()[ActiveMoveIndex].Skill.Recovery * 0.35f
 		: 0.15f;
@@ -587,14 +772,42 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 
 	if (!bTooFar && !bTooClose)
 	{
+		ResetChaseFallback();
 		if (GetMoveStatus() == EPathFollowingStatus::Moving)
 		{
 			StopMovement();
 		}
+		// 在合适距离停下：停 locomotion 动画，播 idle。
+		StopLocomotionAnim();
+		if (!PlayingIdleMontage.IsValid())
+		{
+			TryPlayRandomIdleMontage();
+		}
 		return;
 	}
 
-	if (PathRefreshRemaining > 0.f && GetMoveStatus() == EPathFollowingStatus::Moving)
+	if (!bTooFar)
+	{
+		ResetChaseFallback();
+	}
+	else if (!bDirectChaseFallback)
+	{
+		const FVector CurrentLocation = Fighter->GetActorLocation();
+		if (FVector::DistSquared2D(CurrentLocation, ChaseLastPos) < FMath::Square(1.f))
+		{
+			ChaseStalledSeconds += GetWorld()->GetDeltaSeconds();
+		}
+		else
+		{
+			ChaseStalledSeconds = 0.f;
+		}
+		ChaseLastPos = CurrentLocation;
+		bDirectChaseFallback = ChaseStalledSeconds >= 0.5f;
+	}
+
+	if (!bDirectChaseFallback
+		&& PathRefreshRemaining > 0.f
+		&& GetMoveStatus() == EPathFollowingStatus::Moving)
 	{
 		return;
 	}
@@ -602,17 +815,27 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 
 	if (bTooFar)
 	{
-		const EPathFollowingRequestResult::Type Result = MoveToActor(Player, Preferred * 0.85f);
-		if (Result != EPathFollowingRequestResult::RequestSuccessful)
+		if (!bDirectChaseFallback)
 		{
-			FVector To = Player->GetActorLocation() - Fighter->GetActorLocation();
-			To.Z = 0.f;
-			if (!To.IsNearlyZero())
-			{
-				Fighter->AddMovementInput(To.GetSafeNormal(), 1.f);
-			}
+			const EPathFollowingRequestResult::Type Result = MoveToActor(Player, Preferred * 0.85f);
+			bDirectChaseFallback = Result != EPathFollowingRequestResult::RequestSuccessful;
 		}
-		PlayWalkAnim();
+		if (bDirectChaseFallback)
+		{
+			StopMovement();
+			FVector ToPlayer = Player->GetActorLocation() - Fighter->GetActorLocation();
+			ToPlayer.Z = 0.f;
+			Fighter->AddMovementInput(ToPlayer.GetSafeNormal(), 1.f);
+		}
+		// 追逐时播 Run（ABP 驱动）或 Walk+PlayRate（旧模式）。
+		if (Fighter->bABPDrivenLocomotion)
+		{
+			PlayRunAnim();
+		}
+		else
+		{
+			PlayWalkAnim();
+		}
 	}
 	else
 	{
@@ -623,7 +846,16 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 		{
 			Fighter->AddMovementInput(Away, 1.f);
 		}
+		// 后退也播 Walk（不算追逐跑）。
+		PlayWalkAnim();
 	}
+}
+
+void AEnemyFighterAIController::ResetChaseFallback()
+{
+	ChaseStalledSeconds = 0.f;
+	bDirectChaseFallback = false;
+	ChaseLastPos = Fighter ? Fighter->GetActorLocation() : FVector::ZeroVector;
 }
 
 void AEnemyFighterAIController::ClearTelegraphFx()

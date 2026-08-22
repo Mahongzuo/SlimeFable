@@ -345,16 +345,8 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	Skill1ChargeTrack->AddChild(Skill1ChargeBar);
 
 	PhantomCountText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PhantomCountText"));
-	PhantomCountText->SetVisibility(ESlateVisibility::HitTestInvisible);
-	if (UCanvasPanelSlot* CountSlot = Root->AddChildToCanvas(PhantomCountText))
-	{
-		CountSlot->SetAnchors(FAnchors(0.f, 1.f));
-		CountSlot->SetAlignment(FVector2D(0.f, 1.f));
-		CountSlot->SetPosition(FVector2D(28.f, -28.f));
-		CountSlot->SetAutoSize(true);
-		CountSlot->SetZOrder(15);
-	}
-	FMenuUIStyle::ApplyMarkerFont(PhantomCountText, 18.f, FMenuUIStyle::WarmMutedTextColor());
+	PhantomCountText->SetVisibility(ESlateVisibility::Collapsed);
+	FMenuUIStyle::ApplyMixedMenuFont(PhantomCountText, 16.f, FMenuUIStyle::WarmMutedTextColor());
 
 	UHorizontalBox* HotbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarRow"));
 	if (UCanvasPanelSlot* HotbarSlot = Root->AddChildToCanvas(HotbarRow))
@@ -474,27 +466,44 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, 1.f, 1.f, 0.f, 26.f);
 	BarBox->AddChild(LockOnBar);
 
+	UVerticalBox* StatusCluster = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("StatusCluster"));
+	if (UCanvasPanelSlot* ClusterSlot = Root->AddChildToCanvas(StatusCluster))
+	{
+		ClusterSlot->SetAnchors(FAnchors(0.f, 1.f));
+		ClusterSlot->SetAlignment(FVector2D(0.f, 1.f));
+		ClusterSlot->SetPosition(FVector2D(28.f, -28.f));
+		ClusterSlot->SetAutoSize(true);
+		ClusterSlot->SetZOrder(16);
+	}
+
+	WeekText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("WeekText"));
+	if (UVerticalBoxSlot* WeekSlot = StatusCluster->AddChildToVerticalBox(WeekText))
+	{
+		WeekSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		WeekSlot->SetHorizontalAlignment(HAlign_Left);
+	}
+
+	UHorizontalBox* HpRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HpRow"));
+	StatusCluster->AddChildToVerticalBox(HpRow);
+
 	PlayerHealthBar = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("PlayerHealthBar"));
 	PlayerHealthBarMID = FMenuUIStyle::CreateHealthBarMID(this);
 	FMenuUIStyle::ApplyHealthBarImage(PlayerHealthBar, PlayerHealthBarMID, FVector2D(280.f, 18.f));
 	FMenuUIStyle::SetHealthBarValues(PlayerHealthBarMID, 1.f, 1.f, 0.f, 15.5f);
-	if (UCanvasPanelSlot* HpSlot = Root->AddChildToCanvas(PlayerHealthBar))
+
+	USizeBox* HpBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PlayerHealthBox"));
+	HpBox->SetWidthOverride(280.f);
+	HpBox->SetHeightOverride(18.f);
+	HpBox->AddChild(PlayerHealthBar);
+	if (UHorizontalBoxSlot* HpSlot = HpRow->AddChildToHorizontalBox(HpBox))
 	{
-		HpSlot->SetAnchors(FAnchors(0.f, 1.f));
-		HpSlot->SetAlignment(FVector2D(0.f, 1.f));
-		HpSlot->SetPosition(FVector2D(28.f, -28.f));
-		HpSlot->SetSize(FVector2D(280.f, 18.f));
-		HpSlot->SetZOrder(16);
+		HpSlot->SetVerticalAlignment(VAlign_Center);
 	}
 
-	WeekText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("WeekText"));
-	if (UCanvasPanelSlot* WeekSlot = Root->AddChildToCanvas(WeekText))
+	if (UHorizontalBoxSlot* CountSlot = HpRow->AddChildToHorizontalBox(PhantomCountText))
 	{
-		WeekSlot->SetAnchors(FAnchors(0.f, 1.f));
-		WeekSlot->SetAlignment(FVector2D(0.f, 1.f));
-		WeekSlot->SetPosition(FVector2D(28.f, -52.f));
-		WeekSlot->SetAutoSize(true);
-		WeekSlot->SetZOrder(16);
+		CountSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
+		CountSlot->SetVerticalAlignment(VAlign_Center);
 	}
 
 	DeathText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DeathText"));
@@ -752,8 +761,12 @@ void USlimeCombatHUDWidget::Refresh()
 			}
 			if (PhantomCountText)
 			{
+				const int32 Count = Devour->GetPhantomSlotCount();
+				const int32 Cap = Devour->GetPhantomSlotCapacity();
 				PhantomCountText->SetText(FText::FromString(
-					FString::Printf(TEXT("%d/6"), Devour->GetPhantomSlotCount())));
+					FString::Printf(TEXT("残影 %d/%d"), Count, Cap)));
+				PhantomCountText->SetVisibility(
+					Count > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 			}
 			if (Skill1ChargeTrack && Skill1ChargeBar && Combat)
 			{

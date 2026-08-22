@@ -381,6 +381,7 @@ void USlimeGraphicsSettings::SetQualityLevel(int32 Level)
 		Settings->SetOverallScalabilityLevel(FMath::Clamp(Level, 0, 3));
 		Settings->ApplySettings(false);
 		Settings->SaveSettings();
+		SetCVarInt(TEXT("r.RayTracing.ForceAllRayTracingEffects"), 0);
 	}
 	bHasUserOrAutoQuality = true;
 	bHasCachedTsrScreenPercentage = false;

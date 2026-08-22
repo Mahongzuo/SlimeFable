@@ -20,8 +20,13 @@ class UAnimationAsset;
 class USkeletalMesh;
 class UNiagaraSystem;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class USlimeSouvenirDefinition;
 class UQuestObjectiveComponent;
+class USpringArmComponent;
+class UCameraComponent;
+class UInputAction;
+struct FInputActionValue;
 
 UCLASS(meta = (PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API AEnemyCharacter : public ACharacter, public ISlimeLockTarget, public ICombatDamageable
@@ -77,6 +82,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void InitAsPhantom(float LifeSeconds, AActor* Master);
 
+	/** True while this enemy is the player's morph body (possessed slime disguise). */
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	bool IsMorphTarget() const { return bMorphTarget; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	AActor* GetMorphMaster() const { return MorphMaster.Get(); }
+
+	/**
+	 *  Turns this enemy into a player-controllable morph body: player team, no AI, a
+	 *  temporary third-person camera, and movement input bindings copied from the slime.
+	 *  Call after SpawnActorDeferred and before FinishSpawning.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void InitAsMorphTarget(AActor* Master);
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void BeginDevouredDeath(AActor* Devourer);
 
@@ -109,19 +129,32 @@ public:
 		meta = (ToolTip = "主骨骼用的 AnimBP。填了才会站姿/Idle；空则 T-pose。和 PrimarySkeletalMesh 一起绑。"))
 	TSoftClassPtr<UAnimInstance> PrimaryAnimClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Mesh",
+		meta = (ToolTip = "勾选后按主骨骼参考姿势包围盒重算胶囊半径/半高，并把 Mesh 的 Z 偏移设为 -半高。网格和默认 192cm 胶囊对不上时用来消悬空/陷地。默认开。"))
+	bool bAutoFitCapsuleToMesh = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "0.0", ClampMax = "1.0",
+		ToolTip = "击退抗性。0 完全吃击退，1 完全免疫。空中时竖直击飞不再叠加。默认 0。"))
+	float KnockbackResistance = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour",
 		meta = (ToolTip = "能否被史莱姆吞噬。塔默认关。幻形实例运行时会关掉。"))
 	bool bDevourable = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour",
+		meta = (ClampMin = "0.0", ClampMax = "1.0",
+			ToolTip = "血量低于这个比例才能被吞噬。0.2 = 剩 20% 血。0 则改用史莱姆吞噬组件上的全局阈值。默认 0.2，避免残血窗口太窄被普攻打死。"))
+	float DevourHealthThreshold = 0.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug",
 		meta = (ToolTip = "勾选后攻击伤害归零（含近战/投射）。SlimeLab 测试桩勾上。"))
 	bool bHarmless = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug", meta = (ClampMin = "0.0", ClampMax = "1.0",
-		ToolTip = "出生时把 HP 设为 MaxHP 的这个比例。0 表示关闭。设 0.08 可直接测吞噬。脱战复位也会再套一次。"))
+		ToolTip = "出生时把 HP 设为 MaxHP 的这个比例。0 表示关闭。设 0.2 可直接测吞噬。脱战复位也会再套一次。"))
 	float DebugStartHealthPercent = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Debug",
@@ -163,16 +196,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Presence", meta = (ClampMin = "50.0", Units = "cm"))
 	float StuckResetDistance = 200.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats",
+		meta = (ToolTip = "死亡时播放的 Montage。播完后冻结最后一帧再溶解，不会混回 Idle。空则直接溶解。"))
 	TSoftObjectPtr<UAnimMontage> DeathMontage;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death", meta = (ClampMin = "0.2", Units = "s"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death", meta = (ClampMin = "0.2", Units = "s",
+		ToolTip = "溶解持续时间（秒）。默认 1.2。到点后销毁 Actor。"))
 	float DeathDissolveSeconds = 1.2f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death",
+		meta = (ToolTip = "死亡时在身体中心生成的 Niagara。骨架没有 head socket 时用网格包围盒中心，避免特效埋在脚底。"))
 	TSoftObjectPtr<UNiagaraSystem> DeathDissolveNiagara;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Death",
+		meta = (ToolTip = "叠在骨骼上的溶解 Overlay 材质，驱动 DissolveAmount。默认 /Game/_Slime/FX/M_EnemyDeathDissolve。空则只靠淡出网格。"))
 	TSoftObjectPtr<UMaterialInterface> DeathDissolveMaterial;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Souvenir")
@@ -210,6 +247,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	FVector GetHudAnchorLocation() const;
 
+	void RefreshWorldHealthBarVisibility(const APawn* Player, const AActor* LockedTarget);
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Presence")
 	void RestoreToSpawn();
 
@@ -223,12 +262,20 @@ public:
 	virtual bool IsInCombat() const;
 
 protected:
+	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+	/** Enhanced Input handlers for morph body movement / look. */
+	void MorphMove(const FInputActionValue& Value);
+	void MorphLook(const FInputActionValue& Value);
+	void UpdateMorphSafeTransform();
+
 	virtual void OnRestoredToSpawn();
 	void TickOutOfCombatReset(float DeltaSeconds);
 	void ApplyHealthBarOffset();
 	void RefreshWorldHealthBarVisibility();
 	void UpdateHudAnchorCache() const;
 	void RebuildMeshParts();
+	void FitCapsuleToMesh();
 	void ApplySingleNodeAnimModeIfNeeded();
 	void ClearGeneratedParts();
 	USceneComponent* ResolveAttachParent(const FEnemyMeshPart& Part) const;
@@ -240,6 +287,7 @@ protected:
 	void CaptureDifficultyBases();
 	void DropSouvenirReward();
 	void PlayDeathMontageThenDissolve();
+	void FreezeDeathPoseAndDissolve();
 	void StartDeathDissolve();
 	void TickDeathDissolve();
 	void FinishDeathSequence();
@@ -250,9 +298,6 @@ protected:
 
 	UFUNCTION()
 	void HandleDied();
-
-	UFUNCTION()
-	void HandleDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<USlimeHealthComponent> Health;
@@ -288,9 +333,32 @@ protected:
 	float PhantomLifeSeconds = 5.f;
 	TWeakObjectPtr<AActor> PhantomMaster;
 	FTimerHandle PhantomLifeTimer;
+
+	// ---- Morph target (player disguise) -----------------------------------------
+	bool bMorphTarget = false;
+	TWeakObjectPtr<AActor> MorphMaster;
+	FTransform MorphSafeTransform = FTransform::Identity;
+	bool bHasMorphSafeTransform = false;
+	/** Temporary third-person camera created in InitAsMorphTarget. */
+	UPROPERTY(Transient)
+	TObjectPtr<USpringArmComponent> MorphCameraBoom;
+	UPROPERTY(Transient)
+	TObjectPtr<UCameraComponent> MorphFollowCamera;
+	/** Input action assets copied from the slime so Enhanced Input works on this pawn. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MorphMoveAction;
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MorphLookAction;
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MorphMouseLookAction;
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MorphJumpAction;
 	bool bDifficultyBasesCaptured = false;
 	float DifficultyBaseMaxHP = 200.f;
 	float DeathDissolveElapsed = 0.f;
 	FTimerHandle DeathDissolveTimer;
 	FTimerHandle DeathMontageFallbackTimer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DeathDissolveMID;
 };

@@ -206,7 +206,8 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		FEnemyMoveDef Move;
 		Move.MoveId = TEXT("BiteLunge");
 		Move.Skill.DisplayName = FText::FromString(TEXT("扑咬"));
-		Move.Skill.Exec = EEnemySkillExec::Melee;
+		Move.Skill.Exec = EEnemySkillExec::Dash;
+		Move.Skill.DashDistance = 180.f;
 		Move.Skill.Windup = 0.16f;
 		Move.Skill.HitStart = 0.22f;
 		Move.Skill.HitEnd = 0.4f;

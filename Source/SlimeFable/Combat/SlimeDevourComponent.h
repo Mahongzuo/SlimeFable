@@ -69,7 +69,7 @@ struct SLIMEFABLE_API FSlimeDevourCapture
 	bool IsValidCapture() const { return EnemyClass.Get() != nullptr; }
 };
 
-UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API USlimeDevourComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -149,13 +149,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
 	bool TryPhantom(int32 Slot);
 
+	/**
+	 *  Removes a phantom slot without spawning a phantom. Used by the morph system when a
+	 *  morphed enemy is killed in action — the capture is consumed so it cannot be morphed
+	 *  again this day. Safe to call on an empty/invalid slot (no-op).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
+	void ConsumePhantomSlot(int32 Slot);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "50.0", Units = "cm",
 		ToolTip = "可吞噬扫描半径。默认 1000cm，长按 F 读条期间超出此距离会取消。"))
 	float DevourRadius = 1000.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.01", ClampMax = "1.0",
-		ToolTip = "HP 百分比阈值。默认 0.1 即残血 10%。"))
-	float DevourHealthThreshold = 0.1f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "0.01", ClampMax = "1.0",
+		ToolTip = "全局吞噬血量阈值。敌人自己填了大于 0 的值时以敌人为准。默认 0.2 即残血 20%。"))
+	float DevourHealthThreshold = 0.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.2", Units = "s",
 		ToolTip = "长按 F 蓄力时长。默认 1.2s，读满才发射子球。"))

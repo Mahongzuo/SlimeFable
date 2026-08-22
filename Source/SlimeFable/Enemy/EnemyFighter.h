@@ -111,6 +111,18 @@ public:
 		meta = (ToolTip = "闲逛/走近时循环播。看门狗绑原地走路（Walk_F_IP）。"))
 	TSoftObjectPtr<UAnimMontage> WalkMontage;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
+		meta = (ToolTip = "追逐时循环播（bABPDrivenLocomotion 勾上生效）。看门狗绑跑步（Run_F_IP）。空则回退 WalkMontage 加速。"))
+	TSoftObjectPtr<UAnimMontage> RunMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
+		meta = (ToolTip = "勾选后按 MaxWalkSpeed/WalkSpeed 匹配 Walk 蒙太奇 PlayRate（高速加速=跑），并在追逐时把 MaxWalkSpeed 提到 ChaseSpeed。看门狗勾上。"))
+	bool bABPDrivenLocomotion = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
+		meta = (ClampMin = "100.0", ToolTip = "追逐玩家时的 MaxWalkSpeed，配合 ABP RunThreshold 触发跑步。仅 bABPDrivenLocomotion 生效。默认 600。"))
+	float ChaseSpeed = 600.f;
+
 	const TArray<FEnemyMoveDef>& GetMoves() const { return Moves; }
 
 	virtual bool UsesSingleNodeAnims() const override { return bUseSingleNodeAnims; }

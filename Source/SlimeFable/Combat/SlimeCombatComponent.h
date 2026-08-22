@@ -17,6 +17,9 @@ class USlimeCombatHUDWidget;
 class USlimeElementComponent;
 class USlimeHealthComponent;
 class USlimeLockOnComponent;
+class USlimeDevourComponent;
+class USlimePlacementComponent;
+class USlimeVehicleComponent;
 class UNiagaraSystem;
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
@@ -93,6 +96,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.1", Units = "s"))
 	float ComboResetDelay = 1.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "锁定时连招突进只朝锁定目标；目标超过这个距离就按当前朝向短突，绝不改打别人。默认 300。"))
+	float ComboLungeSeekRange = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "未锁定时终结技/点名技吸附最近敌人的最大距离。锁定时无视此项，圆心落在锁定目标上。默认 450。"))
+	float FinisherSeekRange = 450.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ToolTip = "勾选后链式技能（雷 Skill2）首段仍只打锁定目标，后续弹射可以跳到附近其他敌人。关掉则整条链只打锁定目标。默认开。"))
+	bool bChainIgnoresLock = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	TSubclassOf<USlimeCombatHUDWidget> HUDWidgetClass;
 
@@ -137,9 +152,10 @@ private:
 	int32 SkillCdIndex(ESlimeElement InElement, ESlimeSkillSlot Slot) const;
 	APlayerController* GetPlayerController() const;
 	FVector GetBlobOrigin() const;
-	AActor* FindNearestHostile(float MaxRange) const;
+	AActor* GetLockedRestrictTarget() const;
+	AActor* FindNearestHostile(float MaxRange, float MinFacingDot = -1.f) const;
 	FVector ResolveGroundPoint(float ForwardCm) const;
-	FVector ResolveFinisherLocation(float SeekRange = 1000.f) const;
+	FVector ResolveFinisherLocation(float SeekRange) const;
 	FVector ResolveSkillHitOrigin(const FSlimeSkillDef& Def) const;
 	void ApplyComboLunge();
 	void TickComboReturn(float DeltaTime);
@@ -155,6 +171,15 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeLockOnComponent> LockOn;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeDevourComponent> Devour;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlimePlacementComponent> Placement;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeVehicleComponent> Vehicle;
 
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeCombatHUDWidget> HUDWidget;

@@ -39,9 +39,10 @@ ASlimeSkillProjectile::ASlimeSkillProjectile()
 	Niagara->SetAutoDestroy(false);
 }
 
-void ASlimeSkillProjectile::InitProjectile(AActor* InInstigator, const FSlimeSkillDef& InSkill, const FVector& InVelocity)
+void ASlimeSkillProjectile::InitProjectile(AActor* InInstigator, const FSlimeSkillDef& InSkill, const FVector& InVelocity, AActor* InRestrictTarget)
 {
 	Source = InInstigator;
+	RestrictTarget = InRestrictTarget;
 	Skill = InSkill;
 	Velocity = InVelocity;
 	LifeRemaining = FMath::Max(InSkill.ProjectileLife, 0.4f);
@@ -107,6 +108,18 @@ void ASlimeSkillProjectile::ExplodeAndDestroy(bool bSpawnImpact)
 
 AActor* ASlimeSkillProjectile::FindHomingTarget(float MaxRange) const
 {
+	if (RestrictTarget.IsValid())
+	{
+		if (const USlimeHealthComponent* Health = RestrictTarget->FindComponentByClass<USlimeHealthComponent>())
+		{
+			if (!Health->IsAlive())
+			{
+				return nullptr;
+			}
+		}
+		return RestrictTarget.Get();
+	}
+
 	UWorld* World = GetWorld();
 	if (!World || !Source.IsValid() || MaxRange <= 0.f)
 	{
@@ -243,7 +256,7 @@ void ASlimeSkillProjectile::Tick(float DeltaSeconds)
 			Impact.Hit.Radius = FMath::Max(Skill.Hit.Radius * 2.f, 70.f);
 			Impact.Hit.Range = 0.f;
 			Impact.Hit.OriginForwardOffset = 0.f;
-			USlimeHitProbe::PerformHit(Source.Get(), Impact, Hit.ImpactPoint, Velocity.GetSafeNormal(), AlreadyHit);
+			USlimeHitProbe::PerformHit(Source.Get(), Impact, Hit.ImpactPoint, Velocity.GetSafeNormal(), AlreadyHit, RestrictTarget.Get());
 			bExplode = true;
 			bHitEnemy = true;
 		}
