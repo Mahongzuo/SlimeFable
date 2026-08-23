@@ -8,7 +8,9 @@
 UEnemySkillAbility::UEnemySkillAbility()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
-	AbilityTags.AddTag(SlimeEnemyTags::Ability_Skill);
+	FGameplayTagContainer DefaultAbilityTags;
+	DefaultAbilityTags.AddTag(SlimeEnemyTags::Ability_Skill);
+	SetAssetTags(DefaultAbilityTags);
 	ActivationOwnedTags.AddTag(SlimeEnemyTags::State_Attacking);
 }
 

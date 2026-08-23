@@ -51,10 +51,9 @@ UGE_EnemyTimedState::UGE_EnemyTimedState()
 
 void UGE_EnemyTimedState::GrantStateTag(const FGameplayTag& Tag)
 {
-	// UE 5.8's AddComponent() creates an unnamed subobject and crashes when called
-	// from a native GameplayEffect constructor. The inherited container remains
-	// runtime-compatible and is safe for C++-constructed effects.
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	InheritableOwnedTagsContainer.AddTag(Tag);
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 }
 
 UGE_EnemyStagger::UGE_EnemyStagger()

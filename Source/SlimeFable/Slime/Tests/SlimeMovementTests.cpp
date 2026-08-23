@@ -252,7 +252,10 @@ bool FSlimeBlockedSurfaceTransitionTest::RunTest(const FString& Parameters)
 	DynamicBox->SetCollisionResponseToAllChannels(ECR_Block);
 	DynamicBox->RegisterComponent();
 	DynamicBox->SetWorldLocation(FVector(52.0, 400.0, 150.0));
-	DynamicMovement->TickComponent(1.f / 30.f, LEVELTICK_All, nullptr);
+	for (int32 Step = 0; Step < 30 && !DynamicMovement->WasClimbMoveBlocked(); ++Step)
+	{
+		DynamicMovement->TickComponent(1.f / 30.f, LEVELTICK_All, nullptr);
+	}
 
 	TestTrue(TEXT("A dynamic obstruction reports transition failure"),
 		DynamicMovement->ConsumeSurfaceTransitionFailure());
