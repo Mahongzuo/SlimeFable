@@ -13,6 +13,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeCharacterMovementComponent.h"
 #include "SlimeVehicleComponent.h"
 
 USlimeClingComponent::USlimeClingComponent()
@@ -25,6 +26,8 @@ USlimeClingComponent::USlimeClingComponent()
 	bSavedOrientToMovement = true;
 	bLockMountAfterLedgeDrop = false;
 	bWallTopIsEave = false;
+	bMantling = false;
+	bSurfaceTransitionPending = false;
 }
 
 void USlimeClingComponent::BeginPlay()
@@ -74,7 +77,7 @@ bool USlimeClingComponent::TryWallJump()
 	}
 
 	UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
-	const FVector LaunchDir = (WallNormal + FVector::UpVector).GetSafeNormal();
+	const FVector LaunchDir = SlimeMovementPolicies::ClingJumpDirection(WallNormal);
 	ExitCling(EClingExit::Falling);
 	if (Movement)
 	{
@@ -141,9 +144,60 @@ void USlimeClingComponent::UpdateCling(float DeltaTime)
 	if (bClinging)
 	{
 		SetWalkStepBoost(0.f);
+		if (bMantling)
+		{
+			USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement();
+			if (SlimeMovement && SlimeMovement->IsSlimeMantling())
+			{
+				bHasMoveInput = false;
+				MoveRight = 0.f;
+				MoveForward = 0.f;
+				return;
+			}
+			bMantling = false;
+			if (!SlimeMovement || !SlimeMovement->IsSlimeClimbing())
+			{
+				ExitCling(EClingExit::Walking);
+				bHasMoveInput = false;
+				MoveRight = 0.f;
+				MoveForward = 0.f;
+				return;
+			}
+			LostContactTime = 0.f;
+		}
+		if (bSurfaceTransitionPending)
+		{
+			USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement();
+			if (SlimeMovement && SlimeMovement->IsSurfaceTransitioning())
+			{
+				LostContactTime = 0.f;
+				bHasMoveInput = false;
+				MoveRight = 0.f;
+				MoveForward = 0.f;
+				return;
+			}
+			const bool bFailed = !SlimeMovement || SlimeMovement->ConsumeSurfaceTransitionFailure();
+			bSurfaceTransitionPending = false;
+			if (!bFailed)
+			{
+				CommitClingHit(PendingSurfaceTransitionHit);
+			}
+			LostContactTime = 0.f;
+		}
+		if (USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement();
+			SlimeMovement && SlimeMovement->IsSurfaceTransitioning())
+		{
+			LostContactTime = 0.f;
+			ApplyClingVelocity();
+			PushVisualToBody();
+			bHasMoveInput = false;
+			MoveRight = 0.f;
+			MoveForward = 0.f;
+			return;
+		}
 		if (!MaintainWall(WallHit) || !IsAcceptableClingHit(WallHit))
 		{
-			if (bHasMoveInput && !FMath::IsNearlyZero(MoveRight) && TryTransferAlongWall(WallHit, true))
+			if (bHasMoveInput && TryTransferAlongWall(WallHit, true))
 			{
 				LostContactTime = 0.f;
 				CommitClingHit(WallHit);
@@ -151,7 +205,12 @@ void USlimeClingComponent::UpdateCling(float DeltaTime)
 			else
 			{
 				LostContactTime += DeltaTime;
-				if (UCharacterMovementComponent* ClingMove = OwnerCharacter->GetCharacterMovement())
+				if (USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement())
+				{
+					SlimeMovement->SetClimbInput(0.f, 0.f, ClimbSpeed, 0.f);
+					SlimeMovement->Velocity = FVector::ZeroVector;
+				}
+				else if (UCharacterMovementComponent* ClingMove = OwnerCharacter->GetCharacterMovement())
 				{
 					ClingMove->Velocity = FVector::ZeroVector;
 				}
@@ -169,8 +228,7 @@ void USlimeClingComponent::UpdateCling(float DeltaTime)
 				return;
 			}
 		}
-		else if (bHasMoveInput && !FMath::IsNearlyZero(MoveRight) && IsWallOpenToSide()
-			&& TryTransferAlongWall(WallHit, false))
+		else if (bHasMoveInput && TryTransferAlongWall(WallHit, false))
 		{
 			LostContactTime = 0.f;
 			CommitClingHit(WallHit);
@@ -248,8 +306,10 @@ bool USlimeClingComponent::IsClingableWall(const FHitResult& Hit) const
 	{
 		return false;
 	}
-	const float NormalZ = float(Hit.ImpactNormal.GetSafeNormal().Z);
-	if (NormalZ > WallNormalZMax || NormalZ < -WallNormalZMax)
+	const UCharacterMovementComponent* Movement = OwnerCharacter
+		? OwnerCharacter->GetCharacterMovement()
+		: nullptr;
+	if (!Movement || Movement->IsWalkable(Hit))
 	{
 		return false;
 	}
@@ -271,7 +331,13 @@ bool USlimeClingComponent::WantsEnterCling(const FHitResult& Hit) const
 
 	if (Movement->IsFalling())
 	{
-		return true;
+		const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+		if (Normal.Z < -WallNormalZMax)
+		{
+			return SlimeMovementPolicies::CanGrabCeiling(
+				float(Movement->Velocity.Z), Normal, CeilingGrabMinUpSpeed);
+		}
+		return FMath::Abs(float(Normal.Z)) <= WallNormalZMax;
 	}
 
 	if (IsLipWallWhileOnTop(Hit))
@@ -311,9 +377,8 @@ bool USlimeClingComponent::FindWall(FHitResult& OutHit, bool bIncludeCardinals) 
 	const float HalfH = FMath::Max(OwnerCapsule->GetScaledCapsuleHalfHeight() * 0.85f, Radius);
 	const FCollisionShape Shape = FCollisionShape::MakeCapsule(Radius, HalfH);
 
-		auto TrySweep = [this, World, &Loc, &Shape, &Query, &OutHit](FVector Dir) -> bool
+	auto TrySweep = [this, World, &Loc, &Shape, &Query, &OutHit](FVector Dir) -> bool
 	{
-		Dir.Z = 0.0;
 		if (Dir.IsNearlyZero())
 		{
 			return false;
@@ -332,21 +397,18 @@ bool USlimeClingComponent::FindWall(FHitResult& OutHit, bool bIncludeCardinals) 
 	};
 
 	FVector HorizVel = Movement->Velocity;
-	HorizVel.Z = 0.0;
 	if (TrySweep(HorizVel))
 	{
 		return true;
 	}
 
 	FVector Accel = Movement->GetCurrentAcceleration();
-	Accel.Z = 0.0;
 	if (TrySweep(Accel))
 	{
 		return true;
 	}
 
 	FVector Input = Movement->GetLastInputVector();
-	Input.Z = 0.0;
 	if (TrySweep(Input))
 	{
 		return true;
@@ -384,6 +446,10 @@ bool USlimeClingComponent::HasTallWallFace(const FHitResult& Hit) const
 	{
 		return false;
 	}
+	if (FMath::Abs(float(N.Z)) > WallNormalZMax)
+	{
+		return true;
+	}
 
 	const FVector Loc = OwnerCapsule->GetComponentLocation();
 	const float Offsets[] = { 40.f, 70.f, 100.f, 130.f };
@@ -419,8 +485,10 @@ bool USlimeClingComponent::IsAcceptableClingHit(const FHitResult& Hit) const
 
 	const FVector Loc = OwnerCapsule->GetComponentLocation();
 	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
+	const float HalfHeight = OwnerCapsule->GetScaledCapsuleHalfHeight();
+	const float Support = SlimeMovementPolicies::CapsuleSupportDistance(Radius, HalfHeight, WallNormal);
 	const float AlongInward = float((Hit.ImpactPoint - Loc) | (-WallNormal));
-	if (AlongInward > Radius + ClingSkin + 12.f)
+	if (AlongInward > Support + ClingSkin + 12.f)
 	{
 		return false;
 	}
@@ -438,7 +506,9 @@ bool USlimeClingComponent::MaintainWall(FHitResult& OutHit) const
 	FCollisionQueryParams Query(TEXT("SlimeClingMaintain"), false, GetOwner());
 	const FVector Loc = OwnerCapsule->GetComponentLocation();
 	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
-	const float Probe = Radius + ClingSkin + 12.f;
+	const float HalfHeight = OwnerCapsule->GetScaledCapsuleHalfHeight();
+	const float Support = SlimeMovementPolicies::CapsuleSupportDistance(Radius, HalfHeight, WallNormal);
+	const float Probe = Support + ClingSkin + 12.f;
 	const FCollisionShape Shape = FCollisionShape::MakeSphere(4.f);
 	const FVector Right = GetWallRight();
 
@@ -552,13 +622,23 @@ void USlimeClingComponent::EnterCling(const FHitResult& Hit)
 		bSavedMovement = true;
 	}
 
-	Movement->SetMovementMode(MOVE_Flying);
 	Movement->GravityScale = 0.f;
-	Movement->MaxAcceleration = 0.f;
-	Movement->BrakingDecelerationFlying = 0.f;
-	Movement->MaxFlySpeed = 2000.f;
 	Movement->bOrientRotationToMovement = false;
-	Movement->Velocity = FVector::ZeroVector;
+	if (USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement())
+	{
+		FVector PreferredForward = GetWallUp();
+		if (WallNormal.Z < -WallNormalZMax && OwnerCharacter->GetController())
+		{
+			const FRotator Yaw(0.0, OwnerCharacter->GetController()->GetControlRotation().Yaw, 0.0);
+			PreferredForward = FRotationMatrix(Yaw).GetUnitAxis(EAxis::X);
+		}
+		FSlimeSurfaceContact Contact;
+		Contact.Point = Hit.ImpactPoint;
+		Contact.Normal = Hit.ImpactNormal;
+		Contact.Component = Hit.GetComponent();
+		Contact.Skin = ClingSkin;
+		SlimeMovement->RequestClimbStart(Contact, PreferredForward);
+	}
 }
 
 void USlimeClingComponent::CommitClingHit(const FHitResult& Hit)
@@ -573,42 +653,29 @@ void USlimeClingComponent::CommitClingHit(const FHitResult& Hit)
 		WallNormal = NewNormal;
 	}
 
-	if (FMath::Abs(WallNormal.Z) > WallNormalZMax)
-	{
-		WallNormal.Z = FMath::Clamp(WallNormal.Z, -WallNormalZMax, WallNormalZMax);
-		WallNormal.Normalize();
-	}
-
 	WallPoint = Hit.ImpactPoint;
 	WallComponent = Hit.GetComponent();
-	bool bEave = false;
-	WallTopZ = ComputeWallTopZ(Hit, &bEave);
-	bWallTopIsEave = bEave;
-	PlaceOnWallSkin();
-}
-
-void USlimeClingComponent::PlaceOnWallSkin()
-{
-	if (!OwnerCharacter || !OwnerCapsule || WallNormal.IsNearlyZero())
+	if (FMath::Abs(WallNormal.Z) <= WallNormalZMax)
 	{
-		return;
+		bool bEave = false;
+		WallTopZ = ComputeWallTopZ(Hit, &bEave);
+		bWallTopIsEave = bEave;
+	}
+	else
+	{
+		WallTopZ = -1.e9f;
+		bWallTopIsEave = WallNormal.Z <= -0.7f;
 	}
 
-	// Holding climb-up under an eave: stay free to mantle out instead of snapping into the soffit.
-	if (bWallTopIsEave && MoveForward > 0.f)
+	if (USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement())
 	{
-		return;
+		FSlimeSurfaceContact Contact;
+		Contact.Point = WallPoint;
+		Contact.Normal = WallNormal;
+		Contact.Component = WallComponent;
+		Contact.Skin = ClingSkin;
+		SlimeMovement->UpdateClimbContact(Contact, true);
 	}
-
-	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
-	const FVector Loc = OwnerCapsule->GetComponentLocation();
-	const float Depth = float((Loc - WallPoint) | WallNormal);
-	const float DesiredDepth = Radius + ClingSkin;
-	OwnerCharacter->SetActorLocation(
-		Loc + WallNormal * double(DesiredDepth - Depth),
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics);
 }
 
 void USlimeClingComponent::ExitCling(EClingExit Exit)
@@ -619,6 +686,8 @@ void USlimeClingComponent::ExitCling(EClingExit Exit)
 	}
 
 	bClinging = false;
+	bMantling = false;
+	bSurfaceTransitionPending = false;
 	bLockMountAfterLedgeDrop = false;
 	bWallTopIsEave = false;
 	LostContactTime = 0.f;
@@ -627,9 +696,13 @@ void USlimeClingComponent::ExitCling(EClingExit Exit)
 
 	if (OwnerCharacter)
 	{
-		if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
+		if (USlimeCharacterMovementComponent* Movement = GetSlimeMovement())
 		{
-			Movement->SetMovementMode(Exit == EClingExit::Walking ? MOVE_Walking : MOVE_Falling);
+			Movement->RequestClimbStop(Exit == EClingExit::Walking);
+		}
+		else if (UCharacterMovementComponent* BaseMovement = OwnerCharacter->GetCharacterMovement())
+		{
+			BaseMovement->SetMovementMode(Exit == EClingExit::Walking ? MOVE_Walking : MOVE_Falling);
 		}
 	}
 
@@ -663,6 +736,13 @@ void USlimeClingComponent::RestoreMovementSettings()
 
 FVector USlimeClingComponent::GetWallUp() const
 {
+	if (const USlimeCharacterMovementComponent* Movement = GetSlimeMovement())
+	{
+		if (Movement->IsSlimeClimbing() || Movement->IsSlimeMantling())
+		{
+			return Movement->GetSurfaceForward();
+		}
+	}
 	const FVector Projected = FVector::VectorPlaneProject(FVector::UpVector, WallNormal);
 	if (Projected.IsNearlyZero())
 	{
@@ -673,6 +753,13 @@ FVector USlimeClingComponent::GetWallUp() const
 
 FVector USlimeClingComponent::GetWallRight() const
 {
+	if (const USlimeCharacterMovementComponent* Movement = GetSlimeMovement())
+	{
+		if (Movement->IsSlimeClimbing() || Movement->IsSlimeMantling())
+		{
+			return Movement->GetSurfaceRight();
+		}
+	}
 	const FVector Right = FVector::CrossProduct(WallNormal, FVector::UpVector);
 	if (Right.IsNearlyZero())
 	{
@@ -694,50 +781,23 @@ void USlimeClingComponent::ApplyClingVelocity()
 		return;
 	}
 
-	const FVector WallUp = GetWallUp();
-	const FVector WallRight = GetWallRight();
-
-	FVector Desired = FVector::ZeroVector;
-	if (bLockMountAfterLedgeDrop)
+	if (USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement())
 	{
-		Desired -= WallUp * SlideSpeed;
-		if (bHasMoveInput)
-		{
-			Desired += WallRight * (MoveRight * ClimbSpeed);
-		}
-	}
-	else if (bHasMoveInput)
-	{
-		if (bWallTopIsEave && MoveForward > 0.f)
-		{
-			Desired -= WallNormal * (MoveForward * ClimbSpeed);
-			if (OwnerCapsule)
-			{
-				const float CapsuleTop = float(OwnerCapsule->GetComponentLocation().Z)
-					+ OwnerCapsule->GetScaledCapsuleHalfHeight();
-				if (CapsuleTop < WallTopZ - 4.f)
-				{
-					Desired += WallUp * (MoveForward * ClimbSpeed);
-				}
-			}
-		}
-		else
-		{
-			Desired += WallUp * (MoveForward * ClimbSpeed);
-		}
-		Desired += WallRight * (MoveRight * ClimbSpeed);
-	}
-	else
-	{
-		Desired -= WallUp * SlideSpeed;
+		SlimeMovement->SetClimbInput(
+			bLockMountAfterLedgeDrop ? MoveRight : MoveRight,
+			bLockMountAfterLedgeDrop ? -1.f : MoveForward,
+			ClimbSpeed,
+			SlideSpeed);
 	}
 
-	Movement->Velocity = Desired;
-
-	FRotator FaceWall = (-WallNormal).Rotation();
-	FaceWall.Pitch = 0.f;
-	FaceWall.Roll = 0.f;
-	OwnerCharacter->SetActorRotation(FaceWall);
+	const FVector HorizontalNormal(WallNormal.X, WallNormal.Y, 0.0);
+	if (!HorizontalNormal.IsNearlyZero())
+	{
+		FRotator FaceWall = (-HorizontalNormal).Rotation();
+		FaceWall.Pitch = 0.f;
+		FaceWall.Roll = 0.f;
+		OwnerCharacter->SetActorRotation(FaceWall);
+	}
 }
 
 void USlimeClingComponent::SetWalkStepBoost(float BoostedMaxStep)
@@ -831,56 +891,30 @@ bool USlimeClingComponent::TryWalkUpShortObstacle(const FHitResult& Hit)
 	return true;
 }
 
-bool USlimeClingComponent::IsWallOpenToSide() const
-{
-	UWorld* World = GetWorld();
-	if (!World || !OwnerCapsule || WallNormal.IsNearlyZero() || FMath::IsNearlyZero(MoveRight))
-	{
-		return false;
-	}
-
-	const FVector Strafe = GetWallRight() * (MoveRight >= 0.f ? 1.f : -1.f);
-	if (Strafe.IsNearlyZero())
-	{
-		return false;
-	}
-
-	const FVector Loc = OwnerCapsule->GetComponentLocation();
-	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
-	const FVector Start = Loc + Strafe * double(Radius + 8.f) + WallNormal * 8.0;
-	const FVector End = Start - WallNormal * double(WallProbeDistance);
-
-	FCollisionQueryParams Query(TEXT("SlimeClingSideOpen"), false, GetOwner());
-	FHitResult Hit;
-	if (!World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Query) || !IsClingableWall(Hit))
-	{
-		return true;
-	}
-	return (Hit.ImpactNormal.GetSafeNormal() | WallNormal) < ClingAcceptNormalDot;
-}
-
 bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostContact) const
 {
 	UWorld* World = GetWorld();
-	if (!World || !OwnerCapsule || WallNormal.IsNearlyZero() || FMath::IsNearlyZero(MoveRight))
+	if (!World || !OwnerCapsule || WallNormal.IsNearlyZero())
 	{
 		return false;
-	}
+}
 
-	const FVector Strafe = GetWallRight() * (MoveRight >= 0.f ? 1.f : -1.f);
-	if (Strafe.IsNearlyZero())
+	const FVector Travel = (GetWallRight() * MoveRight + GetWallUp() * MoveForward).GetSafeNormal();
+	if (Travel.IsNearlyZero())
 	{
 		return false;
 	}
 
 	const FVector Loc = OwnerCapsule->GetComponentLocation();
 	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
-	const float MaxDist = Radius + 45.f;
+	const float HalfHeight = OwnerCapsule->GetScaledCapsuleHalfHeight();
+	const float Support = SlimeMovementPolicies::CapsuleSupportDistance(Radius, HalfHeight, WallNormal);
+	const float MaxDist = Support + 45.f;
 	const float SideOffsets[] = { 8.f, 20.f };
 	const FVector SweepDirs[] = {
 		-WallNormal,
-		-Strafe,
-		(-Strafe * 0.7 - WallNormal * 0.3).GetSafeNormal()
+		-Travel,
+		(-Travel * 0.7 - WallNormal * 0.3).GetSafeNormal()
 	};
 	const FCollisionShape Shape = FCollisionShape::MakeSphere(4.f);
 
@@ -903,8 +937,8 @@ bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostCo
 			return false;
 		}
 
-		const float AlongStrafe = float((Hit.ImpactPoint - Loc) | Strafe);
-		if (AlongStrafe <= 8.f || AlongStrafe > MaxDist)
+		const float AlongTravel = float((Hit.ImpactPoint - Loc) | Travel);
+		if (AlongTravel <= 4.f || AlongTravel > MaxDist)
 		{
 			return false;
 		}
@@ -912,9 +946,9 @@ bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostCo
 		const bool bDifferentComp = Hit.GetComponent() != nullptr && Hit.GetComponent() != WallComponent.Get();
 		const bool bSeam = FaceDot >= ClingAcceptNormalDot
 			&& bLostContact
-			&& (bDifferentComp || AlongStrafe > Radius * 0.35f);
+			&& (bDifferentComp || AlongTravel > Radius * 0.35f);
 		const bool bCorner = FaceDot < ClingAcceptNormalDot
-			&& float(NewNormal | Strafe) > 0.25f;
+			&& FMath::Abs(float(NewNormal | Travel)) > 0.25f;
 		return bSeam || bCorner;
 	};
 
@@ -932,7 +966,7 @@ bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostCo
 
 		for (const float Side : SideOffsets)
 		{
-			const FVector Start = Loc + WallNormal * double(Radius + 12.f) + Strafe * double(Radius + Side);
+			const FVector Start = Loc + WallNormal * double(Support + 12.f) + Travel * double(Radius + Side);
 			for (const FVector& Dir : SweepDirs)
 			{
 				if (Dir.IsNearlyZero())
@@ -943,18 +977,28 @@ bool USlimeClingComponent::TryTransferAlongWall(FHitResult& OutHit, bool bLostCo
 				const float Dist = (Dir | -WallNormal) > 0.7f
 					? FMath::Max(WallProbeDistance, Radius * 2.f + 24.f)
 					: Radius * 2.f + 40.f;
-				FHitResult Hit;
-				if (!World->SweepSingleByChannel(Hit, Start, Start + Dir * double(Dist), FQuat::Identity, ECC_Pawn, Shape, Query)
-					|| !AcceptTransferHit(Hit))
+				TArray<FHitResult> Hits;
+				if (!World->SweepMultiByChannel(Hits, Start, Start + Dir * double(Dist),
+					FQuat::Identity, ECC_Pawn, Shape, Query))
 				{
 					continue;
 				}
-				const float DistSq = float(FVector::DistSquared(Hit.ImpactPoint, Loc));
-				if (DistSq < BestDistSq)
+				for (const FHitResult& Hit : Hits)
 				{
-					BestDistSq = DistSq;
-					BestHit = Hit;
-					bFound = true;
+					if (!AcceptTransferHit(Hit))
+					{
+						continue;
+					}
+					const float DistSq = float(FVector::DistSquared(Hit.ImpactPoint, Loc));
+					const float ContinuityPenalty = 1.f - FMath::Clamp(
+						float(Hit.ImpactNormal.GetSafeNormal() | WallNormal), -1.f, 1.f);
+					const float Score = DistSq + ContinuityPenalty * FMath::Square(Radius * 0.35f);
+					if (Score < BestDistSq)
+					{
+						BestDistSq = Score;
+						BestHit = Hit;
+						bFound = true;
+					}
 				}
 			}
 			if (bFound)
@@ -987,6 +1031,11 @@ void USlimeClingComponent::TryMountLedge()
 	}
 
 	if (bLockMountAfterLedgeDrop || MoveForward <= 0.f || IsStandingOnLedgeTop())
+	{
+		return;
+	}
+
+	if (bWallTopIsEave && TryTransferToOverhang())
 	{
 		return;
 	}
@@ -1030,12 +1079,24 @@ void USlimeClingComponent::TryMountLedge()
 	}
 
 	const FVector Stand = FloorHit.ImpactPoint + FVector(0.0, 0.0, double(HalfH) + 2.0);
-	OwnerCharacter->SetActorLocation(Stand, false);
-	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
+	const double ClearanceZ = FMath::Max(Stand.Z, double(WallTopZ) + double(HalfH) + 2.0);
+	const FVector Clearance = Loc + WallNormal * double(ClingSkin + 2.f)
+		+ FVector(0.0, 0.0, ClearanceZ - Loc.Z);
+	if (USlimeCharacterMovementComponent* Movement = GetSlimeMovement())
 	{
-		Movement->Velocity = FVector::ZeroVector;
+		if (Movement->RequestMantle(Clearance, Stand, MantleSpeed))
+		{
+			bMantling = true;
+			bWallTopIsEave = false;
+			LostContactTime = 0.f;
+			WallComponent.Reset();
+			if (Body)
+			{
+				Body->SetClingVisual(false, FVector::ZeroVector, FVector::UpVector);
+				Body->SuppressHeightSqueeze(0.35f);
+			}
+		}
 	}
-	ExitCling(EClingExit::Walking);
 }
 
 void USlimeClingComponent::TryLandWhileClinging()
@@ -1327,9 +1388,17 @@ void USlimeClingComponent::NudgeAlongLedge(const FLedgeOverhang& Ledge, float De
 	UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
 	const float Speed = Movement ? Movement->MaxWalkSpeed : 420.f;
 	const float HalfH = OwnerCapsule->GetScaledCapsuleHalfHeight();
-	FVector NewLoc = OwnerCharacter->GetActorLocation() + Ledge.Outward * double(Speed * DeltaTime);
-	NewLoc.Z = double(Ledge.FloorZ) + double(HalfH);
-	OwnerCharacter->SetActorLocation(NewLoc, false);
+	FVector Delta = Ledge.Outward * double(Speed * DeltaTime);
+	Delta.Z = double(Ledge.FloorZ) + double(HalfH) - OwnerCharacter->GetActorLocation().Z;
+	if (USlimeCharacterMovementComponent* SlimeMovement = GetSlimeMovement())
+	{
+		SlimeMovement->QueueExternalCorrection(Delta);
+	}
+	else if (Movement && Movement->UpdatedComponent)
+	{
+		FHitResult Hit;
+		Movement->SafeMoveUpdatedComponent(Delta, OwnerCharacter->GetActorQuat(), true, Hit);
+	}
 	if (Movement)
 	{
 		Movement->Velocity = Ledge.Outward * Speed;
@@ -1346,11 +1415,8 @@ void USlimeClingComponent::EnterClingFromLedgeDrop(const FHitResult& SideWall)
 		return;
 	}
 
-	const float Radius = GetBodyRadius();
-	const float HalfH = OwnerCapsule->GetScaledCapsuleHalfHeight();
-	FVector Nudged = OwnerCharacter->GetActorLocation() + WallNormal * double(Radius * 0.35f);
-	Nudged.Z = FMath::Min(Nudged.Z, double(WallTopZ) - double(HalfH) - 6.0);
-	OwnerCharacter->SetActorLocation(Nudged, false);
+	// EnterCling submitted the contact to the movement component. It will apply a bounded
+	// surface correction during the next custom movement sub-step.
 }
 
 void USlimeClingComponent::UpdateLedgeDropMountLock()
@@ -1432,4 +1498,53 @@ bool USlimeClingComponent::IsLedgeTallEnough(const FLedgeOverhang& Ledge) const
 
 	const float Drop = Ledge.FloorZ - float(Hit.ImpactPoint.Z);
 	return Drop > MinDrop;
+}
+
+USlimeCharacterMovementComponent* USlimeClingComponent::GetSlimeMovement() const
+{
+	return OwnerCharacter
+		? Cast<USlimeCharacterMovementComponent>(OwnerCharacter->GetCharacterMovement())
+		: nullptr;
+}
+
+bool USlimeClingComponent::TryTransferToOverhang()
+{
+	USlimeCharacterMovementComponent* Movement = GetSlimeMovement();
+	UWorld* World = GetWorld();
+	if (!OwnerCharacter || !OwnerCapsule || !Movement || !World || !bWallTopIsEave)
+	{
+		return false;
+	}
+
+	const float Radius = OwnerCapsule->GetScaledCapsuleRadius();
+	const FVector Travel = GetWallUp().GetSafeNormal();
+	const FVector Start = OwnerCapsule->GetComponentLocation() + Travel * 2.f;
+	const FVector End = Start + Travel * FMath::Max(Radius + LedgeGrabSlack * 2.f, 24.f);
+	FCollisionQueryParams Query(TEXT("SlimeClingOverhang"), false, GetOwner());
+	TArray<FHitResult> Hits;
+	if (!World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Pawn,
+		FCollisionShape::MakeSphere(3.f), Query))
+	{
+		return false;
+	}
+
+	for (const FHitResult& Hit : Hits)
+	{
+		if (!IsClingableWall(Hit) || Hit.ImpactNormal.GetSafeNormal().Z >= -WallNormalZMax)
+		{
+			continue;
+		}
+		FSlimeSurfaceContact Contact;
+		Contact.Point = Hit.ImpactPoint;
+		Contact.Normal = Hit.ImpactNormal;
+		Contact.Component = Hit.GetComponent();
+		Contact.Skin = ClingSkin;
+		if (Movement->RequestSurfaceTransition(Contact, ClimbSpeed))
+		{
+			PendingSurfaceTransitionHit = Hit;
+			bSurfaceTransitionPending = true;
+			return true;
+		}
+	}
+	return false;
 }

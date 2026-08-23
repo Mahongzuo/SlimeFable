@@ -52,7 +52,7 @@ protected:
 public:
 
 	/** Constructor */
-	ASlimeFableCharacter();	
+	ASlimeFableCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 protected:
 
