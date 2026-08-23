@@ -39,7 +39,7 @@ class SLIMEFABLE_API ASlimeCharacter : public ASlimeFableCharacter, public IComb
 	GENERATED_BODY()
 
 public:
-	ASlimeCharacter();
+	ASlimeCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;

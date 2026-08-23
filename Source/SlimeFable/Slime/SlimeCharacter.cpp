@@ -12,6 +12,7 @@
 #include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeClingComponent.h"
+#include "SlimeCharacterMovementComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeHealthComponent.h"
@@ -36,7 +37,10 @@
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 
-ASlimeCharacter::ASlimeCharacter()
+
+ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<USlimeCharacterMovementComponent>(
+		ACharacter::CharacterMovementComponentName))
 {
 	PrimaryActorTick.bCanEverTick = true;
 

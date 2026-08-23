@@ -15,6 +15,7 @@
 #include "ProceduralMeshComponent.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "SlimeFable.h"
+#include "SlimeCharacterMovementComponent.h"
 #include "HAL/IConsoleManager.h"
 
 using namespace SlimeSim;
@@ -380,7 +381,16 @@ void USlimeBodyComponent::UpdateFloor()
 				&& Hang > 4.f
 				&& Hang <= MaxSnap)
 			{
-				OwnerCharacter->AddActorWorldOffset(FVector(0.0, 0.0, double(-Hang)), true);
+				if (USlimeCharacterMovementComponent* SlimeMovement = Cast<USlimeCharacterMovementComponent>(Movement))
+				{
+					SlimeMovement->QueueExternalCorrection(FVector(0.0, 0.0, double(-Hang)));
+				}
+				else
+				{
+					FHitResult Hit;
+					Movement->SafeMoveUpdatedComponent(FVector(0.0, 0.0, double(-Hang)),
+						OwnerCharacter->GetActorQuat(), true, Hit);
+				}
 			}
 		}
 	}
@@ -869,11 +879,22 @@ void USlimeBodyComponent::ApplyCapsuleSize(float NewRadius, float NewHalfHeight)
 		return;
 	}
 
-	const float PreviousHalfHeight = OwnerCapsule->GetUnscaledCapsuleHalfHeight();
-	OwnerCapsule->SetCapsuleSize(NewRadius, NewHalfHeight, true);
-
-	// SetCapsuleSize works around the centre, so shift the actor to keep the feet planted.
-	OwnerCharacter->AddActorWorldOffset(FVector(0.0, 0.0, double(NewHalfHeight - PreviousHalfHeight)), false);
+	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
+	{
+		if (USlimeCharacterMovementComponent* SlimeMovement = Cast<USlimeCharacterMovementComponent>(Movement))
+		{
+			SlimeMovement->RequestCapsuleResize(NewRadius, NewHalfHeight);
+		}
+		else
+		{
+			const float PreviousHalfHeight = OwnerCapsule->GetUnscaledCapsuleHalfHeight();
+			OwnerCapsule->SetCapsuleSize(NewRadius, NewHalfHeight, true);
+			FHitResult Hit;
+			Movement->SafeMoveUpdatedComponent(
+				FVector(0.0, 0.0, double(NewHalfHeight - PreviousHalfHeight)),
+				OwnerCharacter->GetActorQuat(), true, Hit);
+		}
+	}
 
 	if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
 	{
@@ -917,7 +938,16 @@ void USlimeBodyComponent::UpdateAnchor()
 		if (Distance > double(MaxAnchorDistance))
 		{
 			const FVector Correction = Offset.GetSafeNormal() * (Distance - double(MaxAnchorDistance));
-			OwnerCharacter->AddActorWorldOffset(Correction, true);
+			if (USlimeCharacterMovementComponent* SlimeMovement = Cast<USlimeCharacterMovementComponent>(
+				OwnerCharacter->GetCharacterMovement()))
+			{
+				SlimeMovement->QueueExternalCorrection(Correction);
+			}
+			else if (UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement())
+			{
+				FHitResult Hit;
+				Movement->SafeMoveUpdatedComponent(Correction, OwnerCharacter->GetActorQuat(), true, Hit);
+			}
 		}
 	}
 }
