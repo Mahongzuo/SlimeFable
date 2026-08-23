@@ -2,9 +2,14 @@
 
 #include "EnemyCharacter.h"
 
+#include "AbilitySystemComponent.h"
+#include "EnemyAttributeSet.h"
+#include "EnemyGameplayEffects.h"
+#include "Abilities/EnemySkillAbility.h"
+#include "SlimeEnemyGameplayTags.h"
+
 #include "EnemyAllyAIController.h"
 #include "EnemyFighter.h"
-#include "EnemyTower.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -79,6 +84,9 @@ AEnemyCharacter::AEnemyCharacter()
 	Health->bDestroyOnDeath = false;
 	Health->bRegenOnDeath = false;
 	Health->MaxHP = 200.f;
+	AbilitySystem = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("EnemyAbilitySystem"));
+	AbilitySystem->SetIsReplicated(false);
+	EnemyAttributes = CreateDefaultSubobject<UEnemyAttributeSet>(TEXT("EnemyAttributes"));
 	DeathDissolveNiagara = TSoftObjectPtr<UNiagaraSystem>(
 		FSoftObjectPath(TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact.NS_Dark_Solo_Impact")));
 	DeathDissolveMaterial = TSoftObjectPtr<UMaterialInterface>(
@@ -265,6 +273,7 @@ void AEnemyCharacter::Tick(float DeltaSeconds)
 		return;
 	}
 	TickOutOfCombatReset(DeltaSeconds);
+	TickPoiseRegen(DeltaSeconds);
 }
 
 void AEnemyCharacter::UpdateMorphSafeTransform()
@@ -409,6 +418,23 @@ void AEnemyCharacter::TickOutOfCombatReset(float DeltaSeconds)
 void AEnemyCharacter::BeginPlay()
 {
 	SpawnTransform = GetActorTransform();
+	const FString RuntimeClassName = GetClass()->GetName();
+	if (RuntimeClassName.Contains(TEXT("Watchdog")))
+	{
+		CombatRole = EEnemyCombatRole::Chaser;
+	}
+	else if (RuntimeClassName.Contains(TEXT("Samurai")))
+	{
+		CombatRole = EEnemyCombatRole::Duelist;
+	}
+	else if (RuntimeClassName.Contains(TEXT("Gunner")))
+	{
+		CombatRole = EEnemyCombatRole::Suppressor;
+	}
+	else if (RuntimeClassName.Contains(TEXT("Emperor")))
+	{
+		CombatRole = EEnemyCombatRole::Commander;
+	}
 	if (bMorphTarget)
 	{
 		MorphSafeTransform = SpawnTransform;
@@ -501,9 +527,40 @@ void AEnemyCharacter::BeginPlay()
 			}
 		}
 	}
-
 	ApplyLabDummyFlags();
 	ApplyHealthOverridesAfterBeginPlay();
+	InitAbilitySystem();
+}
+
+void AEnemyCharacter::InitAbilitySystem()
+{
+	if (!AbilitySystem)
+	{
+		return;
+	}
+	AbilitySystem->InitAbilityActorInfo(this, this);
+
+	if (EnemyAttributes)
+	{
+		const float ResolvedMaxHP = Health ? Health->MaxHP : MaxHP;
+		EnemyAttributes->InitMaxHealth(FMath::Max(ResolvedMaxHP, 1.f));
+		EnemyAttributes->InitHealth(Health ? Health->CurrentHP : ResolvedMaxHP);
+		EnemyAttributes->InitMaxPoise(FMath::Max(MaxPoise, 1.f));
+		EnemyAttributes->InitPoise(FMath::Max(MaxPoise, 1.f));
+		EnemyAttributes->InitGuard(Guard);
+		EnemyAttributes->InitMoveSpeed(GetCharacterMovement() ? GetCharacterMovement()->MaxWalkSpeed : 420.f);
+		EnemyAttributes->InitDamagePower(1.f);
+		EnemyAttributes->InitPhaseIndex(1.f);
+	}
+
+	// Role tag lets the encounter director and StateTree query enemies by job.
+	AbilitySystem->AddLooseGameplayTag(SlimeEnemyTags::RoleTag(static_cast<uint8>(CombatRole)));
+	AbilitySystem->GiveAbility(FGameplayAbilitySpec(UEnemySkillAbility::StaticClass(), 1, INDEX_NONE, this));
+
+	if (Health && !Health->OnHealthChanged.IsAlreadyBound(this, &AEnemyCharacter::HandleHealthFacadeChanged))
+	{
+		Health->OnHealthChanged.AddDynamic(this, &AEnemyCharacter::HandleHealthFacadeChanged);
+	}
 }
 
 void AEnemyCharacter::ApplyLabDummyFlags()
@@ -861,14 +918,238 @@ void AEnemyCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVec
 	{
 		OutOfCombatSeconds = 0.f;
 	}
-	if (Health)
+
+	// Legacy fallback: no ability system (e.g. CDO / early spawn) or already inside the GAS callback.
+	if (bRoutingGasDamage || !AbilitySystem || !EnemyAttributes)
 	{
-		Health->ApplyDamage(Damage, DamageCauser, DamageLocation, DamageImpulse);
+		if (Health)
+		{
+			Health->ApplyDamage(Damage, DamageCauser, DamageLocation, DamageImpulse);
+		}
+		return;
 	}
+
+	if (Damage > 0.f && HasCombatStateTag(SlimeEnemyTags::State_Invulnerable))
+	{
+		return;
+	}
+
+	float FinalDamage = Damage;
+	if (Damage > 0.f && HasCombatStateTag(SlimeEnemyTags::State_Guarding))
+	{
+		FinalDamage = Damage * FMath::Clamp(1.f - GuardDamageReduction, 0.f, 1.f);
+		const float NewGuard = EnemyAttributes->GetGuard() - Damage;
+		EnemyAttributes->SetGuard(FMath::Max(NewGuard, 0.f));
+		if (NewGuard <= 0.f)
+		{
+			OnGuardBroken(DamageCauser);
+		}
+	}
+
+	const bool bSuperArmor = HasCombatStateTag(SlimeEnemyTags::State_SuperArmor);
+	const float PoiseDamage = (FinalDamage > 0.f && !bSuperArmor) ? FinalDamage * PoiseDamageRatio : 0.f;
+
+	PendingDamageLocation = DamageLocation;
+	PendingDamageImpulse = DamageImpulse;
+	PoiseRegenBlockedUntil = GetWorld() ? GetWorld()->GetTimeSeconds() + 2.f : 0.f;
+
+	FGameplayEffectContextHandle Context = AbilitySystem->MakeEffectContext();
+	Context.AddInstigator(DamageCauser, DamageCauser);
+	const FGameplayEffectSpecHandle Spec =
+		AbilitySystem->MakeOutgoingSpec(UGE_EnemyDamage::StaticClass(), 1.f, Context);
+	if (!Spec.IsValid())
+	{
+		if (Health)
+		{
+			Health->ApplyDamage(FinalDamage, DamageCauser, DamageLocation, DamageImpulse);
+		}
+		return;
+	}
+	Spec.Data->SetSetByCallerMagnitude(SlimeEnemyTags::Data_Damage, FinalDamage);
+	Spec.Data->SetSetByCallerMagnitude(SlimeEnemyTags::Data_PoiseDamage, PoiseDamage);
+	AbilitySystem->ApplyGameplayEffectSpecToSelf(*Spec.Data);
+}
+
+void AEnemyCharacter::OnGasDamageApplied(float Damage, AActor* DamageInstigator)
+{
+	if (!Health || Damage <= 0.f)
+	{
+		return;
+	}
+	TGuardValue<bool> GasRouteGuard(bRoutingGasDamage, true);
+	TGuardValue<bool> FacadeGuard(bSyncingHealthFacade, true);
+	Health->ApplyDamage(Damage, DamageInstigator, PendingDamageLocation, PendingDamageImpulse);
+}
+
+void AEnemyCharacter::OnGasHealingApplied(float Healing, AActor* HealingInstigator)
+{
+	if (!Health || Healing <= 0.f)
+	{
+		return;
+	}
+	TGuardValue<bool> FacadeGuard(bSyncingHealthFacade, true);
+	Health->ApplyHealing(Healing);
+}
+
+void AEnemyCharacter::OnPoiseBroken(AActor* PoiseInstigator)
+{
+	EnterStagger(StaggerDuration, PoiseInstigator);
+}
+
+void AEnemyCharacter::OnGuardBroken(AActor* GuardInstigator)
+{
+	if (AbilitySystem)
+	{
+		FGameplayEventData Payload;
+		Payload.EventTag = SlimeEnemyTags::Event_GuardBreak;
+		Payload.Instigator = GuardInstigator;
+		Payload.Target = this;
+		AbilitySystem->HandleGameplayEvent(SlimeEnemyTags::Event_GuardBreak, &Payload);
+		AbilitySystem->RemoveActiveEffectsWithGrantedTags(
+			FGameplayTagContainer(SlimeEnemyTags::State_Guarding));
+	}
+	EnterStagger(StaggerDuration, GuardInstigator);
+}
+
+void AEnemyCharacter::EnterStagger(float Duration, AActor* StaggerInstigator)
+{
+	if (bDeathSequence || Duration <= 0.f)
+	{
+		return;
+	}
+	if (Combat)
+	{
+		Combat->InterruptCombat();
+	}
+	ReleaseAttackSlot();
+	ApplyTimedState(UGE_EnemyStagger::StaticClass(), Duration);
+	if (EnemyAttributes)
+	{
+		// Refill poise so the enemy does not chain-stagger forever.
+		EnemyAttributes->SetPoise(EnemyAttributes->GetMaxPoise());
+	}
+	if (AbilitySystem)
+	{
+		FGameplayEventData Payload;
+		Payload.EventTag = SlimeEnemyTags::Event_Hit;
+		Payload.Instigator = StaggerInstigator;
+		Payload.Target = this;
+		AbilitySystem->HandleGameplayEvent(SlimeEnemyTags::Event_Hit, &Payload);
+	}
+}
+
+bool AEnemyCharacter::ApplyTimedState(TSubclassOf<UGameplayEffect> EffectClass, float Duration, float Power)
+{
+	if (!AbilitySystem || !EffectClass)
+	{
+		return false;
+	}
+	const FGameplayEffectContextHandle Context = AbilitySystem->MakeEffectContext();
+	const FGameplayEffectSpecHandle Spec = AbilitySystem->MakeOutgoingSpec(EffectClass, 1.f, Context);
+	if (!Spec.IsValid())
+	{
+		return false;
+	}
+	Spec.Data->SetSetByCallerMagnitude(SlimeEnemyTags::Data_Duration, FMath::Max(Duration, 0.05f));
+	Spec.Data->SetSetByCallerMagnitude(SlimeEnemyTags::Data_Power, Power);
+	return AbilitySystem->ApplyGameplayEffectSpecToSelf(*Spec.Data).IsValid();
+}
+
+bool AEnemyCharacter::HasCombatStateTag(FGameplayTag Tag) const
+{
+	return AbilitySystem && Tag.IsValid() && AbilitySystem->HasMatchingGameplayTag(Tag);
+}
+
+bool AEnemyCharacter::IsStaggered() const
+{
+	return HasCombatStateTag(SlimeEnemyTags::State_Staggered);
+}
+
+float AEnemyCharacter::GetPoisePercent() const
+{
+	if (!EnemyAttributes || EnemyAttributes->GetMaxPoise() <= 0.f)
+	{
+		return 1.f;
+	}
+	return FMath::Clamp(EnemyAttributes->GetPoise() / EnemyAttributes->GetMaxPoise(), 0.f, 1.f);
+}
+
+float AEnemyCharacter::GetHealthPercent() const
+{
+	return Health ? Health->GetHealthPercent() : 1.f;
+}
+
+void AEnemyCharacter::HandleHealthFacadeChanged(float CurrentHP, float FacadeMaxHP)
+{
+	if (bSyncingHealthFacade || !EnemyAttributes)
+	{
+		return;
+	}
+	// Damage applied straight to the legacy component (old Blueprints, fall damage, quests):
+	// mirror it so GAS stays the single source of truth for AI queries.
+	EnemyAttributes->SetMaxHealth(FMath::Max(FacadeMaxHP, 1.f));
+	EnemyAttributes->SetHealth(FMath::Clamp(CurrentHP, 0.f, FMath::Max(FacadeMaxHP, 1.f)));
+}
+
+void AEnemyCharacter::TickPoiseRegen(float DeltaSeconds)
+{
+	if (!EnemyAttributes || PoiseRegenPerSecond <= 0.f || bDeathSequence)
+	{
+		return;
+	}
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	if (Now < PoiseRegenBlockedUntil || IsStaggered())
+	{
+		return;
+	}
+	const float MaxValue = EnemyAttributes->GetMaxPoise();
+	const float Current = EnemyAttributes->GetPoise();
+	if (Current < MaxValue)
+	{
+		EnemyAttributes->SetPoise(FMath::Min(Current + PoiseRegenPerSecond * DeltaSeconds, MaxValue));
+	}
+}
+
+bool AEnemyCharacter::RequestAttackSlot(float Duration)
+{
+	if (bDeathSequence || !GetWorld())
+	{
+		return false;
+	}
+	if (UEnemyEncounterSubsystem* Director = GetWorld()->GetSubsystem<UEnemyEncounterSubsystem>())
+	{
+		return Director->TryAcquireAttackSlot(this, CombatRole, Duration);
+	}
+	return true;
+}
+
+void AEnemyCharacter::ReleaseAttackSlot()
+{
+	if (GetWorld())
+	{
+		GetWorld()->GetSubsystem<UEnemyEncounterSubsystem>()->ReleaseAttackSlot(this);
+	}
+}
+
+int32 AEnemyCharacter::GetEncounterPhase() const
+{
+	return GetWorld() ? GetWorld()->GetSubsystem<UEnemyEncounterSubsystem>()->GetBossPhase() : 1;
 }
 
 void AEnemyCharacter::HandleDeath()
 {
+	if (bDeathSequence)
+	{
+		return;
+	}
+	if (Health && Health->IsAlive())
+	{
+		ApplyDamage(FMath::Max(Health->CurrentHP, 1.f), this, GetActorLocation(), FVector::ZeroVector);
+	}
+	else
+	{
+		HandleDied();
+	}
 }
 
 void AEnemyCharacter::ApplyHealing(float Healing, AActor* Healer)
@@ -881,6 +1162,12 @@ void AEnemyCharacter::ApplyHealing(float Healing, AActor* Healer)
 
 void AEnemyCharacter::NotifyDanger(const FVector& DangerLocation, AActor* DangerSource)
 {
+	if (bDeathSequence || CombatRole != EEnemyCombatRole::Duelist || Guard <= 0.f || IsStaggered())
+	{
+		return;
+	}
+	// Duelists answer a readable incoming attack with a short guard stance.
+	ApplyTimedState(UGE_EnemyGuard::StaticClass(), 0.75f);
 }
 
 void AEnemyCharacter::HandleDied()
@@ -1362,10 +1649,6 @@ void AEnemyCharacter::SetEnemyPresence(EEnemyPresence NewPresence)
 bool AEnemyCharacter::IsDevourableNow() const
 {
 	if (!bDevourable || bPhantomInstance || bDeathSequence)
-	{
-		return false;
-	}
-	if (Cast<AEnemyTower>(this))
 	{
 		return false;
 	}

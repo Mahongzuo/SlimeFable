@@ -21,6 +21,7 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetEnemyPresence(EEnemyPresence NewPresence) override;
 	virtual bool IsInCombat() const override;
@@ -85,6 +86,8 @@ protected:
 	FVector GetMuzzleLocation() const;
 	APawn* ResolvePlayerTarget() const;
 	void FaceTarget(AActor* Target);
+	void ConfigureMobileGunner();
+	void TickMobileGunner();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<USphereComponent> AggroSphere;
@@ -104,4 +107,5 @@ protected:
 	float DifficultyBaseBeamDamage = 12.f;
 	float DifficultyBaseMissileDamage = 16.f;
 	bool bCombatBasesCaptured = false;
+	bool bMobileGunner = false;
 };

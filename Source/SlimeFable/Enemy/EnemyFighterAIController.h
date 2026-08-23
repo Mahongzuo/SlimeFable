@@ -11,6 +11,8 @@ class AEnemyFighter;
 class UAnimMontage;
 class UEnemyCombatComponent;
 class UNiagaraComponent;
+class UStateTree;
+class UStateTreeComponent;
 
 UENUM(BlueprintType)
 enum class EEnemyFighterState : uint8
@@ -39,6 +41,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI", meta = (ClampMin = "0.05", Units = "s"))
 	float PathRefreshInterval = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|StateTree",
+		meta = (ToolTip = "可选共享敌人 StateTree。加载成功后由 StateTree 决策，未配置或加载失败自动回退旧状态机。"))
+	TSoftObjectPtr<UStateTree> DecisionStateTree;
 
 protected:
 	virtual APawn* FindCombatFocus() const;
@@ -91,4 +97,9 @@ protected:
 	TArray<float> MoveCooldowns;
 	TWeakObjectPtr<UNiagaraComponent> TelegraphFx;
 	TWeakObjectPtr<UAnimMontage> PlayingIdleMontage;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|StateTree")
+	TObjectPtr<UStateTreeComponent> StateTreeComponent;
+
+	bool bUsingStateTree = false;
 };

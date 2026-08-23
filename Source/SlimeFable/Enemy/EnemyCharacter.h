@@ -4,12 +4,18 @@
 
 #include "CoreMinimal.h"
 #include "CombatDamageable.h"
+#include "GameplayTagContainer.h"
 #include "GameFramework/Character.h"
 #include "EnemyCombatTypes.h"
+#include "EnemyEncounterSubsystem.h"
 #include "SlimeLockTarget.h"
 #include "EnemyCharacter.generated.h"
 
 class UEnemyCombatComponent;
+class UAbilitySystemComponent;
+class UEnemyAttributeSet;
+class UGameplayEffect;
+enum class EEnemyCombatRole : uint8;
 class USlimeHealthComponent;
 class UWidgetComponent;
 class UStaticMeshComponent;
@@ -47,6 +53,46 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	UEnemyCombatComponent* GetEnemyCombat() const { return Combat; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	UAbilitySystemComponent* GetEnemyAbilitySystem() const { return AbilitySystem; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	EEnemyCombatRole GetCombatRole() const { return CombatRole; }
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+	bool RequestAttackSlot(float Duration);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+	void ReleaseAttackSlot();
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	int32 GetEncounterPhase() const;
+
+	/** Applies a timed state GameplayEffect (stagger / guard / invulnerable / super armor / empower). */
+	UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+	bool ApplyTimedState(TSubclassOf<UGameplayEffect> EffectClass, float Duration, float Power = 1.f);
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	bool HasCombatStateTag(FGameplayTag Tag) const;
+
+	/** Poise break / scripted stagger. Interrupts the current attack and opens a counter window. */
+	UFUNCTION(BlueprintCallable, Category = "Combat|AI")
+	void EnterStagger(float Duration, AActor* StaggerInstigator);
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	bool IsStaggered() const;
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	float GetPoisePercent() const;
+
+	UFUNCTION(BlueprintPure, Category = "Combat|AI")
+	float GetHealthPercent() const;
+
+	/** Called from UEnemyAttributeSet once GAS has resolved an attribute change. */
+	void OnGasDamageApplied(float Damage, AActor* DamageInstigator);
+	void OnGasHealingApplied(float Healing, AActor* HealingInstigator);
+	void OnPoiseBroken(AActor* PoiseInstigator);
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual bool CanBeLockedOn() const override;
@@ -135,6 +181,37 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ToolTip = "敌人在遭遇中的职责：看门狗追击、武士决斗、机枪手压制、天皇指挥。"))
+	EEnemyCombatRole CombatRole = EEnemyCombatRole::Duelist;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ClampMin = "0.0", ToolTip = "硬直资源，受击会消耗；归零时进入失衡。默认 100。"))
+	float MaxPoise = 100.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ClampMin = "0.0", ToolTip = "格挡资源，供后续 Boss/武士 Ability 使用。"))
+	float Guard = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ClampMin = "0.0", ClampMax = "3.0",
+			ToolTip = "每点伤害转成多少硬直伤害。0 = 打不出失衡。默认 0.6，配合 MaxPoise 100 约 3~5 下破防。"))
+	float PoiseDamageRatio = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ClampMin = "0.0", ToolTip = "脱战/未受击时每秒回复的硬直。默认 12。"))
+	float PoiseRegenPerSecond = 12.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ClampMin = "0.0", Units = "s",
+			ToolTip = "硬直归零后的失衡时长，也是玩家的反击窗口。默认 1.2 秒。"))
+	float StaggerDuration = 1.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ClampMin = "0.0", ClampMax = "1.0",
+			ToolTip = "格挡状态下的伤害减免比例。0.65 = 只吃 35% 伤害。仅武士等有 Guard 的单位生效。"))
+	float GuardDamageReduction = 0.65f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "0.0", ClampMax = "1.0",
 		ToolTip = "击退抗性。0 完全吃击退，1 完全免疫。空中时竖直击飞不再叠加。默认 0。"))
@@ -299,8 +376,22 @@ protected:
 	UFUNCTION()
 	void HandleDied();
 
+	/** Mirrors legacy health-component changes back into the GAS Health attribute. */
+	UFUNCTION()
+	void HandleHealthFacadeChanged(float CurrentHP, float FacadeMaxHP);
+
+	void InitAbilitySystem();
+	void TickPoiseRegen(float DeltaSeconds);
+	void OnGuardBroken(AActor* GuardInstigator);
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<USlimeHealthComponent> Health;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
+	TObjectPtr<UAbilitySystemComponent> AbilitySystem;
+
+	UPROPERTY()
+	TObjectPtr<UEnemyAttributeSet> EnemyAttributes;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<UEnemyCombatComponent> Combat;
@@ -321,6 +412,12 @@ protected:
 	EEnemyPresence Presence = EEnemyPresence::Active;
 
 	FTransform SpawnTransform = FTransform::Identity;
+	/** Re-entrancy guard: true while GAS is forwarding damage into the legacy health facade. */
+	bool bRoutingGasDamage = false;
+	bool bSyncingHealthFacade = false;
+	FVector PendingDamageLocation = FVector::ZeroVector;
+	FVector PendingDamageImpulse = FVector::ZeroVector;
+	float PoiseRegenBlockedUntil = 0.f;
 	float SavedHP = -1.f;
 	bool bPresenceRegistered = false;
 	float OutOfCombatSeconds = 0.f;

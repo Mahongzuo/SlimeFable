@@ -7,6 +7,7 @@
 #include "SlimeCombatTypes.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
+#include "SlimeSkillVfxSubsystem.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 
@@ -154,7 +155,7 @@ void USlimeStatusComponent::ApplyReactionRow(const FSlimeReactionRow& Row, AActo
 		Health->ApplyDamage(Row.ExtraDamage, Instigator, Owner->GetActorLocation(), Impulse);
 	}
 
-	if (UNiagaraSystem* System = Row.NiagaraSystem.LoadSynchronous())
+	if (UNiagaraSystem* System = USlimeSkillVfxSubsystem::ResolveLoadedSystem(Row.NiagaraSystem, Owner))
 	{
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(Owner, System, Owner->GetActorLocation());
 	}

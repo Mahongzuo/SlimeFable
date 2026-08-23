@@ -36,6 +36,8 @@ protected:
 	void FinishGate();
 	int32 GetShaderJobsRemaining() const;
 	int32 GetStreamingJobsRemaining() const;
+	int32 GetSkillVfxJobsRemaining() const;
+	int32 GetPsoJobsRemaining() const;
 	bool IsRenderReady() const;
 
 	UFUNCTION()

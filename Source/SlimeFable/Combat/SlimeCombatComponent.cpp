@@ -26,6 +26,7 @@
 #include "SlimeLockOnComponent.h"
 #include "SlimeMorphComponent.h"
 #include "SlimeSkillProjectile.h"
+#include "SlimeSkillVfxSubsystem.h"
 #include "Blueprint/UserWidget.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
@@ -1012,18 +1013,33 @@ void USlimeCombatComponent::ExecuteChain(const FSlimeSkillDef& Def, const FVecto
 
 void USlimeCombatComponent::SpawnVfx(const FSlimeSkillDef& Def, const FVector& Location) const
 {
-	UNiagaraSystem* System = Def.NiagaraSystem.LoadSynchronous();
+	UNiagaraSystem* System = USlimeSkillVfxSubsystem::ResolveLoadedSystem(Def.NiagaraSystem, GetOwner());
 	if (!System || !GetOwner())
 	{
 		return;
 	}
 
+	FRotator VfxRotation = FRotator::ZeroRotator;
+	switch (Def.VfxRotationPolicy)
+	{
+	case ESlimeVfxRotationPolicy::Owner:
+		VfxRotation = GetOwner()->GetActorRotation();
+		break;
+	case ESlimeVfxRotationPolicy::World:
+		break;
+	case ESlimeVfxRotationPolicy::Aim:
+	default:
+		VfxRotation = ActiveAim.Rotation();
+		break;
+	}
+	const FVector VfxLocation = Location + VfxRotation.RotateVector(Def.VfxLocationOffset);
+
 	UNiagaraComponent* FX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 		GetOwner(),
 		System,
-		Location,
-		ActiveAim.Rotation(),
-		FVector(1.f),
+		VfxLocation,
+		VfxRotation,
+		Def.VfxScale,
 		true,
 		true);
 	if (!FX)
@@ -1032,19 +1048,26 @@ void USlimeCombatComponent::SpawnVfx(const FSlimeSkillDef& Def, const FVector& L
 	}
 
 	FX->SetAutoDestroy(true);
-	const float KillAfter = FMath::Clamp(Def.HitEnd + Def.Recovery + 0.85f, 1.1f, 3.2f);
-	if (UWorld* World = FX->GetWorld())
+	FX->SetVariableLinearColor(TEXT("User.Color"), Def.VfxColor);
+	FX->SetVariableLinearColor(TEXT("User.Tint"), Def.VfxColor);
+	FX->SetVariableLinearColor(TEXT("User.ElementColor"), Def.VfxColor);
+
+	if (Def.VfxHardLifetime > 0.f)
 	{
-		TWeakObjectPtr<UNiagaraComponent> WeakFX(FX);
-		FTimerHandle Handle;
-		World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakFX]()
+		const float KillAfter = FMath::Max(Def.VfxHardLifetime, Def.VfxMinVisibleTime);
+		if (UWorld* World = FX->GetWorld())
 		{
-			if (UNiagaraComponent* Comp = WeakFX.Get())
+			TWeakObjectPtr<UNiagaraComponent> WeakFX(FX);
+			FTimerHandle Handle;
+			World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakFX]()
 			{
-				Comp->DeactivateImmediate();
-				Comp->DestroyComponent();
-			}
-		}), KillAfter, false);
+				if (UNiagaraComponent* Comp = WeakFX.Get())
+				{
+					Comp->DeactivateImmediate();
+					Comp->DestroyComponent();
+				}
+			}), KillAfter, false);
+		}
 	}
 }
 

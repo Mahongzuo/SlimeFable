@@ -18,6 +18,8 @@ public class SlimeFable : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"GameplayTags",
+			"GameplayAbilities",
+			"GameplayTasks",
 			"UMG",
 			"Slate",
 			"SlateCore",

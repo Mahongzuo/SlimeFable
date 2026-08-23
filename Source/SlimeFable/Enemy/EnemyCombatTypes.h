@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "SlimeCombatTypes.h"
+#include "GameplayTagContainer.h"
 #include "EnemyCombatTypes.generated.h"
 
 class UAnimMontage;
@@ -11,6 +12,7 @@ class UNiagaraSystem;
 class USkeletalMesh;
 class UStaticMesh;
 class UMaterialInterface;
+class UGameplayEffect;
 
 UENUM(BlueprintType)
 enum class EEnemyMeshPartKind : uint8
@@ -145,6 +147,58 @@ struct SLIMEFABLE_API FEnemySkillDef
 	TSoftObjectPtr<UNiagaraSystem> ProjectileNiagara;
 
 	float GetTotalDuration() const { return Windup + Recovery; }
+};
+
+/** GAS-facing ability contract used by encounter data and StateTree selection. */
+USTRUCT(BlueprintType)
+struct SLIMEFABLE_API FEnemyAbilityDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
+		meta = (ToolTip = "Ability 唯一标识；用于 StateTree 选招与连段，不要和同一敌人的其他招重复。"))
+	FName AbilityId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability",
+		meta = (ToolTip = "兼容旧 CombatComponent 的技能数据；迁移到 GAS 后仍由此定义命中、伤害和动画。"))
+	FEnemySkillDef Skill;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "允许使用该 Ability 的最低遭遇阶段，1/2/3 对应 Boss 血量阶段。"))
+	int32 MinPhase = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "允许使用该 Ability 的最高遭遇阶段；0 表示不限制。"))
+	int32 MaxPhase = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "勾选后必须持有近战攻击权才能激活；远程压制通常关闭。"))
+	bool bRequiresAttackSlot = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "距离下限（厘米）。目标更近时不选该招。"))
+	float MinRange = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "距离上限（厘米）。目标更远时不选该招。"))
+	float MaxRange = 1200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "Ability 冷却秒数；由遭遇 Director/StateTree 选择层消费。"))
+	float Cooldown = 1.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Rules",
+		meta = (ToolTip = "可选冷却 GameplayEffect。为空时使用 Cooldown 数值，由兼容门面计时。"))
+	TSubclassOf<UGameplayEffect> CooldownEffect;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ability|Tags",
+		meta = (ToolTip = "激活时附加的标签，例如 Combat.Ability.Skill；用于 StateTree/Director 查询。"))
+	FGameplayTagContainer AbilityTags;
+
+	bool IsUsableInPhase(int32 Phase) const
+	{
+		return Phase >= MinPhase && (MaxPhase <= 0 || Phase <= MaxPhase);
+	}
 };
 
 /** Fighter move table row: skill + AI gates / chaining. */

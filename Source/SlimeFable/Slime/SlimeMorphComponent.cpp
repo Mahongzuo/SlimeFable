@@ -19,6 +19,10 @@
 #include "SlimeFable.h"
 #include "Settings/SlimeInputSettings.h"
 #include "UI/SlimePhantomWheelWidget.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -43,6 +47,36 @@ namespace SlimeMorphParams
 	static const FName FlowSpeed(TEXT("FlowSpeed"));
 	static const FName NoiseScale(TEXT("NoiseScale"));
 	static const FName RimPower(TEXT("RimPower"));
+}
+
+namespace SlimeMorphPolicies
+{
+	EMovementMode ResolveActivationMovementMode(EMovementMode CachedMode)
+	{
+		return CachedMode == MOVE_None ? MOVE_Walking : CachedMode;
+	}
+
+	FVector AlignCapsuleCenterToFoot(const FVector& CurrentLocation, float FootZ, float CapsuleHalfHeight)
+	{
+		FVector Aligned = CurrentLocation;
+		Aligned.Z = FootZ + FMath::Max(CapsuleHalfHeight, 0.f);
+		return Aligned;
+	}
+
+	bool IsSlotUsable(const TArray<FSlimeDevourCapture>& Slots, int32 SelectedSlot)
+	{
+		return Slots.IsValidIndex(SelectedSlot) && Slots[SelectedSlot].IsValidCapture();
+	}
+
+	bool IsTargetGameplayEnabled(ESlimeMorphPhase Phase)
+	{
+		return Phase == ESlimeMorphPhase::Morphed;
+	}
+
+	bool KeepsTargetGroundCollision(ESlimeMorphPhase Phase)
+	{
+		return Phase != ESlimeMorphPhase::Idle;
+	}
 }
 
 namespace
@@ -262,20 +296,29 @@ void USlimeMorphComponent::BeginMorph()
 
 	// Need at least one captured enemy to morph into.
 	const TArray<FSlimeDevourCapture>& Slots = Devour->GetPhantomSlots();
-	if (Slots.Num() == 0 || !Slots[Devour->GetSelectedPhantomSlot()].IsValidCapture())
+	const int32 SelectedSlot = Devour->GetSelectedPhantomSlot();
+	if (!SlimeMorphPolicies::IsSlotUsable(Slots, SelectedSlot))
 	{
 		return;
 	}
 
-	MorphedSlotIndex = Devour->GetSelectedPhantomSlot();
+	MorphedSlotIndex = SelectedSlot;
 	bConsumeMorphedSlotOnExit = false;
 	bHasCachedSlimeReturnTransform = false;
 	CachedSlimeReturnTransform = FTransform::Identity;
+	bHasCachedMorphTargetGameplayState = false;
+	bHasCachedMorphTargetMeshCollisionState = false;
 	bPossessDone = false;
+	SetSlimeMovementEnabled(false);
 
 	if (Body)
 	{
 		Body->SetSpread(true);
+	}
+	if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner()))
+	{
+		// Prevent the two pawn capsules from pushing each other upward during the transition.
+		Slime->SetActorEnableCollision(false);
 	}
 
 	EnterPhase(ESlimeMorphPhase::Spreading);
@@ -346,6 +389,11 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 	}
 	else if (Next == ESlimeMorphPhase::Idle)
 	{
+		if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner()))
+		{
+			Slime->SetActorEnableCollision(true);
+		}
+		SetSlimeMovementEnabled(true);
 		MorphTarget = nullptr;
 		MorphMIDs.Reset();
 		ShellMID = nullptr;
@@ -354,9 +402,16 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 		bConsumeMorphedSlotOnExit = false;
 		bHasCachedSlimeReturnTransform = false;
 		CachedSlimeReturnTransform = FTransform::Identity;
+		bHasCachedMorphTargetGameplayState = false;
+		bHasCachedMorphTargetMeshCollisionState = false;
 		bOriginalMaterialsActive = false;
 		bShellActive = false;
 		bMorphedKeyDown = false;
+	}
+
+	if (MorphTarget)
+	{
+		SetMorphTargetGameplayEnabled(SlimeMorphPolicies::IsTargetGameplayEnabled(Next));
 	}
 }
 
@@ -516,6 +571,15 @@ void USlimeMorphComponent::SpawnMorphTarget()
 
 	Enemy->InitAsMorphTarget(Slime);
 	Enemy->FinishSpawning(SpawnXform);
+
+	// FinishSpawning may resize the capsule from the actual mesh. Align using that final
+	// half-height so the target's feet stay on the slime's ground plane instead of floating.
+	if (UCapsuleComponent* EnemyCapsule = Enemy->GetCapsuleComponent())
+	{
+		const FVector AlignedLocation = SlimeMorphPolicies::AlignCapsuleCenterToFoot(
+			Enemy->GetActorLocation(), FootZ, EnemyCapsule->GetScaledCapsuleHalfHeight());
+		Enemy->TeleportTo(AlignedLocation, Enemy->GetActorRotation(), false, true);
+	}
 
 	MorphTarget = Enemy;
 
@@ -774,6 +838,7 @@ void USlimeMorphComponent::PossessSlime()
 	// The morph body stopped blocking this spot when unmorph began. Restore the slime's
 	// collision, then resolve against world geometry without colliding with its old body.
 	Slime->SetMorphParked(false);
+	SetSlimeMovementEnabled(false);
 	if (!Slime->TeleportTo(TargetLocation, TargetRotation, false, false))
 	{
 		UE_LOG(LogSlimeFable, Warning,
@@ -794,6 +859,84 @@ void USlimeMorphComponent::PossessSlime()
 	PC->SetControlRotation(PreservedViewRotation);
 	RefreshCameraRig(Slime->GetCameraBoom());
 	PC->FlushPressedKeys();
+}
+
+void USlimeMorphComponent::SetSlimeMovementEnabled(bool bEnabled)
+{
+	ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner());
+	UCharacterMovementComponent* Movement = Slime ? Slime->GetCharacterMovement() : nullptr;
+	if (!Movement)
+	{
+		return;
+	}
+
+	Movement->StopMovementImmediately();
+	Movement->Velocity = FVector::ZeroVector;
+	if (bEnabled)
+	{
+		Movement->SetMovementMode(MOVE_Walking);
+	}
+	else
+	{
+		Movement->DisableMovement();
+	}
+}
+
+void USlimeMorphComponent::SetMorphTargetGameplayEnabled(bool bEnabled)
+{
+	if (!MorphTarget)
+	{
+		return;
+	}
+
+	if (!bHasCachedMorphTargetGameplayState)
+	{
+		if (const UCharacterMovementComponent* Movement = MorphTarget->GetCharacterMovement())
+		{
+			CachedMorphTargetMovementMode = static_cast<uint8>(Movement->MovementMode.GetValue());
+			CachedMorphTargetCustomMovementMode = Movement->CustomMovementMode;
+		}
+		bHasCachedMorphTargetGameplayState = true;
+	}
+
+	// Keep the target capsule and actor collision alive so the spawned body remains grounded.
+	// Only the rendered mesh is removed from collision during the visual transition; otherwise
+	// a giant mesh (for example Tianhuang) becomes a dynamic collider that pushes the slime up.
+	if (USkeletalMeshComponent* Mesh = MorphTarget->GetMesh())
+	{
+		if (!bHasCachedMorphTargetMeshCollisionState)
+		{
+			CachedMorphTargetMeshCollisionEnabled = static_cast<uint8>(Mesh->GetCollisionEnabled());
+			bHasCachedMorphTargetMeshCollisionState = true;
+		}
+		Mesh->SetCollisionEnabled(bEnabled
+			? static_cast<ECollisionEnabled::Type>(CachedMorphTargetMeshCollisionEnabled)
+			: ECollisionEnabled::NoCollision);
+	}
+	if (UCharacterMovementComponent* Movement = MorphTarget->GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		Movement->Velocity = FVector::ZeroVector;
+		if (bEnabled)
+		{
+			Movement->SetMovementMode(
+				SlimeMorphPolicies::ResolveActivationMovementMode(
+					static_cast<EMovementMode>(CachedMorphTargetMovementMode)),
+				CachedMorphTargetCustomMovementMode);
+		}
+		else
+		{
+			Movement->DisableMovement();
+		}
+	}
+
+	if (bEnabled)
+	{
+		if (APlayerController* PC = Cast<APlayerController>(MorphTarget->GetController()))
+		{
+			PC->FlushPressedKeys();
+		}
+	}
 }
 
 void USlimeMorphComponent::CacheUnmorphPoseAndFreezeTarget()
@@ -1048,3 +1191,69 @@ void USlimeMorphComponent::TickMorphWheelInput()
 		}
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSlimeMorphSlotSelectionTest,
+	"SlimeFable.Slime.Morph.EmptySlotSelectionIsRejected",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSlimeMorphSlotSelectionTest::RunTest(const FString& Parameters)
+{
+	TArray<FSlimeDevourCapture> Slots;
+	Slots.SetNum(3);
+
+	TestFalse(TEXT("A capacity-only slot cannot index the capture array"), SlimeMorphPolicies::IsSlotUsable(Slots, 3));
+	TestFalse(TEXT("An empty captured slot cannot start morphing"), SlimeMorphPolicies::IsSlotUsable(Slots, 1));
+
+	Slots[1].EnemyClass = AEnemyCharacter::StaticClass();
+	TestTrue(TEXT("A populated captured slot can start morphing"), SlimeMorphPolicies::IsSlotUsable(Slots, 1));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSlimeMorphTransitionGameplayTest,
+	"SlimeFable.Slime.Morph.TransitionTargetIsNonInteractive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSlimeMorphTransitionGameplayTest::RunTest(const FString& Parameters)
+{
+	TestFalse(TEXT("Growing target is visual-only"), SlimeMorphPolicies::IsTargetGameplayEnabled(ESlimeMorphPhase::Growing));
+	TestFalse(TEXT("Blending target cannot move or collide"), SlimeMorphPolicies::IsTargetGameplayEnabled(ESlimeMorphPhase::Blending));
+	TestTrue(TEXT("Completed morph target enables gameplay"), SlimeMorphPolicies::IsTargetGameplayEnabled(ESlimeMorphPhase::Morphed));
+	TestFalse(TEXT("Unblending target is frozen again"), SlimeMorphPolicies::IsTargetGameplayEnabled(ESlimeMorphPhase::Unblending));
+	TestTrue(TEXT("Transition keeps the target's ground collision"), SlimeMorphPolicies::KeepsTargetGroundCollision(ESlimeMorphPhase::Growing));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSlimeMorphActivationMovementTest,
+	"SlimeFable.Slime.Morph.ActivationRestoresWalkFromUninitializedMovement",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSlimeMorphActivationMovementTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("A deferred morph target cannot remain in MOVE_None when player control starts"),
+		SlimeMorphPolicies::ResolveActivationMovementMode(MOVE_None), MOVE_Walking);
+	TestEqual(TEXT("A valid cached movement mode remains unchanged"),
+		SlimeMorphPolicies::ResolveActivationMovementMode(MOVE_Falling), MOVE_Falling);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FSlimeMorphFootAlignmentTest,
+	"SlimeFable.Slime.Morph.PostSpawnCapsuleKeepsFeetOnSlimeGround",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FSlimeMorphFootAlignmentTest::RunTest(const FString& Parameters)
+{
+	const FVector CurrentLocation(120.0, -45.0, 96.0);
+	const FVector AlignedLocation = SlimeMorphPolicies::AlignCapsuleCenterToFoot(CurrentLocation, 20.0, 140.0);
+	TestEqual(TEXT("Alignment preserves X"), AlignedLocation.X, 120.0);
+	TestEqual(TEXT("Alignment preserves Y"), AlignedLocation.Y, -45.0);
+	TestEqual(TEXT("Alignment places the new capsule feet on the slime ground"), AlignedLocation.Z, 160.0);
+	return true;
+}
+
+#endif

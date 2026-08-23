@@ -49,6 +49,14 @@ enum class ESlimeHitShape : uint8
 };
 
 UENUM(BlueprintType)
+enum class ESlimeVfxRotationPolicy : uint8
+{
+	Aim,
+	Owner,
+	World
+};
+
+UENUM(BlueprintType)
 enum class ESlimeCombatPose : uint8
 {
 	None,
@@ -176,6 +184,34 @@ struct SLIMEFABLE_API FSlimeSkillDef
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX")
 	TSoftObjectPtr<UNiagaraSystem> NiagaraSystem;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ToolTip = "投射物命中或技能落点使用的轻量 Niagara；为空时不生成命中特效。"))
+	TSoftObjectPtr<UNiagaraSystem> ImpactNiagaraSystem;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ToolTip = "技能主特效的独立缩放，默认 1。"))
+	FVector VfxScale = FVector::OneVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ToolTip = "相对所选特效朝向的生成位置偏移，单位厘米。"))
+	FVector VfxLocationOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ToolTip = "Aim 跟随瞄准方向，Owner 跟随角色朝向，World 使用世界零旋转。"))
+	ESlimeVfxRotationPolicy VfxRotationPolicy = ESlimeVfxRotationPolicy::Aim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ToolTip = "尝试写入 Niagara 的 User.Color/User.Tint/User.ElementColor，用于统一属性辨识色。"))
+	FLinearColor VfxColor = FLinearColor::White;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ClampMin = "0.0", Units = "s", ToolTip = "代码不会在此时间前强制回收特效；默认 0.5 秒。"))
+	float VfxMinVisibleTime = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|VFX",
+		meta = (ClampMin = "0.0", Units = "s", ToolTip = "循环特效的强制回收上限；0 表示完全由 Niagara Auto Destroy 管理。"))
+	float VfxHardLifetime = 0.f;
 
 	float GetTotalDuration() const { return Windup + Recovery; }
 };

@@ -12,11 +12,7 @@
 #include "NiagaraSystem.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
-
-namespace
-{
-	static const TCHAR* DarkImpactPath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact.NS_Dark_Solo_Impact");
-}
+#include "SlimeSkillVfxSubsystem.h"
 
 ASlimeSkillProjectile::ASlimeSkillProjectile()
 {
@@ -64,10 +60,15 @@ void ASlimeSkillProjectile::InitProjectile(AActor* InInstigator, const FSlimeSki
 	{
 		Collision->SetSphereRadius(FMath::Max(InSkill.Hit.Radius, 12.f));
 	}
-	if (UNiagaraSystem* System = InSkill.NiagaraSystem.LoadSynchronous())
+	if (UNiagaraSystem* System = USlimeSkillVfxSubsystem::ResolveLoadedSystem(InSkill.NiagaraSystem, this))
 	{
 		Niagara->SetAsset(System);
 		Niagara->SetAutoDestroy(false);
+		Niagara->SetRelativeLocation(InSkill.VfxLocationOffset);
+		Niagara->SetRelativeScale3D(InSkill.VfxScale);
+		Niagara->SetVariableLinearColor(TEXT("User.Color"), InSkill.VfxColor);
+		Niagara->SetVariableLinearColor(TEXT("User.Tint"), InSkill.VfxColor);
+		Niagara->SetVariableLinearColor(TEXT("User.ElementColor"), InSkill.VfxColor);
 		Niagara->Activate(true);
 	}
 	if (InInstigator)
@@ -88,13 +89,18 @@ void ASlimeSkillProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ASlimeSkillProjectile::ExplodeAndDestroy(bool bSpawnImpact)
 {
-	if (bSpawnImpact && Skill.Element == ESlimeElement::Dark)
+	if (bSpawnImpact)
 	{
-		if (UNiagaraSystem* Impact = Cast<UNiagaraSystem>(
-				StaticLoadObject(UNiagaraSystem::StaticClass(), nullptr, DarkImpactPath)))
+		if (UNiagaraSystem* Impact = USlimeSkillVfxSubsystem::ResolveLoadedSystem(Skill.ImpactNiagaraSystem, this))
 		{
-			UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-				this, Impact, GetActorLocation(), GetActorRotation(), FVector(1.f), true, true);
+			UNiagaraComponent* ImpactComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+				this, Impact, GetActorLocation(), GetActorRotation(), Skill.VfxScale, true, true);
+			if (ImpactComponent)
+			{
+				ImpactComponent->SetVariableLinearColor(TEXT("User.Color"), Skill.VfxColor);
+				ImpactComponent->SetVariableLinearColor(TEXT("User.Tint"), Skill.VfxColor);
+				ImpactComponent->SetVariableLinearColor(TEXT("User.ElementColor"), Skill.VfxColor);
+			}
 		}
 	}
 

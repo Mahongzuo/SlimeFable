@@ -14,11 +14,14 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "ShaderCompiler.h"
+#include "ShaderPipelineCache.h"
 #include "ContentStreaming.h"
+#include "Engine/GameInstance.h"
 #include "UObject/UObjectGlobals.h"
 #include "Styling/SlateTypes.h"
 #include "TimerManager.h"
 #include "Misc/App.h"
+#include "SlimeSkillVfxSubsystem.h"
 
 void USlimeLoadingGateWidget::NativeConstruct()
 {
@@ -173,9 +176,30 @@ int32 USlimeLoadingGateWidget::GetStreamingJobsRemaining() const
 	return Count;
 }
 
+int32 USlimeLoadingGateWidget::GetSkillVfxJobsRemaining() const
+{
+	const UGameInstance* GameInstance = GetGameInstance();
+	const USlimeSkillVfxSubsystem* VfxSubsystem = GameInstance
+		? GameInstance->GetSubsystem<USlimeSkillVfxSubsystem>()
+		: nullptr;
+	if (!VfxSubsystem || VfxSubsystem->IsPreloadComplete())
+	{
+		return 0;
+	}
+	return FMath::Max(VfxSubsystem->GetRequestedAssetCount() - VfxSubsystem->GetFailedAssetCount(), 1);
+}
+
+int32 USlimeLoadingGateWidget::GetPsoJobsRemaining() const
+{
+	return static_cast<int32>(FShaderPipelineCache::NumPrecompilesRemaining());
+}
+
 bool USlimeLoadingGateWidget::IsRenderReady() const
 {
-	return GetShaderJobsRemaining() <= 0 && GetStreamingJobsRemaining() <= 0;
+	return GetShaderJobsRemaining() <= 0
+		&& GetStreamingJobsRemaining() <= 0
+		&& GetSkillVfxJobsRemaining() <= 0
+		&& GetPsoJobsRemaining() <= 0;
 }
 
 void USlimeLoadingGateWidget::PollGate()
@@ -191,6 +215,8 @@ void USlimeLoadingGateWidget::PollGate()
 
 	const int32 ShaderJobs = GetShaderJobsRemaining();
 	const int32 StreamJobs = GetStreamingJobsRemaining();
+	const int32 SkillVfxJobs = GetSkillVfxJobsRemaining();
+	const int32 PsoJobs = GetPsoJobsRemaining();
 	const bool bJobsIdle = IsRenderReady();
 
 	if (bJobsIdle)
@@ -231,7 +257,15 @@ void USlimeLoadingGateWidget::PollGate()
 	if (StatusText)
 	{
 		const int32 Pct = FMath::RoundToInt(DisplayedProgress * 100.f);
-		if (ShaderJobs > 0)
+		if (SkillVfxJobs > 0)
+		{
+			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（技能特效 %d）"), Pct, SkillVfxJobs)));
+		}
+		else if (PsoJobs > 0)
+		{
+			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（渲染管线 %d）"), Pct, PsoJobs)));
+		}
+		else if (ShaderJobs > 0)
 		{
 			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（着色器 %d）"), Pct, ShaderJobs)));
 		}

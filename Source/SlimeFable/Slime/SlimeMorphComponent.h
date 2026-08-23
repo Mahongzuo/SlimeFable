@@ -148,6 +148,8 @@ private:
 	void UpdateSlimeOpacity(float Alpha);
 	void PossessEnemy();
 	void PossessSlime();
+	void SetSlimeMovementEnabled(bool bEnabled);
+	void SetMorphTargetGameplayEnabled(bool bEnabled);
 	void CacheUnmorphPoseAndFreezeTarget();
 	void ConsumeMorphedSlotIfRequested();
 	void SyncElementProfileToMorphMaterial();
@@ -212,6 +214,11 @@ private:
 	bool bConsumeMorphedSlotOnExit = false;
 	bool bHasCachedSlimeReturnTransform = false;
 	FTransform CachedSlimeReturnTransform = FTransform::Identity;
+	bool bHasCachedMorphTargetGameplayState = false;
+	bool bHasCachedMorphTargetMeshCollisionState = false;
+	uint8 CachedMorphTargetMeshCollisionEnabled = 0;
+	uint8 CachedMorphTargetMovementMode = 0;
+	uint8 CachedMorphTargetCustomMovementMode = 0;
 
 	// Locomotion state for single-node-anim enemies.
 	bool bMorphWalkPlaying = false;

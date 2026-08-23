@@ -9,6 +9,7 @@
 
 class UAnimInstance;
 class UNiagaraSystem;
+class UEnemySkillAbility;
 
 UCLASS(ClassGroup = (Enemy), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API UEnemyCombatComponent : public UActorComponent
@@ -22,6 +23,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
 	bool TryExecute(const FEnemySkillDef& Def);
+
+	/** Called by UEnemySkillAbility after the ASC accepted the activation. */
+	bool BeginGasAbility(UEnemySkillAbility* Ability);
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
 	void InterruptCombat();
@@ -62,4 +66,6 @@ protected:
 	bool bHitFired = false;
 	bool bPlayerMorphed = false;
 	TSet<TWeakObjectPtr<AActor>> AlreadyHit;
+	FEnemySkillDef PendingGasDef;
+	TWeakObjectPtr<UEnemySkillAbility> ActiveGasAbility;
 };

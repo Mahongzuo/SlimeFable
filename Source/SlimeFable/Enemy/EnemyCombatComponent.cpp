@@ -5,8 +5,11 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "EnemyCharacter.h"
+#include "Abilities/EnemySkillAbility.h"
+#include "EnemyGameplayEffects.h"
 #include "EnemyFighter.h"
 #include "EnemyProjectile.h"
+#include "AbilitySystemComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -16,6 +19,7 @@
 #include "Settings/SlimeInputTypes.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeHitProbe.h"
+#include "SlimeEnemyGameplayTags.h"
 #include "Engine/GameInstance.h"
 
 UEnemyCombatComponent::UEnemyCombatComponent()
@@ -77,7 +81,29 @@ bool UEnemyCombatComponent::TryExecute(const FEnemySkillDef& Def)
 	{
 		return false;
 	}
+	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+	{
+		if (UAbilitySystemComponent* ASC = Enemy->GetEnemyAbilitySystem())
+		{
+			PendingGasDef = Def;
+			FGameplayTagContainer Tags(SlimeEnemyTags::Ability_Skill);
+			if (ASC->TryActivateAbilitiesByTag(Tags, true))
+			{
+				return true;
+			}
+		}
+	}
 	return StartAction(Def);
+}
+
+bool UEnemyCombatComponent::BeginGasAbility(UEnemySkillAbility* Ability)
+{
+	if (!Ability || !CanStartAction())
+	{
+		return false;
+	}
+	ActiveGasAbility = Ability;
+	return StartAction(PendingGasDef);
 }
 
 void UEnemyCombatComponent::InterruptCombat()
@@ -96,6 +122,11 @@ void UEnemyCombatComponent::InterruptCombat()
 	bAttacking = false;
 	bHitFired = false;
 	AlreadyHit.Reset();
+	if (UEnemySkillAbility* Ability = ActiveGasAbility.Get())
+	{
+		ActiveGasAbility.Reset();
+		Ability->EndFromCombat();
+	}
 }
 
 bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
@@ -175,9 +206,28 @@ void UEnemyCombatComponent::TickAction(float DeltaTime)
 
 void UEnemyCombatComponent::FinishAction()
 {
+	const bool bWhiffed = AlreadyHit.Num() == 0;
+	if (bWhiffed)
+	{
+		if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+		{
+			if (Enemy->GetCombatRole() == EEnemyCombatRole::Chaser
+				&& (ActiveDef.Exec == EEnemySkillExec::Dash || ActiveDef.Exec == EEnemySkillExec::Melee))
+			{
+				// A missed lunge is a readable punish window for the player.
+				Enemy->ApplyTimedState(UGE_EnemyStagger::StaticClass(), 0.65f);
+				Enemy->ReleaseAttackSlot();
+			}
+		}
+	}
 	bAttacking = false;
 	bHitFired = false;
 	AlreadyHit.Reset();
+	if (UEnemySkillAbility* Ability = ActiveGasAbility.Get())
+	{
+		ActiveGasAbility.Reset();
+		Ability->EndFromCombat();
+	}
 }
 
 void UEnemyCombatComponent::FireHit()

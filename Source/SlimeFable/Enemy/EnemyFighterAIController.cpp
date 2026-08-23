@@ -17,10 +17,14 @@
 #include "SlimeDodgeComponent.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
+#include "Components/StateTreeComponent.h"
+#include "StateTree.h"
 
 AEnemyFighterAIController::AEnemyFighterAIController()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	StateTreeComponent = CreateDefaultSubobject<UStateTreeComponent>(TEXT("EnemyDecisionStateTree"));
+	StateTreeComponent->SetStartLogicAutomatically(false);
 }
 
 void AEnemyFighterAIController::ReturnToIdle()
@@ -52,6 +56,16 @@ void AEnemyFighterAIController::OnPossess(APawn* InPawn)
 	{
 		MoveCooldowns.SetNumZeroed(Fighter->GetMoves().Num());
 	}
+	bUsingStateTree = false;
+	if (StateTreeComponent && !DecisionStateTree.IsNull())
+	{
+		if (UStateTree* Tree = DecisionStateTree.LoadSynchronous())
+		{
+			StateTreeComponent->SetStateTree(Tree);
+			StateTreeComponent->StartLogic();
+			bUsingStateTree = true;
+		}
+	}
 	State = EEnemyFighterState::Idle;
 	ActiveMoveIndex = INDEX_NONE;
 	StateTime = 0.f;
@@ -72,6 +86,10 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	if (!Fighter || !Combat)
+	{
+		return;
+	}
+	if (bUsingStateTree)
 	{
 		return;
 	}
@@ -631,8 +649,16 @@ void AEnemyFighterAIController::BeginExecute()
 	FacePlayer();
 	bPlayingWalk = false;
 	bPlayingRun = false;
+	if (!Fighter->RequestAttackSlot(Move.Skill.GetTotalDuration() + Move.TelegraphTime + 0.5f))
+	{
+		State = EEnemyFighterState::Combat;
+		ActiveMoveIndex = INDEX_NONE;
+		RequestMoveToPreferred(FVector::Dist(Fighter->GetActorLocation(), FindCombatFocus()->GetActorLocation()) + 1.f);
+		return;
+	}
 	if (!Combat->TryExecute(Move.Skill))
 	{
+		Fighter->ReleaseAttackSlot();
 		State = EEnemyFighterState::Combat;
 		return;
 	}
@@ -650,6 +676,7 @@ void AEnemyFighterAIController::TickExecute()
 	FacePlayer();
 	if (!Combat->IsAttacking())
 	{
+		Fighter->ReleaseAttackSlot();
 		State = EEnemyFighterState::Recover;
 		StateTime = 0.f;
 	}

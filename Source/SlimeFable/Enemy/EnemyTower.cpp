@@ -85,6 +85,7 @@ void AEnemyTower::BeginPlay()
 {
 	Super::BeginPlay();
 	SyncRangeSphere();
+	ConfigureMobileGunner();
 
 	if (AggroSphere)
 	{
@@ -95,6 +96,103 @@ void AEnemyTower::BeginPlay()
 	if (Combat)
 	{
 		Combat->MuzzleSocket = AimSocket;
+	}
+}
+
+void AEnemyTower::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (bMobileGunner)
+	{
+		TickMobileGunner();
+	}
+}
+
+void AEnemyTower::ConfigureMobileGunner()
+{
+	const bool bIsGunnerClass = GetClass()->GetName().Contains(TEXT("Gunner"));
+	if (!bIsGunnerClass)
+	{
+		return;
+	}
+
+	if (IsMorphTarget())
+	{
+		if (UCharacterMovementComponent* Move = GetCharacterMovement())
+		{
+			Move->DefaultLandMovementMode = MOVE_Walking;
+			Move->MaxWalkSpeed = FMath::Max(Move->MaxWalkSpeed, 420.f);
+			Move->SetMovementMode(MOVE_Walking);
+		}
+		return;
+	}
+
+	if (IsPhantomInstance())
+	{
+		return;
+	}
+
+	bMobileGunner = true;
+	bDevourable = true;
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->DefaultLandMovementMode = MOVE_Walking;
+		Move->MaxWalkSpeed = 360.f;
+		Move->bOrientRotationToMovement = true;
+		Move->SetMovementMode(MOVE_Walking);
+	}
+}
+
+void AEnemyTower::TickMobileGunner()
+{
+	if (IsDevourLocked()
+		|| (Health && !Health->IsAlive())
+		|| GetEnemyPresence() == EEnemyPresence::Sleep
+		|| GetEnemyPresence() == EEnemyPresence::Despawned)
+	{
+		StopFiring();
+		return;
+	}
+
+	APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+	if (!Player)
+	{
+		StopFiring();
+		return;
+	}
+	if (const USlimeHealthComponent* TargetHealth = Player->FindComponentByClass<USlimeHealthComponent>())
+	{
+		if (!TargetHealth->IsAlive())
+		{
+			StopFiring();
+			return;
+		}
+	}
+
+	const FVector ToTarget = Player->GetActorLocation() - GetActorLocation();
+	const float DistanceSq = ToTarget.SizeSquared();
+	FVector ToPlayer = ToTarget;
+	ToPlayer.Z = 0.f;
+	const bool bInRange = DistanceSq <= FMath::Square(AttackRange);
+	if (!bInRange)
+	{
+		bPlayerInRange = false;
+		CurrentTarget.Reset();
+		StopFiring();
+		return;
+	}
+
+	bPlayerInRange = true;
+	CurrentTarget = Player;
+	StartFiring();
+
+	const float PreferredRange = AttackRange * 0.65f;
+	if (GetEnemyPresence() == EEnemyPresence::Active
+		&& DistanceSq > FMath::Square(PreferredRange)
+		&& !ToPlayer.IsNearlyZero())
+	{
+		AddMovementInput(ToPlayer.GetSafeNormal(), 1.f, true);
 	}
 }
 
@@ -309,6 +407,10 @@ void AEnemyTower::FireAtTarget()
 	{
 		return;
 	}
+	if (!RequestAttackSlot(FireTelegraphTime + BeamDuration + 0.5f))
+	{
+		return;
+	}
 
 	FaceTarget(Target);
 	USlimeDodgeComponent::NotifyPlayerIncomingAttack(this, this);
@@ -363,6 +465,7 @@ void AEnemyTower::CommitFire()
 	const float DistSq = FVector::DistSquared(GetActorLocation(), Target->GetActorLocation());
 	if (DistSq > FMath::Square(AttackRange * 1.05f))
 	{
+		ReleaseAttackSlot();
 		return;
 	}
 
@@ -376,6 +479,7 @@ void AEnemyTower::CommitFire()
 	{
 		FireProjectile(Target);
 	}
+	ReleaseAttackSlot();
 }
 
 void AEnemyTower::FireBeam(AActor* Target)
