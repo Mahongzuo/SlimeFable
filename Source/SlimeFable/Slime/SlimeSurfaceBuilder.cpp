@@ -872,17 +872,27 @@ void FSlimeSurfaceBuilder::Triangulate()
 			const FVector3f B(CornerOffsets[Pair[1]].X, CornerOffsets[Pair[1]].Y, CornerOffsets[Pair[1]].Z);
 			const FVector3f Grid = FVector3f(float(X), float(Y), float(Z)) + FMath::Lerp(A, B, Alpha);
 
-			Vertices[LiveVertexCount] = GridOrigin + FVector(Grid) * double(ActiveCellSize);
+			// Two Newton steps onto the iso surface. Central-difference |G| ≈ 2·dD/dCell, so
+			// the cell step is 2·error/|G|. This flattens MC terraces that sunlight picks out.
+			FVector3f P = Grid;
+			FVector Grad = SampleGradient(P.X, P.Y, P.Z);
+			FVector Normal = Grad.GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+			for (int32 Iter = 0; Iter < 2; ++Iter)
+			{
+				const float GradLen = float(Grad.Size());
+				if (GradLen <= KINDA_SMALL_NUMBER)
+				{
+					break;
+				}
+				const float Error = SampleTrilinear(P.X, P.Y, P.Z) - Threshold;
+				const float StepCells = FMath::Clamp(2.f * Error / GradLen, -0.75f, 0.75f);
+				P -= FVector3f(Normal) * StepCells;
+				Grad = SampleGradient(P.X, P.Y, P.Z);
+				Normal = Grad.GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+			}
 
-			// Density rises inwards, so the outward normal is the negated gradient.
-			const int32 Gx = X + FMath::RoundToInt(Grid.X - float(X));
-			const int32 Gy = Y + FMath::RoundToInt(Grid.Y - float(Y));
-			const int32 Gz = Z + FMath::RoundToInt(Grid.Z - float(Z));
-			const FVector Gradient(
-				SampleAt(Gx - 1, Gy, Gz) - SampleAt(Gx + 1, Gy, Gz),
-				SampleAt(Gx, Gy - 1, Gz) - SampleAt(Gx, Gy + 1, Gz),
-				SampleAt(Gx, Gy, Gz - 1) - SampleAt(Gx, Gy, Gz + 1));
-			Normals[LiveVertexCount] = Gradient.GetSafeNormal(SMALL_NUMBER, FVector::UpVector);
+			Vertices[LiveVertexCount] = GridOrigin + FVector(P) * double(ActiveCellSize);
+			Normals[LiveVertexCount] = Normal;
 
 			++LiveVertexCount;
 		}

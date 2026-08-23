@@ -106,6 +106,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SurfaceMesh->bCastVolumetricTranslucentShadow = false;
 	SurfaceMesh->bCastContactShadow = false;
 	// Avoid CSM speckles on the translucent shell (proxy still shades the ground).
+	// UE 5.8 dropped SetReceiveShadows; bReceiveMobileCSMShadows is the remaining receive toggle.
 	SurfaceMesh->bReceiveMobileCSMShadows = false;
 
 	ShadowMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("SlimeShadow"));

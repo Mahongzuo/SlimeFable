@@ -103,6 +103,7 @@ void USlimeDevourComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 bool USlimeDevourComponent::IsCombatLocked() const
 {
 	return Phase == ESlimeDevourPhase::Charging
+		|| Phase == ESlimeDevourPhase::CloseRangeShrink
 		|| Phase == ESlimeDevourPhase::Latch
 		|| Phase == ESlimeDevourPhase::Shrink
 		|| Phase == ESlimeDevourPhase::Retract;
@@ -192,6 +193,7 @@ AEnemyCharacter* USlimeDevourComponent::FindBestDevourTarget() const
 		return nullptr;
 	}
 	if (Phase == ESlimeDevourPhase::Latch
+		|| Phase == ESlimeDevourPhase::CloseRangeShrink
 		|| Phase == ESlimeDevourPhase::Shrink
 		|| Phase == ESlimeDevourPhase::Retract
 		|| Phase == ESlimeDevourPhase::Digest)
@@ -277,6 +279,7 @@ bool USlimeDevourComponent::BeginHold(AEnemyCharacter* Enemy)
 	PendingDestroyEnemy.Reset();
 	ActiveCapture = FSlimeDevourCapture();
 	LatchShotIds.Reset();
+	CloseRangeShotId = 0;
 	FaceTarget(Enemy);
 	EnterPhase(ESlimeDevourPhase::Charging);
 	return true;
@@ -293,6 +296,28 @@ void USlimeDevourComponent::CancelHold()
 	PhaseElapsed = 0.f;
 }
 
+bool USlimeDevourComponent::ReleaseHold()
+{
+	if (Phase != ESlimeDevourPhase::Charging)
+	{
+		return false;
+	}
+
+	AEnemyCharacter* Target = DevourTarget.Get();
+	const bool bCloseRange = PhaseElapsed < HoldSeconds
+		&& IsTargetStillValid(Target)
+		&& GetOwner()
+		&& FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation()) < CloseRangeRadius;
+	if (bCloseRange)
+	{
+		BeginCloseRange(Target);
+		return Phase != ESlimeDevourPhase::Idle;
+	}
+
+	CancelHold();
+	return false;
+}
+
 bool USlimeDevourComponent::TryStartDevour(AEnemyCharacter* Enemy)
 {
 	if (!CanStartDevour() || !CanDevourTarget(Enemy) || !Body)
@@ -301,6 +326,131 @@ bool USlimeDevourComponent::TryStartDevour(AEnemyCharacter* Enemy)
 	}
 	BeginLatch(Enemy);
 	return DevourTarget.IsValid();
+}
+
+bool USlimeDevourComponent::PrepareDevourTarget(AEnemyCharacter* Enemy)
+{
+	if (!Enemy || !Body || !CanDevourTarget(Enemy))
+	{
+		return false;
+	}
+
+	if (USlimeClingComponent* Cling = GetOwner() ? GetOwner()->FindComponentByClass<USlimeClingComponent>() : nullptr)
+	{
+		if (Cling->IsClinging())
+		{
+			Cling->TryDetach();
+		}
+	}
+	if (Body->IsSpreading())
+	{
+		Body->SetSpread(false);
+	}
+	if (Combat)
+	{
+		Combat->InterruptCombat();
+	}
+	ClearOwnerLockOn();
+
+	DevourTarget = Enemy;
+	PendingDestroyEnemy = Enemy;
+	FreezeDevourTarget(Enemy);
+	FaceTarget(Enemy);
+
+	FBox MeshBox;
+	if (!GetEnemyMeshBox(Enemy, MeshBox))
+	{
+		MeshBox = FBox::BuildAABB(Enemy->GetActorLocation(), FVector(40.f));
+	}
+	const float Radius = FMath::Max(float(MeshBox.GetExtent().Size()), 10.f);
+	const float Want = GetBlobRadius() * FMath::Clamp(ShrinkFitFraction, 0.2f, 1.f);
+	const float ScaleMul = FMath::Min(Want / Radius, 1.f);
+	EnemyStartScale = Enemy->GetActorScale3D();
+	EnemyTargetScale = EnemyStartScale * ScaleMul;
+
+	LatchShotIds.Reset();
+	LatchPinned.Reset();
+	LatchLaunchIndex = 0;
+	CloseRangeShotId = 0;
+	if (Body->HasFragments())
+	{
+		Body->ClearFragments();
+	}
+	return true;
+}
+
+void USlimeDevourComponent::BeginCloseRange(AEnemyCharacter* Enemy)
+{
+	if (!PrepareDevourTarget(Enemy))
+	{
+		AbortDevour(true);
+		return;
+	}
+
+	FBox MeshBox;
+	if (!GetEnemyMeshBox(Enemy, MeshBox))
+	{
+		MeshBox = FBox::BuildAABB(Enemy->GetActorLocation(), FVector(40.f));
+	}
+	const float HoverOffset = FMath::Max(
+		MeshBox.GetExtent().Z + GetBlobRadius() * 0.5f,
+		GetBlobRadius() * 1.25f);
+	CloseRangeHoverLocation = Enemy->GetActorLocation() + FVector(0.f, 0.f, HoverOffset);
+	Enemy->SetActorLocation(CloseRangeHoverLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	EnterPhase(ESlimeDevourPhase::CloseRangeShrink);
+}
+
+FVector USlimeDevourComponent::GetWrapCenter(const AEnemyCharacter* Enemy) const
+{
+	if (!Enemy)
+	{
+		return FVector::ZeroVector;
+	}
+	FBox MeshBox;
+	if (GetEnemyMeshBox(Enemy, MeshBox))
+	{
+		return MeshBox.GetCenter();
+	}
+	return Enemy->GetVisualBoundsCenter();
+}
+
+bool USlimeDevourComponent::IsCloseRangeWrapped(const AEnemyCharacter* Enemy) const
+{
+	if (!Body || !Enemy || CloseRangeShotId == 0)
+	{
+		return false;
+	}
+	const FVector ShotCenter = Body->GetShotCenter(CloseRangeShotId);
+	const float Arrive = FMath::Max(GetLatchMiniRadius() * 0.4f, 8.f);
+	return FVector::DistSquared(ShotCenter, GetWrapCenter(Enemy)) <= FMath::Square(Arrive);
+}
+
+bool USlimeDevourComponent::LaunchCloseRangeWrapper(AEnemyCharacter* Enemy)
+{
+	if (!Body || !Enemy)
+	{
+		return false;
+	}
+
+	const FVector From = GetBlobCenter();
+	const FVector WrapCenter = GetWrapCenter(Enemy);
+	const float TravelTime = FMath::Max(LatchSeconds, 0.1f);
+	FVector Velocity = (WrapCenter - From) / TravelTime;
+	Velocity.Z += 0.5f * FMath::Abs(Body->SolverParams.Gravity) * TravelTime;
+
+	Body->SetLaunchFractionOverride(LatchShotFraction);
+	uint8 ShotId = 0;
+	if (Body->LaunchDevourShot(Velocity, LatchShotFraction, LatchShotLife, ShotId) <= 0 || ShotId == 0)
+	{
+		return false;
+	}
+
+	CloseRangeShotId = ShotId;
+	LatchShotIds.Add(ShotId);
+	LatchPinned.Add(1);
+	Body->AddIgnoreWorldShot(ShotId);
+	Body->SetShotTarget(ShotId, WrapCenter, LatchPullSpeed);
+	return true;
 }
 
 void USlimeDevourComponent::EnterPhase(ESlimeDevourPhase NewPhase)
@@ -336,6 +486,7 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 	AEnemyCharacter* Target = DevourTarget.Get();
 
 	if (Phase == ESlimeDevourPhase::Charging
+		|| Phase == ESlimeDevourPhase::CloseRangeShrink
 		|| Phase == ESlimeDevourPhase::Latch
 		|| Phase == ESlimeDevourPhase::Shrink
 		|| Phase == ESlimeDevourPhase::Retract)
@@ -350,7 +501,7 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 	PhaseElapsed += DeltaTime;
 	UpdateInnerMesh(DeltaTime);
 
-	if (Phase == ESlimeDevourPhase::Latch || Phase == ESlimeDevourPhase::Shrink || Phase == ESlimeDevourPhase::Retract)
+	if (LatchShotIds.Num() > 0)
 	{
 		UpdateLatchTargets(Target);
 	}
@@ -369,6 +520,29 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 			if (PhaseElapsed >= HoldSeconds)
 			{
 				BeginLatch(Target);
+			}
+		}
+		break;
+	case ESlimeDevourPhase::CloseRangeShrink:
+		{
+			Target->SetActorLocation(CloseRangeHoverLocation, false, nullptr, ETeleportType::TeleportPhysics);
+			const float Alpha = FMath::Clamp(PhaseElapsed / FMath::Max(CloseRangeShrinkSeconds, 0.01f), 0.f, 1.f);
+			ApplyEnemyShrink(Target, FMath::Min(Alpha, 1.f));
+			if (PhaseElapsed >= CloseRangeShrinkSeconds)
+			{
+				ApplyEnemyShrink(Target, 1.f);
+				if (CloseRangeShotId == 0)
+				{
+					if (!LaunchCloseRangeWrapper(Target))
+					{
+						AbortDevour(true);
+						return;
+					}
+				}
+				if (IsCloseRangeWrapped(Target) || PhaseElapsed >= CloseRangeShrinkSeconds + LatchSeconds)
+				{
+					EnterPhase(ESlimeDevourPhase::Retract);
+				}
 			}
 		}
 		break;
@@ -412,48 +586,11 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 
 void USlimeDevourComponent::BeginLatch(AEnemyCharacter* Enemy)
 {
-	if (!Enemy || !Body)
+	if (!PrepareDevourTarget(Enemy))
 	{
 		AbortDevour(true);
 		return;
 	}
-
-	if (USlimeClingComponent* Cling = GetOwner() ? GetOwner()->FindComponentByClass<USlimeClingComponent>() : nullptr)
-	{
-		if (Cling->IsClinging())
-		{
-			Cling->TryDetach();
-		}
-	}
-	if (Body->IsSpreading())
-	{
-		Body->SetSpread(false);
-	}
-	if (Combat)
-	{
-		Combat->InterruptCombat();
-	}
-	ClearOwnerLockOn();
-
-	DevourTarget = Enemy;
-	PendingDestroyEnemy = Enemy;
-	FreezeDevourTarget(Enemy);
-	FaceTarget(Enemy);
-
-	FBox MeshBox;
-	if (!GetEnemyMeshBox(Enemy, MeshBox))
-	{
-		MeshBox = FBox::BuildAABB(Enemy->GetActorLocation(), FVector(40.f));
-	}
-	const float Radius = FMath::Max(float(MeshBox.GetExtent().Size()), 10.f);
-	const float Want = GetBlobRadius() * FMath::Clamp(ShrinkFitFraction, 0.2f, 1.f);
-	const float ScaleMul = FMath::Min(Want / Radius, 1.f);
-	EnemyStartScale = Enemy->GetActorScale3D();
-	EnemyTargetScale = EnemyStartScale * ScaleMul;
-
-	LatchShotIds.Reset();
-	LatchPinned.Reset();
-	LatchLaunchIndex = 0;
 	if (Body->HasFragments())
 	{
 		Body->ClearFragments();
@@ -808,6 +945,20 @@ void USlimeDevourComponent::UpdateLatchTargets(AEnemyCharacter* Enemy)
 		return;
 	}
 
+	if (CloseRangeShotId != 0)
+	{
+		const FVector WrapCenter = GetWrapCenter(Enemy);
+		for (int32 Index = 0; Index < LatchShotIds.Num(); ++Index)
+		{
+			if (LatchPinned.IsValidIndex(Index))
+			{
+				LatchPinned[Index] = 1;
+			}
+			Body->SetShotTarget(LatchShotIds[Index], WrapCenter, LatchPullSpeed);
+		}
+		return;
+	}
+
 	TArray<FVector> AttachPoints;
 	GetLatchAttachPoints(Enemy, AttachPoints);
 	const int32 Count = FMath::Min(LatchShotIds.Num(), AttachPoints.Num());
@@ -927,6 +1078,7 @@ void USlimeDevourComponent::CleanupLatchShots()
 {
 	LatchShotIds.Reset();
 	LatchPinned.Reset();
+	CloseRangeShotId = 0;
 	LatchLaunchIndex = 0;
 	if (Body)
 	{

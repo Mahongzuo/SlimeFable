@@ -397,7 +397,7 @@ void USlimeInteractComponent::PollKeys()
 	{
 		if (Devour->GetPhase() == ESlimeDevourPhase::Charging && !IsDown(ESlimeInputAction::Interact, EKeys::F))
 		{
-			Devour->CancelHold();
+			Devour->ReleaseHold();
 		}
 	}
 

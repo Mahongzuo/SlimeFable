@@ -76,6 +76,14 @@ void USlimeBodyComponent::BeginPlay()
 
 	ResolveMaterial();
 
+	if (Quality == ESlimeSimQuality::High)
+	{
+		SurfaceParams.CellSizeMultiplier = 0.64f;
+		SurfaceParams.MaxGridDim = 48;
+		SurfaceParams.MaxVertices = 12000;
+		SurfaceParams.BlurPasses = 3;
+	}
+
 	const FVector Foot = GetFootLocation();
 	FloorZ = float(Foot.Z);
 	Solver.Initialize(SolverParams, Foot + FVector(0.0, 0.0, SolverParams.RestRadius * AnchorHeightFraction));
@@ -1296,9 +1304,10 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 		StepRate = 60.f;
 		SurfaceRate = 60.f;
 		SolverParams.DensityIterations = 2;
-		SurfaceParams.CellSizeMultiplier = 0.85f;
-		SurfaceParams.MaxGridDim = 36;
-		SurfaceParams.BlurPasses = 2;
+		SurfaceParams.CellSizeMultiplier = 0.64f;
+		SurfaceParams.MaxGridDim = 48;
+		SurfaceParams.MaxVertices = 12000;
+		SurfaceParams.BlurPasses = 3;
 		break;
 
 	case ESlimeSimQuality::Medium:
@@ -1307,7 +1316,7 @@ void USlimeBodyComponent::SetQuality(ESlimeSimQuality InQuality)
 		SolverParams.DensityIterations = 1;
 		SurfaceParams.CellSizeMultiplier = 1.0f;
 		SurfaceParams.MaxGridDim = 28;
-		SurfaceParams.BlurPasses = 2;
+		SurfaceParams.BlurPasses = 3;
 		break;
 
 	case ESlimeSimQuality::Low:

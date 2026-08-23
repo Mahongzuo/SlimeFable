@@ -76,6 +76,41 @@ private:
 		return Density[SampleIndex(X, Y, Z)];
 	}
 
+	/** Density at a fractional grid coordinate. Avoids the stair-step normals of nearest-cell sampling. */
+	FORCEINLINE float SampleTrilinear(float X, float Y, float Z) const
+	{
+		const int32 X0 = FMath::FloorToInt(X);
+		const int32 Y0 = FMath::FloorToInt(Y);
+		const int32 Z0 = FMath::FloorToInt(Z);
+		const float Tx = X - float(X0);
+		const float Ty = Y - float(Y0);
+		const float Tz = Z - float(Z0);
+
+		const float C000 = SampleAt(X0, Y0, Z0);
+		const float C100 = SampleAt(X0 + 1, Y0, Z0);
+		const float C010 = SampleAt(X0, Y0 + 1, Z0);
+		const float C110 = SampleAt(X0 + 1, Y0 + 1, Z0);
+		const float C001 = SampleAt(X0, Y0, Z0 + 1);
+		const float C101 = SampleAt(X0 + 1, Y0, Z0 + 1);
+		const float C011 = SampleAt(X0, Y0 + 1, Z0 + 1);
+		const float C111 = SampleAt(X0 + 1, Y0 + 1, Z0 + 1);
+
+		const float C00 = FMath::Lerp(C000, C100, Tx);
+		const float C10 = FMath::Lerp(C010, C110, Tx);
+		const float C01 = FMath::Lerp(C001, C101, Tx);
+		const float C11 = FMath::Lerp(C011, C111, Tx);
+		return FMath::Lerp(FMath::Lerp(C00, C10, Ty), FMath::Lerp(C01, C11, Ty), Tz);
+	}
+
+	/** Central-difference gradient in grid cells. Density rises inwards, so this points outward. */
+	FORCEINLINE FVector SampleGradient(float X, float Y, float Z) const
+	{
+		return FVector(
+			SampleTrilinear(X - 1.f, Y, Z) - SampleTrilinear(X + 1.f, Y, Z),
+			SampleTrilinear(X, Y - 1.f, Z) - SampleTrilinear(X, Y + 1.f, Z),
+			SampleTrilinear(X, Y, Z - 1.f) - SampleTrilinear(X, Y, Z + 1.f));
+	}
+
 	FSlimeSurfaceParams Params;
 	float ParticleSpacing = 4.6f;
 

@@ -28,7 +28,8 @@ enum class ESlimeDevourPhase : uint8
 	Latch,
 	Shrink,
 	Retract,
-	Digest
+	Digest,
+	CloseRangeShrink
 };
 
 USTRUCT(BlueprintType)
@@ -129,6 +130,9 @@ public:
 	void CancelHold();
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
+	bool ReleaseHold();
+
+	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
 	bool TryStartDevour(AEnemyCharacter* Enemy);
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
@@ -164,6 +168,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "0.01", ClampMax = "1.0",
 		ToolTip = "全局吞噬血量阈值。敌人自己填了大于 0 的值时以敌人为准。默认 0.2 即残血 20%。"))
 	float DevourHealthThreshold = 0.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "1.0", Units = "cm",
+		ToolTip = "短按 F 触发快速吞噬的最大距离。严格小于此值才进入近距离流程，默认 200cm。"))
+	float CloseRangeRadius = 200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "0.1", Units = "s",
+		ToolTip = "近距离短按吞噬时敌人悬空并缩小到体内尺寸的时长，默认 1 秒。"))
+	float CloseRangeShrinkSeconds = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.2", Units = "s",
 		ToolTip = "长按 F 蓄力时长。默认 1.2s，读满才发射子球。"))
@@ -256,6 +268,11 @@ protected:
 	void EnterPhase(ESlimeDevourPhase NewPhase);
 	void FaceTarget(AEnemyCharacter* Enemy);
 	bool IsTargetStillValid(const AEnemyCharacter* Enemy) const;
+	bool PrepareDevourTarget(AEnemyCharacter* Enemy);
+	void BeginCloseRange(AEnemyCharacter* Enemy);
+	bool LaunchCloseRangeWrapper(AEnemyCharacter* Enemy);
+	FVector GetWrapCenter(const AEnemyCharacter* Enemy) const;
+	bool IsCloseRangeWrapped(const AEnemyCharacter* Enemy) const;
 	void FreezeDevourTarget(AEnemyCharacter* Enemy);
 	void RestoreDevourTarget(AEnemyCharacter* Enemy);
 	void HideEnemyWidgets(AEnemyCharacter* Enemy, bool bHide) const;
@@ -318,6 +335,8 @@ protected:
 	TArray<uint8> LatchShotIds;
 	TArray<uint8> LatchPinned;
 	FVector RetractStartLocation = FVector::ZeroVector;
+	FVector CloseRangeHoverLocation = FVector::ZeroVector;
+	uint8 CloseRangeShotId = 0;
 	int32 LatchLaunchIndex = 0;
 
 	ESlimeDevourPhase Phase = ESlimeDevourPhase::Idle;
