@@ -17,6 +17,8 @@
 #include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeCombatCatalog.h"
+#include "SlimeCharacter.h"
+#include "EnemyCharacter.h"
 #include "SlimeCombatHUDWidget.h"
 #include "SlimeElementComponent.h"
 #include "SlimeDevourComponent.h"
@@ -25,6 +27,7 @@
 #include "SlimeHealthComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeMorphComponent.h"
+#include "SlimeFable.h"
 #include "SlimeSkillProjectile.h"
 #include "SlimeSkillVfxSubsystem.h"
 #include "Blueprint/UserWidget.h"
@@ -35,11 +38,53 @@
 #include "SlimeVehicleComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
 #include "SlimeDodgeComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Settings/SlimeAudioPlay.h"
+
+namespace SlimeCombatAudio
+{
+	static const TCHAR* DefaultComboSlash = TEXT("/Game/Audio/SFX/Combat/sfx_attack_01.sfx_attack_01");
+	static const TCHAR* DefaultFinisher = TEXT("/Game/Audio/SFX/Combat/sfx_finisher_01.sfx_finisher_01");
+
+	const TCHAR* DefaultSkillForElement(ESlimeElement /*Element*/)
+	{
+		return DefaultFinisher;
+	}
+	USoundBase* ResolveSound(const TSoftObjectPtr<USoundBase>& Soft, const TCHAR* FallbackPath)
+	{
+		if (!Soft.IsNull())
+		{
+			if (USoundBase* Loaded = Soft.LoadSynchronous())
+			{
+				return Loaded;
+			}
+		}
+		return LoadObject<USoundBase>(nullptr, FallbackPath);
+	}
+
+	USoundBase* ResolveElementSkillSound(
+		const TArray<TSoftObjectPtr<USoundBase>>& Overrides,
+		ESlimeElement Element)
+	{
+		const int32 Index = static_cast<int32>(Element);
+		if (Overrides.IsValidIndex(Index) && !Overrides[Index].IsNull())
+		{
+			if (USoundBase* Loaded = Overrides[Index].LoadSynchronous())
+			{
+				return Loaded;
+			}
+		}
+		return LoadObject<USoundBase>(nullptr, DefaultSkillForElement(Element));
+	}
+}
 
 USlimeCombatComponent::USlimeCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	FMemory::Memzero(SkillCd, sizeof(SkillCd));
+	ComboAttackSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeCombatAudio::DefaultComboSlash));
+	FinisherSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeCombatAudio::DefaultFinisher));
 }
 
 void USlimeCombatComponent::BeginPlay()
@@ -108,7 +153,14 @@ void USlimeCombatComponent::BindInput(UEnhancedInputComponent* EnhancedInput)
 	}
 }
 
-void USlimeCombatComponent::HandleAttack() { TryComboAttack(); }
+void USlimeCombatComponent::HandleAttack()
+{
+	if (bPollCombatKeys)
+	{
+		return;
+	}
+	TryComboAttack();
+}
 void USlimeCombatComponent::HandleSkill1()
 {
 	if (bPollCombatKeys)
@@ -304,20 +356,37 @@ FVector USlimeCombatComponent::ResolveFinisherLocation(float SeekRange) const
 {
 	if (AActor* Locked = GetLockedRestrictTarget())
 	{
-		return Locked->GetActorLocation();
+		if (FVector::DistSquared(GetBlobOrigin(), Locked->GetActorLocation()) <= FMath::Square(SeekRange))
+		{
+			return Locked->GetActorLocation();
+		}
 	}
 	if (AActor* Target = FindNearestHostile(SeekRange, 0.25f))
 	{
 		return Target->GetActorLocation();
 	}
-	return ResolveGroundPoint(400.f);
+	return ResolveGroundPoint(100.f);
 }
 
 FVector USlimeCombatComponent::ResolveSkillHitOrigin(const FSlimeSkillDef& Def) const
 {
+	if (Def.Element == ESlimeElement::Physical && Def.Slot == ESlimeSkillSlot::Skill3)
+	{
+		// Arrow rain is authored vertically; place it in front of the slime and
+		// let the hit probe use the same ground-centered origin.
+		return ResolveGroundPoint(200.f);
+	}
+
 	if (AActor* Locked = GetLockedRestrictTarget())
 	{
-		return Locked->GetActorLocation();
+		if (FVector::DistSquared(GetBlobOrigin(), Locked->GetActorLocation()) <= FMath::Square(300.f))
+		{
+			return Locked->GetActorLocation();
+		}
+	}
+	if (AActor* Near = FindNearestHostile(300.f, -1.f))
+	{
+		return Near->GetActorLocation();
 	}
 
 	const bool bTargetedStrike =
@@ -717,7 +786,8 @@ bool USlimeCombatComponent::StartAction(const FSlimeSkillDef& Def, bool bFromCom
 		ActiveHitOrigin = ResolveSkillHitOrigin(Def);
 		bUseExplicitHitOrigin = Def.Exec == ESlimeSkillExec::AoE
 			|| Def.Element == ESlimeElement::Lightning
-			|| (Def.Element == ESlimeElement::Dark && Def.Slot == ESlimeSkillSlot::Skill3);
+			|| (Def.Element == ESlimeElement::Dark && Def.Slot == ESlimeSkillSlot::Skill3)
+			|| (Def.Element == ESlimeElement::Physical && Def.Slot == ESlimeSkillSlot::Skill3);
 	}
 
 	if (APawn* Pawn = Cast<APawn>(GetOwner()))
@@ -740,6 +810,8 @@ bool USlimeCombatComponent::StartAction(const FSlimeSkillDef& Def, bool bFromCom
 		ExecuteProjectile(Def, ActiveAim);
 		bHitFired = true;
 	}
+
+	PlayCombatSound(bFromCombo);
 
 	const bool bComboFinisherVfx = bFromCombo && Def.Slot == ESlimeSkillSlot::Combo4 && !Def.NiagaraSystem.IsNull();
 	const bool bTargetedSkillVfx = !bFromCombo && bUseExplicitHitOrigin && Def.Exec != ESlimeSkillExec::Projectile;
@@ -902,7 +974,15 @@ void USlimeCombatComponent::FireHit()
 			HitDef.Hit.OriginForwardOffset = 0.f;
 			HitDef.Hit.Radius = FMath::Max(HitDef.Hit.Radius, 100.f);
 		}
-		Hits = USlimeHitProbe::PerformHit(GetOwner(), HitDef, Origin, ActiveForward, AlreadyHit, Restrict);
+		// Ensure combo / elemental strikes apply aura using the slime's live element.
+		if (Element && Cast<ASlimeCharacter>(GetOwner()))
+		{
+			HitDef.Element = Element->CurrentElement;
+			HitDef.bAppliesElementAura = Element->CurrentElement != ESlimeElement::Physical;
+			HitDef.VfxColor = SlimeCombat::GetElementVfxColor(Element->CurrentElement);
+		}
+		Hits = USlimeHitProbe::PerformHit(
+			GetOwner(), HitDef, Origin, ActiveForward, AlreadyHit, Restrict);
 	}
 	AwardResources(ActiveDef, Hits);
 }
@@ -1011,6 +1091,43 @@ void USlimeCombatComponent::ExecuteChain(const FSlimeSkillDef& Def, const FVecto
 	}
 }
 
+void USlimeCombatComponent::PlayCombatSound(bool bFromCombo) const
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	USoundBase* Sound = nullptr;
+	const bool bCombo = bFromCombo || SlimeCombat::IsComboSlot(ActiveDef.Slot);
+	if (bCombo && ActiveDef.Slot == ESlimeSkillSlot::Combo4)
+	{
+		Sound = SlimeCombatAudio::ResolveSound(FinisherSound, SlimeCombatAudio::DefaultFinisher);
+	}
+	else if (bCombo)
+	{
+		Sound = SlimeCombatAudio::ResolveSound(ComboAttackSound, SlimeCombatAudio::DefaultComboSlash);
+	}
+	else
+	{
+		const int32 ElemIdx = static_cast<int32>(ActiveDef.Element);
+		if (ElementSkillSounds.IsValidIndex(ElemIdx) && !ElementSkillSounds[ElemIdx].IsNull())
+		{
+			Sound = ElementSkillSounds[ElemIdx].LoadSynchronous();
+		}
+		if (!Sound)
+		{
+			Sound = SlimeCombatAudio::ResolveSound(FinisherSound, SlimeCombatAudio::DefaultFinisher);
+		}
+	}
+
+	if (Sound)
+	{
+		SlimeAudioPlay::PlaySfxAt(Owner, Sound, Owner->GetActorLocation());
+	}
+}
+
 void USlimeCombatComponent::SpawnVfx(const FSlimeSkillDef& Def, const FVector& Location) const
 {
 	UNiagaraSystem* System = USlimeSkillVfxSubsystem::ResolveLoadedSystem(Def.NiagaraSystem, GetOwner());
@@ -1020,6 +1137,15 @@ void USlimeCombatComponent::SpawnVfx(const FSlimeSkillDef& Def, const FVector& L
 	}
 
 	FRotator VfxRotation = FRotator::ZeroRotator;
+	if (Def.Slot == ESlimeSkillSlot::Skill3
+		&& (Def.Element == ESlimeElement::Dark || Def.Element == ESlimeElement::Water || Def.Element == ESlimeElement::Physical))
+	{
+		// Niagara assets use local +X as forward. Use the captured attack vector,
+		// independent of actor or camera/world rotation conventions.
+		VfxRotation = ActiveForward.Rotation();
+	}
+	else
+	{
 	switch (Def.VfxRotationPolicy)
 	{
 	case ESlimeVfxRotationPolicy::Owner:
@@ -1031,6 +1157,7 @@ void USlimeCombatComponent::SpawnVfx(const FSlimeSkillDef& Def, const FVector& L
 	default:
 		VfxRotation = ActiveAim.Rotation();
 		break;
+	}
 	}
 	const FVector VfxLocation = Location + VfxRotation.RotateVector(Def.VfxLocationOffset);
 
@@ -1052,9 +1179,12 @@ void USlimeCombatComponent::SpawnVfx(const FSlimeSkillDef& Def, const FVector& L
 	FX->SetVariableLinearColor(TEXT("User.Tint"), Def.VfxColor);
 	FX->SetVariableLinearColor(TEXT("User.ElementColor"), Def.VfxColor);
 
-	if (Def.VfxHardLifetime > 0.f)
+	const float KillAfter = FMath::Clamp(
+		Def.VfxHardLifetime > 0.f ? FMath::Max(Def.VfxHardLifetime, Def.VfxMinVisibleTime) : 4.8f,
+		0.05f,
+		4.8f);
+	if (KillAfter > 0.f)
 	{
-		const float KillAfter = FMath::Max(Def.VfxHardLifetime, Def.VfxMinVisibleTime);
 		if (UWorld* World = FX->GetWorld())
 		{
 			TWeakObjectPtr<UNiagaraComponent> WeakFX(FX);

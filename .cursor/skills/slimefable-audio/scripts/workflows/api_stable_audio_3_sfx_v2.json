@@ -1,0 +1,71 @@
+{
+  "_meta": {
+    "description": "Flat API prompt for Stable Audio 3 Small-SFX. Patched at runtime.",
+    "note": "Desktop template audio_stable_audio_3_sfx_v2; uses small_sfx checkpoint when present."
+  },
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "stable_audio_3_small_sfx.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "t5gemma_b_b_ul2.safetensors",
+      "type": "stable_audio",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": "__PROMPT__"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": ""
+    }
+  },
+  "5": {
+    "class_type": "EmptyLatentAudio",
+    "inputs": {
+      "seconds": 2.0,
+      "batch_size": 1
+    }
+  },
+  "6": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["3", 0],
+      "negative": ["4", 0],
+      "latent_image": ["5", 0],
+      "seed": 0,
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler_name": "lcm",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "7": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": ["6", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "8": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": ["7", 0],
+      "filename_prefix": "slimefable/sfx",
+      "quality": "V0"
+    }
+  }
+}

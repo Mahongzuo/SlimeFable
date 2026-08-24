@@ -6,7 +6,9 @@
 #include "NiagaraSystem.h"
 #include "ProceduralMeshComponent.h"
 #include "SlimeBodyComponent.h"
+#include "Slime/SlimeElementProgressSubsystem.h"
 #include "SlimeFable.h"
+#include "GameFramework/Pawn.h"
 
 namespace SlimeElementParams
 {
@@ -295,6 +297,17 @@ void USlimeElementComponent::SetElement(ESlimeElement NewElement, bool bInstant)
 
 	UE_LOG(LogSlimeFable, Verbose, TEXT("Slime element %d -> %d"), int32(Previous), int32(CurrentElement));
 	OnElementChanged.Broadcast(CurrentElement, Previous);
+
+	if (const APawn* Pawn = Cast<APawn>(GetOwner()))
+	{
+		if (Pawn->IsPlayerControlled())
+		{
+			if (USlimeElementProgressSubsystem* Progress = USlimeElementProgressSubsystem::Get(this))
+			{
+				Progress->SetSavedElement(CurrentElement, true);
+			}
+		}
+	}
 }
 
 ESlimeElement USlimeElementComponent::CycleElement(int32 Delta)

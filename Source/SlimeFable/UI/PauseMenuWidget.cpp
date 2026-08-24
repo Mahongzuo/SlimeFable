@@ -3,7 +3,10 @@
 #include "UI/PauseMenuWidget.h"
 #include "UI/KeybindSettingsWidget.h"
 #include "UI/GraphicsSettingsWidget.h"
+#include "UI/AudioSettingsWidget.h"
+#include "UI/TutorialMenuWidget.h"
 #include "UI/MenuUIStyle.h"
+#include "SlimeFablePlayerController.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -57,6 +60,14 @@ void UPauseMenuWidget::NativeConstruct()
 	{
 		GraphicsButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnGraphicsClicked);
 	}
+	if (AudioButton)
+	{
+		AudioButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnAudioClicked);
+	}
+	if (TutorialButton)
+	{
+		TutorialButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnTutorialClicked);
+	}
 	if (MainMenuButton)
 	{
 		MainMenuButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnMainMenuClicked);
@@ -100,6 +111,20 @@ bool UPauseMenuWidget::TryHandleEscape()
 		SetVisibility(ESlateVisibility::Visible);
 		return true;
 	}
+	if (AudioSettingsWidget && AudioSettingsWidget->IsInViewport()
+		&& AudioSettingsWidget->GetVisibility() != ESlateVisibility::Collapsed)
+	{
+		AudioSettingsWidget->RemoveFromParent();
+		SetVisibility(ESlateVisibility::Visible);
+		return true;
+	}
+	if (TutorialMenuWidget && TutorialMenuWidget->IsInViewport()
+		&& TutorialMenuWidget->GetVisibility() != ESlateVisibility::Collapsed)
+	{
+		TutorialMenuWidget->RemoveFromParent();
+		SetVisibility(ESlateVisibility::Visible);
+		return true;
+	}
 	return false;
 }
 
@@ -119,7 +144,7 @@ FReply UPauseMenuWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKey
 
 void UPauseMenuWidget::BuildLayoutIfNeeded()
 {
-	if (TitleText && ContinueButton && LevelSelectButton && KeybindButton && GraphicsButton && MainMenuButton)
+	if (TitleText && ContinueButton && LevelSelectButton && KeybindButton && GraphicsButton && AudioButton && TutorialButton && MainMenuButton)
 	{
 		bBuiltInCode = false;
 		EnsureReturnToHubButton();
@@ -185,6 +210,8 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	LevelSelectButton = AddButton(TEXT("LevelSelectButton"), FText::FromString(TEXT("返回选关")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
 	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
+	AudioButton = AddButton(TEXT("AudioButton"), FText::FromString(TEXT("音乐音效")));
+	TutorialButton = AddButton(TEXT("TutorialButton"), FText::FromString(TEXT("操作教程")));
 	MainMenuButton = AddButton(TEXT("MainMenuButton"), FText::FromString(TEXT("返回主菜单")));
 }
 
@@ -343,6 +370,8 @@ void UPauseMenuWidget::ApplyLook()
 	FMenuUIStyle::ApplyMaterialButtonStyle(LevelSelectButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(GraphicsButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(AudioButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(TutorialButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(MainMenuButton, BrushBtn, Size);
 
 	auto StyleLabel = [](UButton* Button)
@@ -362,6 +391,8 @@ void UPauseMenuWidget::ApplyLook()
 	StyleLabel(LevelSelectButton);
 	StyleLabel(KeybindButton);
 	StyleLabel(GraphicsButton);
+	StyleLabel(AudioButton);
+	StyleLabel(TutorialButton);
 	StyleLabel(MainMenuButton);
 
 	auto BindHover = [](UButton* Button)
@@ -375,7 +406,17 @@ void UPauseMenuWidget::ApplyLook()
 	BindHover(LevelSelectButton);
 	BindHover(KeybindButton);
 	BindHover(GraphicsButton);
+	BindHover(AudioButton);
+	BindHover(TutorialButton);
 	BindHover(MainMenuButton);
+}
+
+void UPauseMenuWidget::FocusPauseSubpage(UUserWidget* Subpage)
+{
+	if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayer()))
+	{
+		PC->RetargetUIFocus(Subpage ? Subpage : this);
+	}
 }
 
 void UPauseMenuWidget::OpenKeybindSettings()
@@ -405,6 +446,7 @@ void UPauseMenuWidget::OpenKeybindSettings()
 		KeybindSettingsWidget->SetVisibility(ESlateVisibility::Visible);
 	}
 	KeybindSettingsWidget->RefreshList();
+	FocusPauseSubpage(KeybindSettingsWidget);
 }
 
 void UPauseMenuWidget::OpenGraphicsSettings()
@@ -434,6 +476,7 @@ void UPauseMenuWidget::OpenGraphicsSettings()
 		GraphicsSettingsWidget->SetVisibility(ESlateVisibility::Visible);
 	}
 	GraphicsSettingsWidget->RefreshSelection();
+	FocusPauseSubpage(GraphicsSettingsWidget);
 }
 
 void UPauseMenuWidget::OnContinueClicked()
@@ -455,6 +498,63 @@ void UPauseMenuWidget::OnGraphicsClicked()
 {
 	OpenGraphicsSettings();
 }
+
+
+void UPauseMenuWidget::OpenAudioSettings()
+{
+	if (!AudioSettingsWidget)
+	{
+		AudioSettingsWidget = CreateWidget<UAudioSettingsWidget>(GetOwningPlayer(), UAudioSettingsWidget::StaticClass());
+	}
+	if (AudioSettingsWidget)
+	{
+		AudioSettingsWidget->SetReturnTarget(this);
+		SetVisibility(ESlateVisibility::Collapsed);
+		if (!AudioSettingsWidget->IsInViewport())
+		{
+			AudioSettingsWidget->AddToViewport(20);
+		}
+		else
+		{
+			AudioSettingsWidget->SetVisibility(ESlateVisibility::Visible);
+		}
+		AudioSettingsWidget->RefreshFromSettings();
+		FocusPauseSubpage(AudioSettingsWidget);
+	}
+}
+
+void UPauseMenuWidget::OpenTutorialMenu()
+{
+	if (!TutorialMenuWidget)
+	{
+		TutorialMenuWidget = CreateWidget<UTutorialMenuWidget>(GetOwningPlayer(), UTutorialMenuWidget::StaticClass());
+	}
+	if (TutorialMenuWidget)
+	{
+		TutorialMenuWidget->SetReturnTarget(this);
+		SetVisibility(ESlateVisibility::Collapsed);
+		if (!TutorialMenuWidget->IsInViewport())
+		{
+			TutorialMenuWidget->AddToViewport(20);
+		}
+		else
+		{
+			TutorialMenuWidget->SetVisibility(ESlateVisibility::Visible);
+		}
+		FocusPauseSubpage(TutorialMenuWidget);
+	}
+}
+
+void UPauseMenuWidget::OnAudioClicked()
+{
+	OpenAudioSettings();
+}
+
+void UPauseMenuWidget::OnTutorialClicked()
+{
+	OpenTutorialMenu();
+}
+
 
 void UPauseMenuWidget::OnMainMenuClicked()
 {

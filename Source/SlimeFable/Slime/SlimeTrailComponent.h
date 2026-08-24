@@ -155,7 +155,7 @@ public:
 	UPROPERTY()
 	int32 TrailDefaultsVersion = 0;
 
-	static constexpr int32 CurrentTrailDefaultsVersion = 5;
+	static constexpr int32 CurrentTrailDefaultsVersion = 10;
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Trail")
 	const FSlimeTrailProfile& GetProfile(ESlimeElement Element) const;
@@ -182,6 +182,8 @@ protected:
 	bool PickArcTarget(const FSlimeTrailProfile& Profile, FVector& OutTarget) const;
 	/** Disables TeslaCoil Smoke emitter; keeps arcs only. */
 	static void ConfigureTeslaArc(UNiagaraComponent* Niagara);
+	/** Disables NS_Footstep_Fire footprint / mesh emitters; keeps flame only. */
+	static void ConfigureFireFootstep(UNiagaraComponent* Niagara);
 
 	void TickActiveStamps(float DeltaTime);
 	void TickShotLinkArcs();

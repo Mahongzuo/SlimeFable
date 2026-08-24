@@ -25,7 +25,7 @@ namespace SlimeTrailDefaults
 	static const FSoftObjectPath WaterDecal(TEXT("/Game/Characters/Slime/Materials/MI_SlimeTrail_Water.MI_SlimeTrail_Water"));
 	static const FSoftObjectPath DarkDecal(TEXT("/Game/Characters/Slime/Materials/MI_SlimeTrail_Dark.MI_SlimeTrail_Dark"));
 	static const FSoftObjectPath WindDecal(TEXT("/Game/Characters/Slime/Materials/MI_SlimeTrail_Wind.MI_SlimeTrail_Wind"));
-	static const FSoftObjectPath FireNiagara(TEXT("/Game/Characters/Slime/FX/NS_SlimeTrail_Fire.NS_SlimeTrail_Fire"));
+	static const FSoftObjectPath FireNiagara(TEXT("/Game/NiagaraExamples/FX_Footstep/NS_Footstep_Fire.NS_Footstep_Fire"));
 	static const FSoftObjectPath FireOverlay(TEXT("/Game/Characters/Slime/Materials/MI_Slime_FireOverlay.MI_Slime_FireOverlay"));
 	static const FSoftObjectPath PhysicalNiagara(TEXT("/Game/NiagaraExamples/FX_Footstep/NS_Footstep_Gravel.NS_Footstep_Gravel"));
 	static const FSoftObjectPath TeslaArc(TEXT("/Game/Characters/Slime/FX/NS_SlimeTeslaArc.NS_SlimeTeslaArc"));
@@ -105,9 +105,9 @@ FSlimeTrailProfile USlimeTrailComponent::MakeDefaultProfile(ESlimeElement Elemen
 		Profile.GroundNiagara = TSoftObjectPtr<UNiagaraSystem>(SlimeTrailDefaults::FireNiagara);
 		Profile.AttachedOverlayMaterial = TSoftObjectPtr<UMaterialInterface>(SlimeTrailDefaults::FireOverlay);
 		Profile.SpawnDistance = 16.f;
-		Profile.StampSize = 0.48f;
-		Profile.StampLifetime = 1.f;
-		Profile.MaxStamps = 12;
+		Profile.StampSize = 0.9f;
+		Profile.StampLifetime = 3.f;
+		Profile.MaxStamps = 14;
 		break;
 
 	case ESlimeElement::Lightning:
@@ -467,7 +467,7 @@ void USlimeTrailComponent::UpdateClingFireFx()
 	const FVector Normal = Cling ? Cling->GetWallNormal() : FVector::UpVector;
 	const FRotator Rotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
 	const FVector WorldLoc = GetOwner()->GetActorLocation() + Normal * 12.f;
-	const FVector Scale(FMath::Max(Profile.StampSize, 0.48f));
+	const FVector Scale(FMath::Max(Profile.StampSize, 0.2f));
 
 	if (!ClingFireNiagaraComp)
 	{
@@ -494,9 +494,11 @@ void USlimeTrailComponent::UpdateClingFireFx()
 
 	ClingFireNiagaraComp->SetWorldLocationAndRotation(WorldLoc, Rotation);
 	ClingFireNiagaraComp->SetWorldScale3D(Scale);
+	ConfigureFireFootstep(ClingFireNiagaraComp);
 	if (!ClingFireNiagaraComp->IsActive())
 	{
 		ClingFireNiagaraComp->Activate(true);
+		ConfigureFireFootstep(ClingFireNiagaraComp);
 	}
 }
 
@@ -691,6 +693,11 @@ void USlimeTrailComponent::StampGroundNiagara(
 	// so fire / gravel spray out of a wall instead of world up.
 	Niagara->SetWorldRotation(Rotation);
 
+	if (Profile.Element == ESlimeElement::Fire)
+	{
+		ConfigureFireFootstep(Niagara);
+	}
+
 	FActiveStamp Stamp;
 	Stamp.Niagara = Niagara;
 	Stamp.Lifetime = Profile.StampLifetime;
@@ -790,6 +797,54 @@ void USlimeTrailComponent::ConfigureTeslaArc(UNiagaraComponent* Niagara)
 	}
 
 	Niagara->SetVariableLinearColor(SlimeTrailDefaults::TeslaSmokeColor, FLinearColor(0.f, 0.f, 0.f, 0.f));
+}
+
+void USlimeTrailComponent::ConfigureFireFootstep(UNiagaraComponent* Niagara)
+{
+	if (!Niagara)
+	{
+		return;
+	}
+
+	auto ShouldDisable = [](const FString& Name) -> bool
+	{
+		return Name.Contains(TEXT("Foot"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("Print"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("Decal"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("Mesh"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("Shoe"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("Step"), ESearchCase::IgnoreCase);
+	};
+
+	// Common authoring names on NS_Footstep_Fire.
+	static const FName Candidates[] = {
+		FName(TEXT("Footprint")),
+		FName(TEXT("Footprints")),
+		FName(TEXT("Foot Print")),
+		FName(TEXT("FootPrint")),
+		FName(TEXT("Footstep")),
+		FName(TEXT("Footsteps")),
+		FName(TEXT("Print")),
+		FName(TEXT("Decal")),
+		FName(TEXT("Mesh")),
+	};
+	for (const FName& Name : Candidates)
+	{
+		Niagara->SetEmitterEnable(Name, false);
+	}
+
+	if (UNiagaraSystem* System = Niagara->GetAsset())
+	{
+		for (const FNiagaraEmitterHandle& Handle : System->GetEmitterHandles())
+		{
+			const FString EmitterName = Handle.GetName().ToString();
+			if (ShouldDisable(EmitterName))
+			{
+				Niagara->SetEmitterEnable(Handle.GetName(), false);
+				UE_LOG(LogSlimeFable, Verbose, TEXT("FireTrail: disabled emitter '%s'"), *EmitterName);
+			}
+		}
+	}
 }
 
 void USlimeTrailComponent::TickShotLinkArcs()

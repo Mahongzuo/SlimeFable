@@ -29,7 +29,8 @@ enum class ESlimeDevourPhase : uint8
 	Shrink,
 	Retract,
 	Digest,
-	CloseRangeShrink
+	CloseRangeShrink,
+	CloseRangeDash
 };
 
 USTRUCT(BlueprintType)
@@ -162,40 +163,48 @@ public:
 	void ConsumePhantomSlot(int32 Slot);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "50.0", Units = "cm",
-		ToolTip = "可吞噬扫描半径。默认 1000cm，长按 F 读条期间超出此距离会取消。"))
-	float DevourRadius = 1000.f;
+		ToolTip = "可吞噬扫描半径。默认 800cm，长按 F 读条期间超出此距离会取消。"))
+	float DevourRadius = 800.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "0.01", ClampMax = "1.0",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.01", ClampMax = "1.0",
 		ToolTip = "全局吞噬血量阈值。敌人自己填了大于 0 的值时以敌人为准。默认 0.2 即残血 20%。"))
 	float DevourHealthThreshold = 0.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "1.0", Units = "cm",
-		ToolTip = "短按 F 触发快速吞噬的最大距离。严格小于此值才进入近距离流程，默认 200cm。"))
-	float CloseRangeRadius = 200.f;
+		ToolTip = "短按 F 触发快速吞噬的最大距离。严格小于此值才进入近距离流程，默认 300cm。"))
+	float CloseRangeRadius = 300.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "0.1", Units = "s",
-		ToolTip = "近距离短按吞噬时敌人悬空并缩小到体内尺寸的时长，默认 1 秒。"))
-	float CloseRangeShrinkSeconds = 1.f;
+		ToolTip = "近距离短按吞噬时敌人缩小到可吞尺寸的时长，默认 0.75 秒。"))
+	float CloseRangeShrinkSeconds = 0.75f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "0.1", Units = "s",
+		ToolTip = "近距离缩小后史莱姆冲刺到敌人处的时长，默认 0.5 秒。"))
+	float CloseRangeDashSeconds = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour", meta = (ClampMin = "1.0", ClampMax = "40.0",
+		ToolTip = "近距冲刺时 CameraLagSpeed，默认 28；结束后恢复。"))
+	float CloseRangeDashCameraLag = 28.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.2", Units = "s",
 		ToolTip = "长按 F 蓄力时长。默认 1.2s，读满才发射子球。"))
 	float HoldSeconds = 1.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "1", ClampMax = "3",
-		ToolTip = "贴附子球数量。默认 3：顶部、左、右。"))
-	int32 LatchShotCount = 3;
+		ToolTip = "远距包裹子球数量。默认 1。"))
+	int32 LatchShotCount = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.1", Units = "s",
-		ToolTip = "子球抛物线飞向贴附点的时长。默认 0.9s。"))
-	float LatchSeconds = 0.9f;
+		ToolTip = "子球抛物线飞向包裹点的时长。默认 0.65s。"))
+	float LatchSeconds = 0.65f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.0", Units = "cm",
 		ToolTip = "抛物线额外抬高。默认 80cm，与 G 键弧高同量级。"))
 	float LatchArcHeight = 80.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.2", Units = "s",
-		ToolTip = "贴附后把敌人均匀缩小到可吞尺寸的时长。默认 2s。"))
-	float ShrinkSeconds = 2.f;
+		ToolTip = "远距先把敌人缩小到可吞尺寸的时长。默认 1.5s。"))
+	float ShrinkSeconds = 1.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.2", ClampMax = "1.0",
 		ToolTip = "缩小后敌人包围球半径相对史莱姆 RestRadius 的比例。默认 0.6。"))
@@ -226,8 +235,8 @@ public:
 	float LatchStickOffsetFraction = 0.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.2", Units = "s",
-		ToolTip = "缩小后把三球和敌人网格缓收回体内的时长。默认 1.2s。不改 G 键召回速度。"))
-	float RetractSeconds = 1.2f;
+		ToolTip = "缩小后把子球和敌人网格缓收回体内的时长。默认 0.9s。不改 G 键召回速度。"))
+	float RetractSeconds = 0.9f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.05", Units = "s",
 		ToolTip = "体内消化时长。默认 10s，结束时体内网格消失。"))
@@ -270,6 +279,10 @@ protected:
 	bool IsTargetStillValid(const AEnemyCharacter* Enemy) const;
 	bool PrepareDevourTarget(AEnemyCharacter* Enemy);
 	void BeginCloseRange(AEnemyCharacter* Enemy);
+	void BeginCloseRangeDash(AEnemyCharacter* Enemy);
+	void TickCloseRangeDash(float DeltaTime);
+	void SetCloseRangeCameraLag(bool bBoost);
+	void SetOwnerMovementFrozen(bool bFrozen);
 	bool LaunchCloseRangeWrapper(AEnemyCharacter* Enemy);
 	FVector GetWrapCenter(const AEnemyCharacter* Enemy) const;
 	bool IsCloseRangeWrapped(const AEnemyCharacter* Enemy) const;
@@ -290,6 +303,8 @@ protected:
 	void ApplyEnemyShrink(AEnemyCharacter* Enemy, float Alpha) const;
 	void BeginRetract(AEnemyCharacter* Enemy);
 	void TickRetract(float DeltaTime);
+	/** Place enemy so GetWrapCenter equals DesiredWrapCenter. */
+	void SetEnemyWrapCenter(AEnemyCharacter* Enemy, const FVector& DesiredWrapCenter) const;
 	int32 GetActiveLatchShotCount() const;
 	void SwallowTarget();
 	void CaptureEnemy(AEnemyCharacter* Enemy, FSlimeDevourCapture& OutCapture) const;
@@ -335,9 +350,17 @@ protected:
 	TArray<uint8> LatchShotIds;
 	TArray<uint8> LatchPinned;
 	FVector RetractStartLocation = FVector::ZeroVector;
+	FVector RetractStartWrapCenter = FVector::ZeroVector;
 	FVector CloseRangeHoverLocation = FVector::ZeroVector;
+	FVector CloseRangeDashStart = FVector::ZeroVector;
+	FVector CloseRangeDashEnd = FVector::ZeroVector;
 	uint8 CloseRangeShotId = 0;
 	int32 LatchLaunchIndex = 0;
+	float SavedCameraLagSpeed = 12.f;
+	float SavedEnemyGravityScale = 1.f;
+	bool bCameraLagBoosted = false;
+	bool bSavedEnemyGravity = false;
+	bool bOwnerMovementFrozen = false;
 
 	ESlimeDevourPhase Phase = ESlimeDevourPhase::Idle;
 	float PhaseElapsed = 0.f;

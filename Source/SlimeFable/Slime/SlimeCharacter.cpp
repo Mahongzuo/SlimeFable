@@ -15,6 +15,7 @@
 #include "SlimeCharacterMovementComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
+#include "Slime/SlimeElementProgressSubsystem.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeCombatHUDWidget.h"
 #include "Quest/QuestSubsystem.h"
@@ -36,13 +37,38 @@
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h"
+#include "Settings/SlimeAudioPlay.h"
 
+namespace SlimeMoveAudio
+{
+	static const TCHAR* DefaultFootstep = TEXT("/Game/Audio/SFX/Movement/sfx_crawl_01.sfx_crawl_01");
+	static const TCHAR* DefaultJump = TEXT("/Game/Audio/SFX/Movement/sfx_jump_01.sfx_jump_01");
+	static const TCHAR* DefaultHitTaken = TEXT("/Game/Audio/SFX/Combat/sfx_hit_01.sfx_hit_01");
+
+	USoundBase* Resolve(const TSoftObjectPtr<USoundBase>& Soft, const TCHAR* Fallback)
+	{
+		if (!Soft.IsNull())
+		{
+			if (USoundBase* Loaded = Soft.LoadSynchronous())
+			{
+				return Loaded;
+			}
+		}
+		return LoadObject<USoundBase>(nullptr, Fallback);
+	}
+}
 
 ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<USlimeCharacterMovementComponent>(
 		ACharacter::CharacterMovementComponentName))
 {
 	PrimaryActorTick.bCanEverTick = true;
+	FootstepSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultFootstep));
+	JumpSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultJump));
+	HitTakenSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultHitTaken));
 
 	// A ~40 cm tall dome, not a humanoid.
 	GetCapsuleComponent()->InitCapsuleSize(32.f, 20.f);
@@ -100,7 +126,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SurfaceMesh->bUseComplexAsSimpleCollision = false;
 	SurfaceMesh->SetGenerateOverlapEvents(false);
 	SurfaceMesh->bUseAsyncCooking = false;
-	// Visible jelly does not cast — the opaque ShadowMesh proxy owns ground shadows.
+	// Visible jelly does not cast ï¿½?the opaque ShadowMesh proxy owns ground shadows.
 	SurfaceMesh->SetCastShadow(false);
 	SurfaceMesh->bCastDynamicShadow = false;
 	SurfaceMesh->bCastVolumetricTranslucentShadow = false;
@@ -137,6 +163,8 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	XRayMesh->bUseComplexAsSimpleCollision = false;
 	XRayMesh->SetGenerateOverlapEvents(false);
 	XRayMesh->bUseAsyncCooking = false;
+	// Occlusion-edge silhouette: Unlit + DisableDepthTest, opacity gated by SceneDepth.
+	// Stays visible so walls can reveal the Fresnel rim; transparent when unoccluded.
 	XRayMesh->SetHiddenInGame(false);
 	XRayMesh->SetVisibility(true);
 	XRayMesh->SetCastShadow(false);
@@ -229,6 +257,26 @@ void ASlimeCharacter::BeginPlay()
 	{
 		SlimeHealth->OnDied.AddDynamic(this, &ASlimeCharacter::HandleDeath);
 	}
+
+	if (IsPlayerControlled() && SlimeElement)
+	{
+		if (USlimeElementProgressSubsystem* Progress = USlimeElementProgressSubsystem::Get(this))
+		{
+			SlimeElement->SetElement(Progress->GetSavedElement(), true);
+		}
+	}
+}
+
+void ASlimeCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+	if (Cast<APlayerController>(NewController) && SlimeElement)
+	{
+		if (USlimeElementProgressSubsystem* Progress = USlimeElementProgressSubsystem::Get(this))
+		{
+			SlimeElement->SetElement(Progress->GetSavedElement(), true);
+		}
+	}
 }
 
 void ASlimeCharacter::Tick(float DeltaSeconds)
@@ -242,10 +290,81 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 	{
 		SlimeCling->UpdateCling(DeltaSeconds);
 	}
+	TickFootsteps(DeltaSeconds);
 	Super::Tick(DeltaSeconds);
 	if (IsPlayerControlled())
 	{
 		UpdateCameraZoom(DeltaSeconds);
+	}
+}
+
+void ASlimeCharacter::TickFootsteps(float DeltaSeconds)
+{
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const FVector Horiz = FVector(GetVelocity().X, GetVelocity().Y, 0.f);
+	const bool bMovingOnGround =
+		Movement && Movement->IsMovingOnGround() && Horiz.SizeSquared() >= 400.f;
+
+	if (!bMovingOnGround)
+	{
+		FootstepTimer = 0.f;
+		StopFootstepAudio(false);
+		return;
+	}
+
+	FootstepTimer += DeltaSeconds;
+	if (FootstepTimer < FootstepInterval)
+	{
+		return;
+	}
+	FootstepTimer = 0.f;
+	PlayFootstepAudio();
+}
+
+void ASlimeCharacter::StopFootstepAudio(bool bImmediate)
+{
+	if (!FootstepAudio)
+	{
+		return;
+	}
+	if (bImmediate)
+	{
+		FootstepAudio->Stop();
+	}
+	else if (FootstepAudio->IsPlaying())
+	{
+		FootstepAudio->FadeOut(0.06f, 0.f);
+	}
+}
+
+void ASlimeCharacter::PlayFootstepAudio()
+{
+	USoundBase* Sfx = SlimeMoveAudio::Resolve(FootstepSound, SlimeMoveAudio::DefaultFootstep);
+	if (!Sfx)
+	{
+		return;
+	}
+	StopFootstepAudio(true);
+	FootstepAudio = UGameplayStatics::SpawnSoundAttached(
+		Sfx,
+		GetRootComponent(),
+		NAME_None,
+		FVector::ZeroVector,
+		EAttachLocation::KeepRelativeOffset,
+		false,
+		SlimeAudioPlay::SfxMul(this),
+		1.f,
+		0.f,
+		nullptr,
+		nullptr,
+		true);
+}
+
+void ASlimeCharacter::PlayJumpSound()
+{
+	if (USoundBase* Sfx = SlimeMoveAudio::Resolve(JumpSound, SlimeMoveAudio::DefaultJump))
+	{
+		SlimeAudioPlay::PlaySfxAt(this, Sfx, GetActorLocation());
 	}
 }
 
@@ -459,6 +578,7 @@ void ASlimeCharacter::Landed(const FHitResult& Hit)
 void ASlimeCharacter::OnJumped_Implementation()
 {
 	Super::OnJumped_Implementation();
+	PlayJumpSound();
 
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
 	if (!Movement)
@@ -504,9 +624,17 @@ void ASlimeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 
 void ASlimeCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse)
 {
-	if (SlimeHealth)
+	if (!SlimeHealth)
 	{
-		SlimeHealth->ApplyDamage(Damage, DamageCauser, DamageLocation, DamageImpulse);
+		return;
+	}
+	const float Applied = SlimeHealth->ApplyDamage(Damage, DamageCauser, DamageLocation, DamageImpulse);
+	if (Applied > 0.f)
+	{
+		if (USoundBase* Sfx = SlimeMoveAudio::Resolve(HitTakenSound, SlimeMoveAudio::DefaultHitTaken))
+		{
+			SlimeAudioPlay::PlaySfxAt(this, Sfx, GetActorLocation());
+		}
 	}
 }
 

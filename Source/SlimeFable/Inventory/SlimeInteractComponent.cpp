@@ -411,7 +411,7 @@ void USlimeInteractComponent::PollKeys()
 		ESlimeInputAction::Hotbar4, ESlimeInputAction::Hotbar5, ESlimeInputAction::Hotbar6
 	};
 	static const FKey HotbarFallback[6] = {
-		EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six
+		EKeys::Invalid, EKeys::Invalid, EKeys::Invalid, EKeys::Invalid, EKeys::Invalid, EKeys::Invalid
 	};
 
 	if (!IsInventoryOpen() && CanInteractNow())

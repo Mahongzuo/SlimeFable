@@ -4,6 +4,10 @@
 #include "UI/LevelSelectWidget.h"
 #include "UI/KeybindSettingsWidget.h"
 #include "UI/GraphicsSettingsWidget.h"
+#include "UI/AudioSettingsWidget.h"
+#include "UI/TutorialMenuWidget.h"
+#include "Settings/SlimeAudioSettings.h"
+#include "Settings/SlimeAudioPlay.h"
 #include "UI/MenuUIStyle.h"
 #include "DayLevel/DayLevelSubsystem.h"
 #include "Components/Button.h"
@@ -17,6 +21,14 @@
 #include "Blueprint/WidgetTree.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Engine/GameInstance.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+
+namespace MainMenuAudio
+{
+	static const TCHAR* DefaultMenuBgm = TEXT("/Game/Audio/BGM/bgm_global_menu.bgm_global_menu");
+}
 
 UMainMenuWidget::UMainMenuWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -27,6 +39,7 @@ UMainMenuWidget::UMainMenuWidget(const FObjectInitializer& ObjectInitializer)
 		FSoftObjectPath(TEXT("/Game/UI/WBP_KeybindSettings.WBP_KeybindSettings_C")));
 	GraphicsSettingsClassPath = TSoftClassPtr<UGraphicsSettingsWidget>(
 		FSoftObjectPath(TEXT("/Game/UI/WBP_GraphicsSettings.WBP_GraphicsSettings_C")));
+	MenuMusic = TSoftObjectPtr<USoundBase>(FSoftObjectPath(MainMenuAudio::DefaultMenuBgm));
 }
 
 TSharedRef<SWidget> UMainMenuWidget::RebuildWidget()
@@ -59,12 +72,76 @@ void UMainMenuWidget::NativeConstruct()
 	{
 		GraphicsButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnGraphicsClicked);
 	}
+	if (AudioButton)
+	{
+		AudioButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnAudioClicked);
+	}
+	if (TutorialButton)
+	{
+		TutorialButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnTutorialClicked);
+	}
 	if (QuitButton)
 	{
 		QuitButton->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::OnQuitClicked);
 	}
 
 	RefreshTodayInfo();
+	StartMenuMusic();
+	if (USlimeAudioSettings* AudioSettings = GetGameInstance() ? GetGameInstance()->GetSubsystem<USlimeAudioSettings>() : nullptr)
+	{
+		AudioSettings->OnVolumesChanged.AddUniqueDynamic(this, &UMainMenuWidget::HandleAudioVolumesChanged);
+		RefreshMenuMusicVolume();
+	}
+}
+
+void UMainMenuWidget::NativeDestruct()
+{
+	if (USlimeAudioSettings* AudioSettings = GetGameInstance() ? GetGameInstance()->GetSubsystem<USlimeAudioSettings>() : nullptr)
+	{
+		AudioSettings->OnVolumesChanged.RemoveAll(this);
+	}
+	StopMenuMusic();
+	Super::NativeDestruct();
+}
+
+void UMainMenuWidget::StartMenuMusic()
+{
+	if (MenuMusicComponent && MenuMusicComponent->IsPlaying())
+	{
+		return;
+	}
+
+	USoundBase* Music = nullptr;
+	if (!MenuMusic.IsNull())
+	{
+		Music = MenuMusic.LoadSynchronous();
+	}
+	if (!Music)
+	{
+		Music = LoadObject<USoundBase>(nullptr, MainMenuAudio::DefaultMenuBgm);
+	}
+	if (!Music)
+	{
+		return;
+	}
+
+	MenuMusicComponent = UGameplayStatics::SpawnSound2D(this, Music, SlimeAudioPlay::MusicMul(this), 1.f, 0.f, nullptr, false, true);
+	if (MenuMusicComponent)
+	{
+		MenuMusicComponent->bIsUISound = true;
+		MenuMusicComponent->bAllowSpatialization = false;
+		RefreshMenuMusicVolume();
+	}
+}
+
+void UMainMenuWidget::StopMenuMusic()
+{
+	if (MenuMusicComponent)
+	{
+		MenuMusicComponent->Stop();
+		MenuMusicComponent->DestroyComponent();
+		MenuMusicComponent = nullptr;
+	}
 }
 
 void UMainMenuWidget::ResolveLevelSelectClass()
@@ -94,7 +171,7 @@ void UMainMenuWidget::ResolveGraphicsClass()
 void UMainMenuWidget::BuildLayoutIfNeeded()
 {
 	// Require new settings buttons too; otherwise rebuild full code layout (covers older WBPs).
-	if (TitleText && PlayTodayButton && SelectLevelButton && KeybindButton && GraphicsButton && QuitButton)
+	if (TitleText && PlayTodayButton && SelectLevelButton && KeybindButton && GraphicsButton && AudioButton && TutorialButton && QuitButton)
 	{
 		bBuiltInCode = false;
 		return;
@@ -165,6 +242,8 @@ void UMainMenuWidget::BuildLayoutIfNeeded()
 	SelectLevelButton = AddButton(TEXT("SelectLevelButton"), FText::FromString(TEXT("选择关卡")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
 	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
+	AudioButton = AddButton(TEXT("AudioButton"), FText::FromString(TEXT("音乐音效")));
+	TutorialButton = AddButton(TEXT("TutorialButton"), FText::FromString(TEXT("操作教程")));
 	QuitButton = AddButton(TEXT("QuitButton"), FText::FromString(TEXT("退出游戏")));
 }
 
@@ -198,6 +277,8 @@ void UMainMenuWidget::ApplyMaterialLabLook()
 	FMenuUIStyle::ApplyMaterialButtonStyle(SelectLevelButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(GraphicsButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(AudioButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(TutorialButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(QuitButton, BrushBtn, Size);
 
 	auto StyleChildLabel = [](UButton* Button, float FontSize)
@@ -215,6 +296,8 @@ void UMainMenuWidget::ApplyMaterialLabLook()
 	StyleChildLabel(SelectLevelButton, 22.f);
 	StyleChildLabel(KeybindButton, 22.f);
 	StyleChildLabel(GraphicsButton, 22.f);
+	StyleChildLabel(AudioButton, 22.f);
+	StyleChildLabel(TutorialButton, 22.f);
 	StyleChildLabel(QuitButton, 22.f);
 
 	auto BindHover = [](UButton* Button)
@@ -226,6 +309,8 @@ void UMainMenuWidget::ApplyMaterialLabLook()
 	BindHover(SelectLevelButton);
 	BindHover(KeybindButton);
 	BindHover(GraphicsButton);
+	BindHover(AudioButton);
+	BindHover(TutorialButton);
 	BindHover(QuitButton);
 }
 
@@ -430,6 +515,99 @@ void UMainMenuWidget::OnKeybindClicked()
 void UMainMenuWidget::OnGraphicsClicked()
 {
 	OpenGraphicsSettings();
+}
+
+
+void UMainMenuWidget::ResolveAudioClass()
+{
+	if (!AudioSettingsClass && !AudioSettingsClassPath.IsNull())
+	{
+		AudioSettingsClass = AudioSettingsClassPath.LoadSynchronous();
+	}
+}
+
+void UMainMenuWidget::ResolveTutorialClass()
+{
+	if (!TutorialMenuClass && !TutorialMenuClassPath.IsNull())
+	{
+		TutorialMenuClass = TutorialMenuClassPath.LoadSynchronous();
+	}
+}
+
+void UMainMenuWidget::RefreshMenuMusicVolume()
+{
+	if (MenuMusicComponent)
+	{
+		MenuMusicComponent->SetVolumeMultiplier(SlimeAudioPlay::MusicMul(this));
+	}
+}
+
+void UMainMenuWidget::HandleAudioVolumesChanged()
+{
+	RefreshMenuMusicVolume();
+}
+
+void UMainMenuWidget::OpenAudioSettings()
+{
+	ResolveAudioClass();
+	if (!AudioSettingsWidget)
+	{
+		const TSubclassOf<UAudioSettingsWidget> ClassToSpawn =
+			AudioSettingsClass
+				? AudioSettingsClass
+				: TSubclassOf<UAudioSettingsWidget>(UAudioSettingsWidget::StaticClass());
+		AudioSettingsWidget = CreateWidget<UAudioSettingsWidget>(GetOwningPlayer(), ClassToSpawn);
+	}
+	if (AudioSettingsWidget)
+	{
+		AudioSettingsWidget->SetReturnTarget(this);
+		SetVisibility(ESlateVisibility::Collapsed);
+		if (!AudioSettingsWidget->IsInViewport())
+		{
+			AudioSettingsWidget->AddToViewport(1);
+		}
+		else
+		{
+			AudioSettingsWidget->SetVisibility(ESlateVisibility::Visible);
+		}
+		AudioSettingsWidget->RefreshFromSettings();
+	}
+}
+
+void UMainMenuWidget::OpenTutorialMenu()
+{
+	ResolveTutorialClass();
+	if (!TutorialMenuWidget)
+	{
+		const TSubclassOf<UTutorialMenuWidget> ClassToSpawn =
+			TutorialMenuClass
+				? TutorialMenuClass
+				: TSubclassOf<UTutorialMenuWidget>(UTutorialMenuWidget::StaticClass());
+		TutorialMenuWidget = CreateWidget<UTutorialMenuWidget>(GetOwningPlayer(), ClassToSpawn);
+	}
+	if (TutorialMenuWidget)
+	{
+		TutorialMenuWidget->SetReturnTarget(this);
+		SetVisibility(ESlateVisibility::Collapsed);
+		if (!TutorialMenuWidget->IsInViewport())
+		{
+			TutorialMenuWidget->AddToViewport(1);
+		}
+		else
+		{
+			TutorialMenuWidget->SetVisibility(ESlateVisibility::Visible);
+		}
+	}
+}
+
+void UMainMenuWidget::OnAudioClicked()
+{
+	OpenAudioSettings();
+}
+
+void UMainMenuWidget::OnTutorialClicked()
+{
+	OpenTutorialMenu();
 }
 
 void UMainMenuWidget::OnQuitClicked()

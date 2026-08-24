@@ -14,6 +14,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "NiagaraFunctionLibrary.h"
+#include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
@@ -21,6 +22,7 @@
 #include "SlimeHitProbe.h"
 #include "SlimeEnemyGameplayTags.h"
 #include "Engine/GameInstance.h"
+#include "TimerManager.h"
 
 UEnemyCombatComponent::UEnemyCombatComponent()
 {
@@ -121,6 +123,7 @@ void UEnemyCombatComponent::InterruptCombat()
 	}
 	bAttacking = false;
 	bHitFired = false;
+	bActionAnimationStarted = false;
 	AlreadyHit.Reset();
 	if (UEnemySkillAbility* Ability = ActiveGasAbility.Get())
 	{
@@ -147,6 +150,7 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 			if (Enemy->UsesSingleNodeAnims())
 			{
 				Enemy->PlayMeshAnimation(Montage, false);
+				bActionAnimationStarted = true;
 			}
 			else if (UAnimInstance* Anim = Enemy->GetMesh() ? Enemy->GetMesh()->GetAnimInstance() : nullptr)
 			{
@@ -155,15 +159,20 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 				{
 					Enemy->PlayMeshAnimation(Montage, false);
 				}
+				bActionAnimationStarted = true;
 			}
 		}
 		else if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 		{
 			if (UAnimInstance* Anim = Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr)
 			{
-				Anim->Montage_Play(Montage);
+				bActionAnimationStarted = Anim->Montage_Play(Montage) > 0.f;
 			}
 		}
+	}
+	else
+	{
+		bActionAnimationStarted = true;
 	}
 
 	if (Def.Exec == EEnemySkillExec::Dash)
@@ -191,7 +200,7 @@ void UEnemyCombatComponent::TickAction(float DeltaTime)
 	}
 	ActionElapsed += DeltaTime;
 
-	if (!bHitFired && ActionElapsed >= ActiveDef.HitStart)
+	if (bActionAnimationStarted && !bHitFired && ActionElapsed >= ActiveDef.HitStart)
 	{
 		bHitFired = true;
 		FireHit();
@@ -222,6 +231,7 @@ void UEnemyCombatComponent::FinishAction()
 	}
 	bAttacking = false;
 	bHitFired = false;
+	bActionAnimationStarted = false;
 	AlreadyHit.Reset();
 	if (UEnemySkillAbility* Ability = ActiveGasAbility.Get())
 	{
@@ -349,8 +359,21 @@ void UEnemyCombatComponent::SpawnVfx(const TSoftObjectPtr<UNiagaraSystem>& SoftS
 	}
 	if (UNiagaraSystem* System = SoftSystem.LoadSynchronous())
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		UNiagaraComponent* Spawned = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			this, System, Location, GetAimForward().Rotation(), FVector(1.f), true, true);
+		if (Spawned && GetWorld())
+		{
+			TWeakObjectPtr<UNiagaraComponent> WeakFx(Spawned);
+			FTimerHandle LifetimeHandle;
+			GetWorld()->GetTimerManager().SetTimer(LifetimeHandle, [WeakFx]()
+			{
+				if (UNiagaraComponent* Fx = WeakFx.Get())
+				{
+					Fx->DeactivateImmediate();
+					Fx->DestroyComponent();
+				}
+			}, 4.8f, false);
+		}
 	}
 }
 

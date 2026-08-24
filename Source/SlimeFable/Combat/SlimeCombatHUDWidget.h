@@ -94,6 +94,9 @@ protected:
 	TObjectPtr<UBorder> DevourHoldTrack;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DevourHoldLabel;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UProgressBar> DigestBar;
 
 	UPROPERTY(Transient)

@@ -41,10 +41,12 @@
 | `Content/Variant_*` | 官方模板变体关 |
 | `Content/Python/create_day_levels.py` | 创建/刷新日关卡 + Registry |
 | `Content/Python/start_mcp_8010.py` | 手动启动 MCP 8010 |
+| `Content/Audio/` | 全局 BGM / SFX / Theme（Comfy 生成落盘） |
+| `.cursor/skills/slimefable-audio/` | ComfyUI 音乐/音效生成 Skill + CLI |
 
 ## 配置要点
 
 - `Config/DefaultEngine.ini`：`GameDefaultMap` / `EditorStartupMap` → `/Game/Maps/Main.Main`；`r.XGEController.Enabled=0`（solo 机失效 Incredibuild/XGE 会导致打包着色器 CPU 极低）
-- `Config/DefaultGame.ini`：扫描 `/Game/Maps` 与 `DayLevelRegistry`（`/Game/Data/DayLevels`）；C++ soft-path Niagara（`Mixed_Magic_VFX_Pack` / `BlinkAndDashVFX` / `NiagaraExamples/FX_*` 等运行时子目录）须 `DirectoriesToAlwaysCook`；勿 AlwaysCook 整包 `NiagaraExamples`（`Utilities` 依赖缺失的 NiagaraFluids，会刷 Error）
+- `Config/DefaultGame.ini`：扫描 `/Game/Maps` 与 `DayLevelRegistry`（`/Game/Data/DayLevels`）；C++ soft-path Niagara（`Mixed_Magic_VFX_Pack` / `BlinkAndDashVFX` / `NiagaraExamples/FX_*` 等运行时子目录）须 `DirectoriesToAlwaysCook`；全局音频 `/Game/Audio` AlwaysCook；勿 AlwaysCook 整包 `NiagaraExamples`（`Utilities` 依赖缺失的 NiagaraFluids，会刷 Error）
 - `Config/DefaultGameplayTags.ini`：`Exploration.*` 预留标签
 - `Config/DefaultEditor.ini`：MCP `ServerPortNumber=8010`、`bAutoStartServer=False`（打包 Cook 勿自动绑端口；手动 `ModelContextProtocol.StartServer 8010`）

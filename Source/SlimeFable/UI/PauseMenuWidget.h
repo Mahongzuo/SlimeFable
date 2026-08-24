@@ -11,6 +11,8 @@ class UTextBlock;
 class UImage;
 class UKeybindSettingsWidget;
 class UGraphicsSettingsWidget;
+class UAudioSettingsWidget;
+class UTutorialMenuWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuContinue);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuLevelSelect);
@@ -58,6 +60,9 @@ protected:
 	void ResolveSettingsClasses();
 	void OpenKeybindSettings();
 	void OpenGraphicsSettings();
+	void OpenAudioSettings();
+	void OpenTutorialMenu();
+	void FocusPauseSubpage(UUserWidget* Subpage);
 
 	UFUNCTION()
 	void OnContinueClicked();
@@ -70,6 +75,12 @@ protected:
 
 	UFUNCTION()
 	void OnGraphicsClicked();
+
+	UFUNCTION()
+	void OnAudioClicked();
+
+	UFUNCTION()
+	void OnTutorialClicked();
 
 	UFUNCTION()
 	void OnMainMenuClicked();
@@ -111,6 +122,12 @@ protected:
 	TObjectPtr<UButton> GraphicsButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> AudioButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> TutorialButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> MainMenuButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -124,6 +141,12 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UGraphicsSettingsWidget> GraphicsSettingsWidget;
+
+	UPROPERTY()
+	TObjectPtr<UAudioSettingsWidget> AudioSettingsWidget;
+
+	UPROPERTY()
+	TObjectPtr<UTutorialMenuWidget> TutorialMenuWidget;
 
 	bool bBuiltInCode = false;
 };

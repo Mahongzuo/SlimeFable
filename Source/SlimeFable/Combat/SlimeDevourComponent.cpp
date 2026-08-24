@@ -11,7 +11,10 @@
 #include "SlimeFable.h"
 #include "SlimeHealthComponent.h"
 #include "SlimePlacementComponent.h"
+#include "SlimeStatusComponent.h"
 #include "SlimeVehicleComponent.h"
+#include "SlimeFableCharacter.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/PoseableMeshComponent.h"
@@ -37,8 +40,10 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/App.h"
 #include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
 #include "Blueprint/UserWidget.h"
 #include "InputCoreTypes.h"
+#include "Engine/GameInstance.h"
 
 USlimeDevourComponent::USlimeDevourComponent()
 {
@@ -49,9 +54,23 @@ USlimeDevourComponent::USlimeDevourComponent()
 void USlimeDevourComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	if (FMath::IsNearlyEqual(DevourRadius, 350.f, 1.f) || FMath::IsNearlyEqual(DevourRadius, 220.f, 1.f))
+	if (FMath::IsNearlyEqual(DevourRadius, 350.f, 1.f)
+		|| FMath::IsNearlyEqual(DevourRadius, 220.f, 1.f)
+		|| FMath::IsNearlyEqual(DevourRadius, 1000.f, 1.f))
 	{
-		DevourRadius = 1000.f;
+		DevourRadius = 800.f;
+	}
+	if (FMath::IsNearlyEqual(CloseRangeRadius, 200.f, 1.f))
+	{
+		CloseRangeRadius = 300.f;
+	}
+	if (FMath::IsNearlyEqual(CloseRangeShrinkSeconds, 1.f, 0.01f))
+	{
+		CloseRangeShrinkSeconds = 0.75f;
+	}
+	if (FMath::IsNearlyEqual(CloseRangeDashSeconds, 0.35f, 0.01f))
+	{
+		CloseRangeDashSeconds = 0.5f;
 	}
 	if (FMath::IsNearlyEqual(LatchShotFraction, 0.06f, 0.005f))
 	{
@@ -65,9 +84,22 @@ void USlimeDevourComponent::BeginPlay()
 	{
 		DevourHealthThreshold = 0.2f;
 	}
-	if (FMath::IsNearlyEqual(LatchSeconds, 0.4f, 0.01f))
+	if (FMath::IsNearlyEqual(LatchSeconds, 0.4f, 0.01f)
+		|| FMath::IsNearlyEqual(LatchSeconds, 0.9f, 0.01f))
 	{
-		LatchSeconds = 0.9f;
+		LatchSeconds = 0.65f;
+	}
+	if (LatchShotCount >= 3)
+	{
+		LatchShotCount = 1;
+	}
+	if (FMath::IsNearlyEqual(ShrinkSeconds, 2.f, 0.01f))
+	{
+		ShrinkSeconds = 1.5f;
+	}
+	if (FMath::IsNearlyEqual(RetractSeconds, 1.2f, 0.01f))
+	{
+		RetractSeconds = 0.9f;
 	}
 	if (FMath::IsNearlyEqual(LatchPullSpeed, 2800.f, 1.f))
 	{
@@ -102,8 +134,8 @@ void USlimeDevourComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 bool USlimeDevourComponent::IsCombatLocked() const
 {
-	return Phase == ESlimeDevourPhase::Charging
-		|| Phase == ESlimeDevourPhase::CloseRangeShrink
+	return Phase == ESlimeDevourPhase::CloseRangeShrink
+		|| Phase == ESlimeDevourPhase::CloseRangeDash
 		|| Phase == ESlimeDevourPhase::Latch
 		|| Phase == ESlimeDevourPhase::Shrink
 		|| Phase == ESlimeDevourPhase::Retract;
@@ -194,6 +226,7 @@ AEnemyCharacter* USlimeDevourComponent::FindBestDevourTarget() const
 	}
 	if (Phase == ESlimeDevourPhase::Latch
 		|| Phase == ESlimeDevourPhase::CloseRangeShrink
+		|| Phase == ESlimeDevourPhase::CloseRangeDash
 		|| Phase == ESlimeDevourPhase::Shrink
 		|| Phase == ESlimeDevourPhase::Retract
 		|| Phase == ESlimeDevourPhase::Digest)
@@ -273,7 +306,6 @@ bool USlimeDevourComponent::BeginHold(AEnemyCharacter* Enemy)
 	{
 		Combat->InterruptCombat();
 	}
-	ClearOwnerLockOn();
 
 	DevourTarget = Enemy;
 	PendingDestroyEnemy.Reset();
@@ -386,18 +418,129 @@ void USlimeDevourComponent::BeginCloseRange(AEnemyCharacter* Enemy)
 		AbortDevour(true);
 		return;
 	}
-
-	FBox MeshBox;
-	if (!GetEnemyMeshBox(Enemy, MeshBox))
-	{
-		MeshBox = FBox::BuildAABB(Enemy->GetActorLocation(), FVector(40.f));
-	}
-	const float HoverOffset = FMath::Max(
-		MeshBox.GetExtent().Z + GetBlobRadius() * 0.5f,
-		GetBlobRadius() * 1.25f);
-	CloseRangeHoverLocation = Enemy->GetActorLocation() + FVector(0.f, 0.f, HoverOffset);
-	Enemy->SetActorLocation(CloseRangeHoverLocation, false, nullptr, ETeleportType::TeleportPhysics);
+	ClearOwnerLockOn();
 	EnterPhase(ESlimeDevourPhase::CloseRangeShrink);
+}
+
+void USlimeDevourComponent::SetCloseRangeCameraLag(bool bBoost)
+{
+	ASlimeFableCharacter* Slime = Cast<ASlimeFableCharacter>(GetOwner());
+	USpringArmComponent* Boom = Slime ? Slime->GetCameraBoom() : nullptr;
+	if (!Boom)
+	{
+		return;
+	}
+	if (bBoost)
+	{
+		if (!bCameraLagBoosted)
+		{
+			SavedCameraLagSpeed = Boom->CameraLagSpeed;
+			bCameraLagBoosted = true;
+		}
+		Boom->bEnableCameraLag = true;
+		Boom->CameraLagSpeed = CloseRangeDashCameraLag;
+	}
+	else if (bCameraLagBoosted)
+	{
+		Boom->CameraLagSpeed = SavedCameraLagSpeed;
+		bCameraLagBoosted = false;
+	}
+}
+
+void USlimeDevourComponent::SetOwnerMovementFrozen(bool bFrozen)
+{
+	ACharacter* OwnerChar = Cast<ACharacter>(GetOwner());
+	UCharacterMovementComponent* Move = OwnerChar ? OwnerChar->GetCharacterMovement() : nullptr;
+	if (!Move)
+	{
+		bOwnerMovementFrozen = false;
+		return;
+	}
+
+	if (bFrozen)
+	{
+		if (!bOwnerMovementFrozen)
+		{
+			Move->StopMovementImmediately();
+			Move->Velocity = FVector::ZeroVector;
+			Move->SetMovementMode(MOVE_Flying);
+			bOwnerMovementFrozen = true;
+		}
+		else
+		{
+			Move->Velocity = FVector::ZeroVector;
+		}
+	}
+	else if (bOwnerMovementFrozen)
+	{
+		Move->Velocity = FVector::ZeroVector;
+		Move->SetMovementMode(MOVE_Falling);
+		bOwnerMovementFrozen = false;
+	}
+}
+
+void USlimeDevourComponent::BeginCloseRangeDash(AEnemyCharacter* Enemy)
+{
+	AActor* Owner = GetOwner();
+	if (!Owner || !Enemy)
+	{
+		AbortDevour(true);
+		return;
+	}
+	SetOwnerMovementFrozen(true);
+	CloseRangeDashStart = Owner->GetActorLocation();
+	const FVector BlobOffset = Owner->GetActorLocation() - GetBlobCenter();
+	CloseRangeDashEnd = GetWrapCenter(Enemy) + BlobOffset;
+	SetCloseRangeCameraLag(true);
+	EnterPhase(ESlimeDevourPhase::CloseRangeDash);
+}
+
+void USlimeDevourComponent::TickCloseRangeDash(float DeltaTime)
+{
+	(void)DeltaTime;
+	AActor* Owner = GetOwner();
+	AEnemyCharacter* Target = DevourTarget.Get();
+	if (!Owner || !Target)
+	{
+		AbortDevour(true);
+		return;
+	}
+
+	SetOwnerMovementFrozen(true);
+	// Align visual blob center onto enemy mesh wrap center (not ActorLocation).
+	const FVector BlobOffset = Owner->GetActorLocation() - GetBlobCenter();
+	CloseRangeDashEnd = GetWrapCenter(Target) + BlobOffset;
+	const float Duration = FMath::Max(CloseRangeDashSeconds, 0.05f);
+	const float Alpha = FMath::Clamp(PhaseElapsed / Duration, 0.f, 1.f);
+	const float Smooth = Alpha * Alpha * (3.f - 2.f * Alpha);
+	const FVector Loc = FMath::Lerp(CloseRangeDashStart, CloseRangeDashEnd, Smooth);
+	Owner->SetActorLocation(Loc, false, nullptr, ETeleportType::TeleportPhysics);
+
+	if (Alpha >= 1.f)
+	{
+		Owner->SetActorLocation(CloseRangeDashEnd, false, nullptr, ETeleportType::TeleportPhysics);
+		SetCloseRangeCameraLag(false);
+		// Hover-wrap at enemy center (owner still frozen), inhale, then swallow in air.
+		EnterPhase(ESlimeDevourPhase::Retract);
+	}
+}
+
+void USlimeDevourComponent::SetEnemyWrapCenter(AEnemyCharacter* Enemy, const FVector& DesiredWrapCenter) const
+{
+	if (!Enemy)
+	{
+		return;
+	}
+	const FVector CurrentWrap = GetWrapCenter(Enemy);
+	const FVector ActorLoc = Enemy->GetActorLocation();
+	const FVector Offset = CurrentWrap - ActorLoc;
+	Enemy->SetActorLocation(DesiredWrapCenter - Offset, false, nullptr, ETeleportType::TeleportPhysics);
+	if (UCharacterMovementComponent* Move = Enemy->GetCharacterMovement())
+	{
+		Move->Velocity = FVector::ZeroVector;
+		Move->GravityScale = 0.f;
+		Move->SetMovementMode(MOVE_None);
+	}
 }
 
 FVector USlimeDevourComponent::GetWrapCenter(const AEnemyCharacter* Enemy) const
@@ -487,6 +630,7 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 
 	if (Phase == ESlimeDevourPhase::Charging
 		|| Phase == ESlimeDevourPhase::CloseRangeShrink
+		|| Phase == ESlimeDevourPhase::CloseRangeDash
 		|| Phase == ESlimeDevourPhase::Latch
 		|| Phase == ESlimeDevourPhase::Shrink
 		|| Phase == ESlimeDevourPhase::Retract)
@@ -511,6 +655,32 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 	case ESlimeDevourPhase::Charging:
 		{
 			FaceTarget(Target);
+			// Cancel if Interact/F is no longer held (don't rely solely on InteractComponent poll).
+			bool bHoldDown = false;
+			if (APlayerController* PC = GetPlayerController())
+			{
+				const USlimeInputSettings* InputSettings = nullptr;
+				if (const UWorld* World = GetWorld())
+				{
+					if (const UGameInstance* GI = World->GetGameInstance())
+					{
+						InputSettings = GI->GetSubsystem<USlimeInputSettings>();
+					}
+				}
+				if (InputSettings)
+				{
+					bHoldDown = InputSettings->IsKeyDown(PC, ESlimeInputAction::Interact);
+				}
+				else
+				{
+					bHoldDown = PC->IsInputKeyDown(EKeys::F);
+				}
+			}
+			if (!bHoldDown)
+			{
+				ReleaseHold();
+				return;
+			}
 			const float Dist = FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation());
 			if (Dist > DevourRadius)
 			{
@@ -525,10 +695,29 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 		break;
 	case ESlimeDevourPhase::CloseRangeShrink:
 		{
-			Target->SetActorLocation(CloseRangeHoverLocation, false, nullptr, ETeleportType::TeleportPhysics);
 			const float Alpha = FMath::Clamp(PhaseElapsed / FMath::Max(CloseRangeShrinkSeconds, 0.01f), 0.f, 1.f);
-			ApplyEnemyShrink(Target, FMath::Min(Alpha, 1.f));
+			ApplyEnemyShrink(Target, Alpha);
 			if (PhaseElapsed >= CloseRangeShrinkSeconds)
+			{
+				ApplyEnemyShrink(Target, 1.f);
+				BeginCloseRangeDash(Target);
+			}
+		}
+		break;
+	case ESlimeDevourPhase::CloseRangeDash:
+		TickCloseRangeDash(DeltaTime);
+		break;
+	case ESlimeDevourPhase::Latch:
+		TickLatch(Target, DeltaTime);
+		break;
+	case ESlimeDevourPhase::Shrink:
+		{
+			const float HoverZ = GetBlobRadius() * 0.35f;
+			const FVector Hover = EnemyStartXform.GetLocation() + FVector(0.f, 0.f, HoverZ);
+			Target->SetActorLocation(Hover, false, nullptr, ETeleportType::TeleportPhysics);
+			const float Alpha = FMath::Clamp(PhaseElapsed / FMath::Max(ShrinkSeconds, 0.01f), 0.f, 1.f);
+			ApplyEnemyShrink(Target, Alpha);
+			if (PhaseElapsed >= ShrinkSeconds)
 			{
 				ApplyEnemyShrink(Target, 1.f);
 				if (CloseRangeShotId == 0)
@@ -539,24 +728,7 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 						return;
 					}
 				}
-				if (IsCloseRangeWrapped(Target) || PhaseElapsed >= CloseRangeShrinkSeconds + LatchSeconds)
-				{
-					EnterPhase(ESlimeDevourPhase::Retract);
-				}
-			}
-		}
-		break;
-	case ESlimeDevourPhase::Latch:
-		TickLatch(Target, DeltaTime);
-		break;
-	case ESlimeDevourPhase::Shrink:
-		{
-			const float Alpha = FMath::Clamp(PhaseElapsed / FMath::Max(ShrinkSeconds, 0.01f), 0.f, 1.f);
-			ApplyEnemyShrink(Target, Alpha);
-			if (PhaseElapsed >= ShrinkSeconds)
-			{
-				ApplyEnemyShrink(Target, 1.f);
-				EnterPhase(ESlimeDevourPhase::Retract);
+				EnterPhase(ESlimeDevourPhase::Latch);
 			}
 		}
 		break;
@@ -591,18 +763,13 @@ void USlimeDevourComponent::BeginLatch(AEnemyCharacter* Enemy)
 		AbortDevour(true);
 		return;
 	}
+	ClearOwnerLockOn();
 	if (Body->HasFragments())
 	{
 		Body->ClearFragments();
 	}
-	Body->SetLaunchFractionOverride(LatchShotFraction);
-	TryLaunchNextLatchShot(Enemy);
-	if (LatchShotIds.Num() == 0)
-	{
-		AbortDevour(true);
-		return;
-	}
-	EnterPhase(ESlimeDevourPhase::Latch);
+	// Far devour: shrink first, then one wrap shot (see TickPhase Shrink → Latch).
+	EnterPhase(ESlimeDevourPhase::Shrink);
 }
 
 void USlimeDevourComponent::TryLaunchNextLatchShot(AEnemyCharacter* Enemy)
@@ -646,6 +813,16 @@ void USlimeDevourComponent::TickLatch(AEnemyCharacter* Enemy, float DeltaTime)
 		return;
 	}
 
+	// Single wrap-ball path after Shrink: wait until wrapped or flight timeout, then retract.
+	if (CloseRangeShotId != 0)
+	{
+		if (IsCloseRangeWrapped(Enemy) || PhaseElapsed >= LatchSeconds)
+		{
+			EnterPhase(ESlimeDevourPhase::Retract);
+		}
+		return;
+	}
+
 	const int32 ShotCount = GetActiveLatchShotCount();
 	if (LatchLaunchIndex < ShotCount && PhaseElapsed + KINDA_SMALL_NUMBER >= float(LatchLaunchIndex) * LatchStaggerSeconds)
 	{
@@ -658,7 +835,7 @@ void USlimeDevourComponent::TickLatch(AEnemyCharacter* Enemy, float DeltaTime)
 	const bool bFlightExpired = bAllLaunched && PhaseElapsed >= LastLaunchTime + LatchSeconds;
 	if (bFlightExpired || PhaseElapsed >= MaxLatch)
 	{
-		EnterPhase(ESlimeDevourPhase::Shrink);
+		EnterPhase(ESlimeDevourPhase::Retract);
 	}
 }
 
@@ -997,9 +1174,10 @@ void USlimeDevourComponent::BeginRetract(AEnemyCharacter* Enemy)
 		return;
 	}
 
+	RetractStartWrapCenter = GetWrapCenter(Enemy);
 	RetractStartLocation = Enemy->GetActorLocation();
 	const FVector Home = GetBlobCenter();
-	float MaxDist = FVector::Dist(RetractStartLocation, Home);
+	float MaxDist = FVector::Dist(RetractStartWrapCenter, Home);
 	if (Body)
 	{
 		for (const uint8 ShotId : LatchShotIds)
@@ -1024,14 +1202,20 @@ void USlimeDevourComponent::TickRetract(float DeltaTime)
 	const FVector Home = GetBlobCenter();
 	const float Duration = FMath::Max(RetractSeconds, 0.2f);
 	const float Alpha = FMath::Clamp(PhaseElapsed / Duration, 0.f, 1.f);
-	const float Smooth = Alpha * Alpha * (3.f - 2.f * Alpha);
-	const FVector Loc = FMath::Lerp(RetractStartLocation, Home, Smooth);
-	Target->SetActorLocation(Loc, false, nullptr, ETeleportType::TeleportPhysics);
-
-	const float Arrive = GetBlobRadius() * 0.7f;
-	if (Alpha >= 1.f || FVector::Dist(Loc, Home) <= Arrive)
+	if (Alpha >= 1.f)
 	{
-		Target->SetActorLocation(Home, false, nullptr, ETeleportType::TeleportPhysics);
+		SetEnemyWrapCenter(Target, Home);
+	}
+	else
+	{
+		const float Smooth = Alpha * Alpha * (3.f - 2.f * Alpha);
+		const FVector DesiredWrap = FMath::Lerp(RetractStartWrapCenter, Home, Smooth);
+		SetEnemyWrapCenter(Target, DesiredWrap);
+	}
+
+	constexpr float InhaleAlignCm = 12.f;
+	if (Alpha >= 1.f && FVector::Dist(GetWrapCenter(Target), GetBlobCenter()) <= InhaleAlignCm)
+	{
 		SwallowTarget();
 	}
 }
@@ -1060,10 +1244,19 @@ void USlimeDevourComponent::SwallowTarget()
 	PushPhantomSlot(ActiveCapture);
 	SpawnInnerMesh(ActiveCapture);
 
+	Target->ClearElementAuraFlash();
+	if (USlimeStatusComponent* EnemyStatus = Target->GetEnemyStatus())
+	{
+		EnemyStatus->ClearAllAuras();
+	}
+
 	Target->BeginDevouredDeath(GetOwner());
 	PendingDestroyEnemy.Reset();
 	DevourTarget.Reset();
+	bSavedEnemyGravity = false;
 	Target->Destroy();
+
+	SetOwnerMovementFrozen(false);
 
 	if (Body)
 	{
@@ -1116,7 +1309,15 @@ void USlimeDevourComponent::FreezeDevourTarget(AEnemyCharacter* Enemy)
 	Enemy->SetActorEnableCollision(false);
 	if (UCharacterMovementComponent* Move = Enemy->GetCharacterMovement())
 	{
+		if (!bSavedEnemyGravity)
+		{
+			SavedEnemyGravityScale = Move->GravityScale;
+			bSavedEnemyGravity = true;
+		}
 		Move->StopMovementImmediately();
+		Move->Velocity = FVector::ZeroVector;
+		Move->GravityScale = 0.f;
+		Move->SetMovementMode(MOVE_None);
 		Move->DisableMovement();
 	}
 	if (AController* AI = Enemy->GetController())
@@ -1147,6 +1348,11 @@ void USlimeDevourComponent::RestoreDevourTarget(AEnemyCharacter* Enemy)
 	HideEnemyWidgets(Enemy, false);
 	if (UCharacterMovementComponent* Move = Enemy->GetCharacterMovement())
 	{
+		if (bSavedEnemyGravity)
+		{
+			Move->GravityScale = SavedEnemyGravityScale;
+			bSavedEnemyGravity = false;
+		}
 		Move->SetDefaultMovementMode();
 	}
 	if (AController* AI = Enemy->GetController())
@@ -1480,10 +1686,13 @@ void USlimeDevourComponent::FinishDevour()
 
 void USlimeDevourComponent::AbortDevour(bool bRestoreBody)
 {
+	SetCloseRangeCameraLag(false);
+	SetOwnerMovementFrozen(false);
 	if (AEnemyCharacter* Live = DevourTarget.Get())
 	{
 		RestoreDevourTarget(Live);
 	}
+	bSavedEnemyGravity = false;
 	if (AEnemyCharacter* Pending = Cast<AEnemyCharacter>(PendingDestroyEnemy.Get()))
 	{
 		if (IsValid(Pending) && Pending->IsDevouredDeath())

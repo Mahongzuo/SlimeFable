@@ -12,6 +12,7 @@ alwaysApply: true
 3. 涉及日关卡、DayId、Registry、Exploration Tag、按日存档时，再读 `.cursor/skills/slimefable-day-levels/SKILL.md`。
 4. 涉及大厅传送门、年份子图、周目时，再读 `.cursor/skills/slimefable-week-cycle/SKILL.md`。
 5. 涉及主菜单、选关、HUD、UI 字体/背景/按钮风格时，再读 `.cursor/skills/slimefable-ui/SKILL.md`。
+6. 涉及音乐、音效、BGM、SFX、主题曲、ComfyUI 音频生成时，再读 `.cursor/skills/slimefable-audio/SKILL.md`。
 
 ## 硬约束（摘要）
 
@@ -22,4 +23,4 @@ alwaysApply: true
 - UI 遵循 `slimefable-ui`：土色 NPR 底、墨迹按钮、Marker+KuaiLe 字体，禁用 Halftone 霓虹默认皮。
 - 与用户用中文沟通；勿改 `~/.cursor/skills-cursor/`。
 
-需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`。
+需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`。

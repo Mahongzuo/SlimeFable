@@ -200,6 +200,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.5"))
 	float FragmentLifetime = 10.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "G 子球自动攻击半径。默认 500cm。"))
+	float FragmentAttackRadius = 500.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.01", ClampMax = "1.0",
+		ToolTip = "G 子球伤害相对本体 Combo1 的比例。默认 0.1。"))
+	float FragmentAttackDamageScale = 0.1f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.1", Units = "s",
+		ToolTip = "每颗 G 子球自动攻击间隔。默认 1s。"))
+	float FragmentAttackInterval = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "50.0", Units = "cm/s",
+		ToolTip = "G 子球追击敌人的牵引速度。默认 700。"))
+	float FragmentChaseSpeed = 700.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "10.0", Units = "cm",
+		ToolTip = "G 子球进入此距离才结算伤害。默认 80。"))
+	float FragmentMeleeRange = 80.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "100.0"))
 	float RecallPullSpeed = 900.f;
 
@@ -295,6 +315,8 @@ public:
 	int32 LaunchDevourShot(const FVector& LaunchVelocity, float Fraction, float Life, uint8& OutShotId);
 
 	void SetShotTarget(uint8 ShotId, const FVector& Target, float PullSpeed);
+
+	void ClearShotTarget(uint8 ShotId);
 
 	void ClearShotTargets();
 
@@ -432,6 +454,7 @@ public:
 private:
 	void FixedStep(float StepDelta);
 	void SweepKinematicShots();
+	void TickFragmentAttacks(float DeltaTime);
 	void RefreshColliders();
 	void UpdateFloor();
 	void ProbeSqueeze(float DeltaTime);
@@ -518,6 +541,8 @@ private:
 
 	FVector ClingPoint = FVector::ZeroVector;
 	FVector ClingNormal = FVector::ForwardVector;
+
+	TMap<uint8, float> FragmentAttackCooldownRemaining;
 
 	ESlimeSimQuality Quality = ESlimeSimQuality::High;
 };

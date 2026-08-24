@@ -186,6 +186,12 @@ public:
 
 	void ClearShotTargets();
 
+	/**
+	 *  One-shot chase nudge for G fragments: moves clones toward Target without writing
+	 *  ShotTargets and without refreshing BallisticLife (so FragmentLifetime still expires).
+	 */
+	void SteerShot(uint8 ShotId, const FVector& Target, float Speed, float Dt, bool bKeepGrounded = false);
+
 	void AddIgnoreWorldShot(uint8 ShotId);
 	void ClearIgnoreWorldShot(uint8 ShotId);
 	void ClearIgnoreWorldShots();

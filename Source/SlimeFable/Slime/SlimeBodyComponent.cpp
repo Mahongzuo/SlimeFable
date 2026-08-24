@@ -16,6 +16,15 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "SlimeFable.h"
 #include "SlimeCharacterMovementComponent.h"
+#include "CombatDamageable.h"
+#include "SlimeCharacter.h"
+#include "SlimeCombatComponent.h"
+#include "SlimeDevourComponent.h"
+#include "SlimeElementComponent.h"
+#include "SlimeHealthComponent.h"
+#include "SlimeHitProbe.h"
+#include "SlimeStatusComponent.h"
+#include "UI/SlimeFloatingTextWidget.h"
 #include "HAL/IConsoleManager.h"
 
 using namespace SlimeSim;
@@ -144,6 +153,186 @@ void USlimeBodyComponent::GetActiveShotCenters(TArray<FVector>& OutCenters) cons
 	Solver.GetShotCenters(OutCenters);
 }
 
+void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
+{
+	if (!Solver.HasFragments() || FragmentAttackRadius <= KINDA_SMALL_NUMBER)
+	{
+		FragmentAttackCooldownRemaining.Reset();
+		return;
+	}
+
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	if (bRecalling)
+	{
+		ClearShotTargets();
+		return;
+	}
+
+	if (const USlimeDevourComponent* Devour = Owner->FindComponentByClass<USlimeDevourComponent>())
+	{
+		if (Devour->IsCombatLocked())
+		{
+			return;
+		}
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	Solver.RefreshShotStates();
+	const TArray<FSlimeSolver::FShotState>& Shots = Solver.GetShotStates();
+	if (Shots.Num() == 0)
+	{
+		FragmentAttackCooldownRemaining.Reset();
+		return;
+	}
+
+	TSet<uint8> LiveIds;
+	for (const FSlimeSolver::FShotState& Shot : Shots)
+	{
+		LiveIds.Add(Shot.Id);
+		float& Cd = FragmentAttackCooldownRemaining.FindOrAdd(Shot.Id);
+		Cd = FMath::Max(Cd - DeltaTime, 0.f);
+	}
+
+	for (auto It = FragmentAttackCooldownRemaining.CreateIterator(); It; ++It)
+	{
+		if (!LiveIds.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	USlimeCombatComponent* CombatComp = Owner->FindComponentByClass<USlimeCombatComponent>();
+	USlimeElementComponent* ElementComp = Owner->FindComponentByClass<USlimeElementComponent>();
+	FSlimeSkillDef HitSkill;
+	HitSkill.Slot = ESlimeSkillSlot::Combo1;
+	HitSkill.Damage = 12.f;
+	if (CombatComp)
+	{
+		const FSlimeElementKitData Kit = CombatComp->GetCurrentKit();
+		if (const FSlimeSkillDef* Def = Kit.GetSkillSlot(ESlimeSkillSlot::Combo1))
+		{
+			HitSkill = *Def;
+		}
+	}
+	const ESlimeElement Element = ElementComp ? ElementComp->CurrentElement : ESlimeElement::Physical;
+	HitSkill.Element = Element;
+	HitSkill.bAppliesElementAura = Element != ESlimeElement::Physical;
+	HitSkill.Damage = FMath::Max(HitSkill.Damage * FragmentAttackDamageScale, 0.f);
+
+	const float Interval = FMath::Max(FragmentAttackInterval, 0.1f);
+	const float ChaseSpeed = FMath::Max(FragmentChaseSpeed, 50.f);
+	const float MeleeRangeSq = FMath::Square(FMath::Max(FragmentMeleeRange, 10.f));
+	const float RadiusSq = FMath::Square(FragmentAttackRadius);
+	FCollisionObjectQueryParams ObjectParams;
+	ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(SlimeFragmentAttack), false, Owner);
+	QueryParams.AddIgnoredActor(Owner);
+
+	for (const FSlimeSolver::FShotState& Shot : Shots)
+	{
+		// Clear leftover devour-style targets so BallisticLife is not refreshed forever.
+		if (Solver.IsShotTargeted(Shot.Id))
+		{
+			ClearShotTarget(Shot.Id);
+		}
+
+		const FVector Center(Shot.Center);
+		TArray<FOverlapResult> Overlaps;
+		World->OverlapMultiByObjectType(
+			Overlaps,
+			Center,
+			FQuat::Identity,
+			ObjectParams,
+			FCollisionShape::MakeSphere(FragmentAttackRadius),
+			QueryParams);
+
+		AActor* BestTarget = nullptr;
+		float BestDistSq = RadiusSq;
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			AActor* Candidate = Overlap.GetActor();
+			if (!USlimeHitProbe::IsValidDamageTarget(Candidate) || !USlimeHitProbe::IsHostile(Owner, Candidate))
+			{
+				continue;
+			}
+			const float DistSq = FVector::DistSquared(Center, Candidate->GetActorLocation());
+			if (DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				BestTarget = Candidate;
+			}
+		}
+
+		if (!BestTarget)
+		{
+			continue;
+		}
+
+		const FVector EnemyLoc = BestTarget->GetActorLocation();
+		FVector ChaseTarget = EnemyLoc;
+		const float Fraction = LaunchFractionOverride > KINDA_SMALL_NUMBER ? LaunchFractionOverride : LaunchFraction;
+		const float MiniR = Solver.GetScaledRestRadius() * FMath::Pow(FMath::Clamp(Fraction, 0.05f, 0.6f), 1.f / 3.f);
+		const bool bHasShotFloor = Shot.FloorZ > -1.e8f;
+		ChaseTarget.Z = bHasShotFloor ? (Shot.FloorZ + MiniR) : Center.Z;
+		Solver.SteerShot(Shot.Id, ChaseTarget, ChaseSpeed, DeltaTime, /*bKeepGrounded=*/true);
+
+		const float HorizDistSq = FVector::DistSquaredXY(Center, EnemyLoc);
+		float& Cd = FragmentAttackCooldownRemaining.FindOrAdd(Shot.Id);
+		if (Cd > KINDA_SMALL_NUMBER || HorizDistSq > MeleeRangeSq)
+		{
+			continue;
+		}
+
+		float DamageAmount = HitSkill.Damage;
+		if (CombatComp && DamageAmount > 0.f)
+		{
+			DamageAmount = CombatComp->ResolveOutgoingDamage(HitSkill);
+		}
+		if (DamageAmount <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector HitLoc = BestTarget->GetActorLocation();
+		if (ICombatDamageable* Damageable = Cast<ICombatDamageable>(BestTarget))
+		{
+			Damageable->ApplyDamage(DamageAmount, Owner, HitLoc, FVector::ZeroVector);
+		}
+		else if (USlimeHealthComponent* Health = BestTarget->FindComponentByClass<USlimeHealthComponent>())
+		{
+			Health->ApplyDamage(DamageAmount, Owner, HitLoc, FVector::ZeroVector);
+		}
+
+		if (Cast<ASlimeCharacter>(Owner))
+		{
+			USlimeFloatingTextWidget::Spawn(
+				BestTarget,
+				HitLoc + FVector(0.f, 0.f, 40.f),
+				FText::FromString(FString::Printf(TEXT("%.0f"), DamageAmount)),
+				SlimeCombat::GetElementVfxColor(Element));
+		}
+
+		if (HitSkill.bAppliesElementAura)
+		{
+			if (USlimeStatusComponent* Status = BestTarget->FindComponentByClass<USlimeStatusComponent>())
+			{
+				Status->ApplyAura(Element, Owner);
+			}
+		}
+		Cd = Interval;
+	}
+}
+
 FVector USlimeBodyComponent::GetShotCenter(uint8 ShotId) const
 {
 	const_cast<FSlimeSolver&>(Solver).RefreshShotStates();
@@ -201,6 +390,8 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	{
 		UpdateMeshFollow();
 	}
+
+	TickFragmentAttacks(DeltaTime);
 }
 
 void USlimeBodyComponent::FixedStep(float StepDelta)
@@ -315,7 +506,7 @@ void USlimeBodyComponent::UpdateFloor()
 {
 	const FVector Foot = GetFootLocation();
 
-	auto TraceFloorUnder = [this](const FVector& Origin, float ProxyRadius, float& OutZ)
+	auto TraceFloorUnder = [this](const FVector& Origin, float ProxyRadius, float& OutZ, bool bIgnorePawns = false)
 	{
 		UWorld* World = GetWorld();
 		if (!World)
@@ -324,16 +515,22 @@ void USlimeBodyComponent::UpdateFloor()
 		}
 
 		FCollisionQueryParams Query(TEXT("SlimeFloor"), false, GetOwner());
+		FCollisionResponseParams ResponseParams = FCollisionResponseParams::DefaultResponseParam;
+		if (bIgnorePawns)
+		{
+			// Fragment floor must not treat enemy capsules as ground (was lifting shots onto heads).
+			ResponseParams.CollisionResponse.SetResponse(ECC_Pawn, ECR_Ignore);
+		}
 		FHitResult Hit;
 		const FVector Start = Origin + FVector(0.0, 0.0, 40.0);
 		const FVector End = Origin - FVector(0.0, 0.0, 800.0);
 		const float Radius = FMath::Max(ProxyRadius, 2.f);
-		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(Radius), Query))
+		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(Radius), Query, ResponseParams))
 		{
 			OutZ = float(Hit.ImpactPoint.Z);
 			return true;
 		}
-		if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Query))
+		if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Query, ResponseParams))
 		{
 			OutZ = float(Hit.ImpactPoint.Z);
 			return true;
@@ -409,7 +606,7 @@ void USlimeBodyComponent::UpdateFloor()
 		const float ProxyR = FragmentProxyRadius > KINDA_SMALL_NUMBER
 			? FragmentProxyRadius
 			: SolverParams.RestRadius * 0.45f;
-		if (!TraceFloorUnder(FragmentCenter, ProxyR, FragmentFloorZ))
+		if (!TraceFloorUnder(FragmentCenter, ProxyR, FragmentFloorZ, /*bIgnorePawns=*/true))
 		{
 			FragmentFloorZ = float(FragmentCenter.Z - 800.0);
 		}
@@ -427,7 +624,7 @@ void USlimeBodyComponent::UpdateFloor()
 			? FragmentProxyRadius
 			: SolverParams.RestRadius * 0.45f;
 		float ShotFloor = FragmentFloorZ;
-		if (!TraceFloorUnder(FVector(Shot.Center), ProxyR, ShotFloor))
+		if (!TraceFloorUnder(FVector(Shot.Center), ProxyR, ShotFloor, /*bIgnorePawns=*/true))
 		{
 			ShotFloor = float(Shot.Center.Z - 800.0);
 		}
@@ -1172,20 +1369,32 @@ void USlimeBodyComponent::PushMeshSection()
 	SurfaceMesh->bCastContactShadow = false;
 	SurfaceMesh->bReceiveMobileCSMShadows = false;
 
-	// Slightly shrink the opaque proxy / x-ray so edges don't stick to the translucent shell.
+	// Opaque ground-shadow proxy: XY shrink + Z flatten into a bottom puck so VSM from the
+	// caster cannot sweep dark bands across the translucent two-sided shell interior.
+	// X-ray keeps a full-height 0.92 shell for occlusion silhouette outline.
 	constexpr float ShadowProxyScale = 0.92f;
+	constexpr float ShadowProxyHeightScale = 0.35f;
 	FVector ShadowCentroid = FVector::ZeroVector;
+	float ShadowMinZ = TNumericLimits<float>::Max();
 	for (const FVector& Vertex : Vertices)
 	{
 		ShadowCentroid += Vertex;
+		ShadowMinZ = FMath::Min(ShadowMinZ, static_cast<float>(Vertex.Z));
 	}
 	ShadowCentroid /= float(Vertices.Num());
 
 	TArray<FVector> ShadowVertices;
 	ShadowVertices.Reserve(Vertices.Num());
+	TArray<FVector> XRayVertices;
+	XRayVertices.Reserve(Vertices.Num());
 	for (const FVector& Vertex : Vertices)
 	{
-		ShadowVertices.Add(ShadowCentroid + (Vertex - ShadowCentroid) * ShadowProxyScale);
+		const FVector Scaled = ShadowCentroid + (Vertex - ShadowCentroid) * ShadowProxyScale;
+		XRayVertices.Add(Scaled);
+
+		FVector Puck = Scaled;
+		Puck.Z = ShadowMinZ + (Scaled.Z - ShadowMinZ) * ShadowProxyHeightScale;
+		ShadowVertices.Add(Puck);
 	}
 
 	if (ShadowMesh)
@@ -1226,7 +1435,7 @@ void USlimeBodyComponent::PushMeshSection()
 		{
 			XRayMesh->ClearAllMeshSections();
 			XRayMesh->CreateMeshSection_LinearColor(
-				0, ShadowVertices, Indices, Normals,
+				0, XRayVertices, Indices, Normals,
 				NoUVs, NoColors, NoTangents, false);
 			if (ResolvedXRayMaterial)
 			{
@@ -1236,9 +1445,10 @@ void USlimeBodyComponent::PushMeshSection()
 		}
 		else
 		{
-			XRayMesh->UpdateMeshSection_LinearColor(0, ShadowVertices, Normals, NoUVs, NoColors, NoTangents);
+			XRayMesh->UpdateMeshSection_LinearColor(0, XRayVertices, Normals, NoUVs, NoColors, NoTangents);
 		}
 
+		// Occlusion silhouette: Create/Update can reset flags; keep visible for wall reveal.
 		XRayMesh->SetHiddenInGame(false);
 		XRayMesh->SetVisibility(true);
 		XRayMesh->SetCastShadow(false);
@@ -1479,6 +1689,11 @@ void USlimeBodyComponent::SetShotTarget(uint8 ShotId, const FVector& Target, flo
 	Solver.SetShotTarget(ShotId, Target, PullSpeed);
 }
 
+void USlimeBodyComponent::ClearShotTarget(uint8 ShotId)
+{
+	Solver.ClearShotTarget(ShotId);
+}
+
 void USlimeBodyComponent::ClearShotTargets()
 {
 	Solver.ClearShotTargets();
@@ -1562,6 +1777,10 @@ void USlimeBodyComponent::SetRecalling(bool bInRecalling)
 	if (bInRecalling && !Solver.HasFragments())
 	{
 		return;
+	}
+	if (bInRecalling)
+	{
+		ClearShotTargets();
 	}
 	bRecalling = bInRecalling;
 	RecallElapsed = 0.f;

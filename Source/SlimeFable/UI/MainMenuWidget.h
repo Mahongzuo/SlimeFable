@@ -12,7 +12,11 @@ class UImage;
 class ULevelSelectWidget;
 class UKeybindSettingsWidget;
 class UGraphicsSettingsWidget;
+class UAudioSettingsWidget;
+class UTutorialMenuWidget;
 class UDayLevelSubsystem;
+class USoundBase;
+class UAudioComponent;
 
 UCLASS()
 class SLIMEFABLE_API UMainMenuWidget : public UUserWidget
@@ -23,6 +27,7 @@ public:
 	UMainMenuWidget(const FObjectInitializer& ObjectInitializer);
 
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 	/** Show the level-select calendar overlay (also used when returning from a day level). */
@@ -35,6 +40,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void OpenGraphicsSettings();
 
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void OpenAudioSettings();
+
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void OpenTutorialMenu();
+
 protected:
 	void BuildLayoutIfNeeded();
 	void ApplyMaterialLabLook();
@@ -42,6 +53,13 @@ protected:
 	void ResolveLevelSelectClass();
 	void ResolveKeybindClass();
 	void ResolveGraphicsClass();
+	void ResolveAudioClass();
+	void ResolveTutorialClass();
+	void StartMenuMusic();
+	void StopMenuMusic();
+	void RefreshMenuMusicVolume();
+	UFUNCTION()
+	void HandleAudioVolumesChanged();
 	UDayLevelSubsystem* GetDayLevelSubsystem() const;
 
 	UFUNCTION()
@@ -55,6 +73,12 @@ protected:
 
 	UFUNCTION()
 	void OnGraphicsClicked();
+
+	UFUNCTION()
+	void OnAudioClicked();
+
+	UFUNCTION()
+	void OnTutorialClicked();
 
 	UFUNCTION()
 	void OnQuitClicked();
@@ -76,6 +100,22 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "UI")
 	TSoftClassPtr<UGraphicsSettingsWidget> GraphicsSettingsClassPath;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSubclassOf<UAudioSettingsWidget> AudioSettingsClass;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSoftClassPtr<UAudioSettingsWidget> AudioSettingsClassPath;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSubclassOf<UTutorialMenuWidget> TutorialMenuClass;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSoftClassPtr<UTutorialMenuWidget> TutorialMenuClassPath;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Audio",
+		meta = (ToolTip = "主菜单循环 BGM。空则 /Game/Audio/BGM/bgm_global_menu。"))
+	TSoftObjectPtr<USoundBase> MenuMusic;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UImage> BackgroundImage;
@@ -105,6 +145,12 @@ protected:
 	TObjectPtr<UButton> GraphicsButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> AudioButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> TutorialButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> QuitButton;
 
 	UPROPERTY()
@@ -115,6 +161,15 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UGraphicsSettingsWidget> GraphicsSettingsWidget;
+
+	UPROPERTY()
+	TObjectPtr<UAudioSettingsWidget> AudioSettingsWidget;
+
+	UPROPERTY()
+	TObjectPtr<UTutorialMenuWidget> TutorialMenuWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> MenuMusicComponent;
 
 	bool bBuiltInCode = false;
 };

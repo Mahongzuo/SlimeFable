@@ -1963,6 +1963,79 @@ void FSlimeSolver::ClearShotTargets()
 	ShotTargets.Reset();
 }
 
+void FSlimeSolver::SteerShot(uint8 ShotId, const FVector& Target, float Speed, float Dt, bool bKeepGrounded)
+{
+	if (ShotId == 0 || Dt <= KINDA_SMALL_NUMBER || Speed <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	RebuildShotStates();
+	FVector Center = FVector::ZeroVector;
+	bool bFound = false;
+	for (const FShotState& Shot : ShotStates)
+	{
+		if (Shot.Id == ShotId)
+		{
+			Center = FVector(Shot.Center);
+			bFound = true;
+			break;
+		}
+	}
+	if (!bFound)
+	{
+		return;
+	}
+
+	FVector Move = FVector::ZeroVector;
+	if (bKeepGrounded)
+	{
+		const FVector DeltaXY(Target.X - Center.X, Target.Y - Center.Y, 0.f);
+		const float HorizDist = DeltaXY.Size();
+		if (HorizDist > KINDA_SMALL_NUMBER)
+		{
+			const float StepXY = FMath::Min(Speed * Dt, HorizDist);
+			Move += DeltaXY * (StepXY / HorizDist);
+		}
+		const float ZDelta = Target.Z - Center.Z;
+		if (FMath::Abs(ZDelta) > KINDA_SMALL_NUMBER)
+		{
+			const float ZSpeed = Speed * 0.35f;
+			const float StepZ = FMath::Min(ZSpeed * Dt, FMath::Abs(ZDelta));
+			Move.Z += FMath::Sign(ZDelta) * StepZ;
+		}
+	}
+	else
+	{
+		const FVector Delta = Target - Center;
+		const float Distance = Delta.Size();
+		if (Distance <= KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		const float Step = FMath::Min(Speed * Dt, Distance);
+		Move = Delta * (Step / Distance);
+	}
+
+	if (Move.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FVector3f Shift(Move);
+	const FVector3f Vel = Shift / Dt;
+	for (FSlimeParticle& Particle : Particles)
+	{
+		if (!Particle.IsBallistic() || Particle.ShotId != ShotId)
+		{
+			continue;
+		}
+		Particle.Position += Shift;
+		Particle.PredictedPosition = Particle.Position;
+		Particle.Velocity = Vel;
+	}
+}
+
 void FSlimeSolver::AddIgnoreWorldShot(uint8 ShotId)
 {
 	if (ShotId != 0)

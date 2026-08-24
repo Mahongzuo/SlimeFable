@@ -25,7 +25,13 @@
 #include "SlimeMorphComponent.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
-#include "UI/SlimeElementWheelWidget.h"
+#include "UI/SlimeHotbarWheelWidget.h"
+#include "UI/SlimeElementFormationWidget.h"
+#include "UI/SlimeHotbarConfirmWidget.h"
+#include "Slime/SlimeElementProgressSubsystem.h"
+#include "Inventory/SlimeInventorySubsystem.h"
+#include "Inventory/SlimeItemDefinition.h"
+#include "SlimeFablePlayerController.h"
 #include "Engine/GameInstance.h"
 
 USlimeAbilityComponent::USlimeAbilityComponent()
@@ -59,6 +65,8 @@ void USlimeAbilityComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		CloseWheel(false);
 	}
+	CloseFormation();
+	CloseHotbarConfirm();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -219,12 +227,13 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	const USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr;
 	const bool bCombatLocked = Devour && Devour->IsCombatLocked();
 	const bool bPhantomWheelOpen = Devour && Devour->IsPhantomWheelOpen();
-	if (bFlatten != bPollFlattenDown)
+	bPollFlattenDown = bFlatten;
+	if (Body)
 	{
-		bPollFlattenDown = bFlatten;
-		if (Body && !(bFlatten && bCombatLocked))
+		const bool bWantSpread = bFlatten && !bCombatLocked;
+		if (Body->IsSpreading() != bWantSpread)
 		{
-			Body->SetSpread(bFlatten);
+			Body->SetSpread(bWantSpread);
 		}
 	}
 
@@ -250,18 +259,27 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	}
 
 	const bool bLaunch = IsDown(ESlimeInputAction::Launch, EKeys::G);
-	if (bLaunch && !bPollLaunchDown)
+	if (bPollLaunchKey)
 	{
-		bPollLaunchDown = true;
-		if (!bCombatLocked && !bPhantomWheelOpen)
+		if (bLaunch && !bPollLaunchDown)
 		{
-			BeginLaunchCharge();
+			bPollLaunchDown = true;
+			if (!bCombatLocked && !bPhantomWheelOpen)
+			{
+				BeginLaunchCharge();
+			}
 		}
-	}
-	else if (!bLaunch && bPollLaunchDown)
-	{
-		bPollLaunchDown = false;
-		ReleaseLaunchCharge();
+		else if (!bLaunch && bPollLaunchDown)
+		{
+			bPollLaunchDown = false;
+			ReleaseLaunchCharge();
+		}
+		// Unstick only on poll path: charging while G is up after a missed edge.
+		else if (bCharging && !bLaunch)
+		{
+			bPollLaunchDown = false;
+			ReleaseLaunchCharge();
+		}
 	}
 
 	const bool bWheel = IsDown(ESlimeInputAction::ElementWheel, EKeys::Tab);
@@ -277,6 +295,28 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	{
 		bPollWheelDown = false;
 		CloseWheel(true);
+	}
+
+	if (!bCombatLocked && !bPhantomWheelOpen && !bWheelOpen)
+	{
+		static const ESlimeInputAction ElementActions[6] = {
+			ESlimeInputAction::Element1, ESlimeInputAction::Element2, ESlimeInputAction::Element3,
+			ESlimeInputAction::Element4, ESlimeInputAction::Element5, ESlimeInputAction::Element6
+		};
+		static const FKey ElementFallbacks[6] = {
+			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six
+		};
+		for (int32 Index = 0; Index < 6; ++Index)
+		{
+			if (WasPressed(ElementActions[Index], ElementFallbacks[Index]))
+			{
+				TrySwitchOrderedElement(Index);
+			}
+		}
+		if (WasPressed(ESlimeInputAction::ElementFormation, EKeys::L))
+		{
+			OpenFormation();
+		}
 	}
 
 	if (CycleCooldownRemaining <= 0.f)
@@ -305,13 +345,13 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 
 		if (Step != 0)
 		{
-			if (bWheelOpen && Element)
+			if (bWheelOpen)
 			{
 				CycleCooldownRemaining = CycleCooldown;
-				const ESlimeElement Next = Element->CycleElement(Step);
+				HotbarWheelSlot = ((HotbarWheelSlot + Step) % 6 + 6) % 6;
 				if (WheelWidget)
 				{
-					WheelWidget->SetHighlightedElement(Next);
+					WheelWidget->SetHighlightedSlot(HotbarWheelSlot);
 				}
 			}
 			else if (bCharging)
@@ -744,12 +784,11 @@ void USlimeAbilityComponent::HandleWheelCompleted()
 
 void USlimeAbilityComponent::HandleCycle(const FInputActionValue& Value)
 {
-	// Tick polling already steps the wheel from mouse scroll while open.
 	if (bPollAbilityKeys)
 	{
 		return;
 	}
-	if (!bWheelOpen || !Element)
+	if (!bWheelOpen)
 	{
 		return;
 	}
@@ -760,24 +799,119 @@ void USlimeAbilityComponent::HandleCycle(const FInputActionValue& Value)
 		return;
 	}
 
-	// One notch per step: without the throttle a single flick of the wheel jumps several slots.
 	CycleCooldownRemaining = CycleCooldown;
-	const ESlimeElement Next = Element->CycleElement(Axis > 0.f ? 1 : -1);
-
+	const int32 Step = Axis > 0.f ? 1 : -1;
+	HotbarWheelSlot = ((HotbarWheelSlot + Step) % 6 + 6) % 6;
 	if (WheelWidget)
 	{
-		WheelWidget->SetHighlightedElement(Next);
+		WheelWidget->SetHighlightedSlot(HotbarWheelSlot);
+	}
+}
+
+void USlimeAbilityComponent::TrySwitchOrderedElement(int32 SlotIndex)
+{
+	if (!Element)
+	{
+		return;
+	}
+	ESlimeElement Target = SlimeElement::FromIndex(SlotIndex);
+	if (USlimeElementProgressSubsystem* Progress = USlimeElementProgressSubsystem::Get(this))
+	{
+		Target = Progress->GetOrderedElement(SlotIndex);
+	}
+	Element->SetElement(Target, false);
+}
+
+void USlimeAbilityComponent::OpenFormation()
+{
+	ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayerController());
+	if (!PC || PC->HasUIInput(ESlimeUIInputReason::ElementFormation))
+	{
+		return;
+	}
+	if (FormationWidget && FormationWidget->IsInViewport())
+	{
+		return;
+	}
+
+	UClass* WidgetClass = FormationWidgetClass;
+	if (!WidgetClass)
+	{
+		WidgetClass = USlimeElementFormationWidget::StaticClass();
+	}
+	FormationWidget = CreateWidget<USlimeElementFormationWidget>(PC, WidgetClass);
+	if (!FormationWidget)
+	{
+		return;
+	}
+	FormationWidget->AddToViewport(60);
+	PC->PushUIInput(ESlimeUIInputReason::ElementFormation, FormationWidget);
+}
+
+void USlimeAbilityComponent::CloseFormation()
+{
+	if (FormationWidget)
+	{
+		FormationWidget->RemoveFromParent();
+		FormationWidget = nullptr;
+	}
+	if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayerController()))
+	{
+		PC->PopUIInput(ESlimeUIInputReason::ElementFormation);
+	}
+}
+
+void USlimeAbilityComponent::OpenHotbarConfirm(int32 SlotIndex)
+{
+	ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayerController());
+	if (!PC || PC->HasUIInput(ESlimeUIInputReason::HotbarConfirm))
+	{
+		return;
+	}
+	UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+	USlimeInventorySubsystem* Inv = GI ? GI->GetSubsystem<USlimeInventorySubsystem>() : nullptr;
+	if (!Inv)
+	{
+		return;
+	}
+	const FName ItemId = Inv->GetHotbarItem(SlotIndex);
+	if (ItemId.IsNone())
+	{
+		return;
+	}
+	FText DisplayName = FText::FromName(ItemId);
+	if (const USlimeItemDefinition* Def = Inv->FindDefinition(ItemId))
+	{
+		DisplayName = Def->DisplayName;
+	}
+
+	HotbarConfirmWidget = CreateWidget<USlimeHotbarConfirmWidget>(PC, USlimeHotbarConfirmWidget::StaticClass());
+	if (!HotbarConfirmWidget)
+	{
+		return;
+	}
+	HotbarConfirmWidget->Setup(SlotIndex, ItemId, DisplayName);
+	HotbarConfirmWidget->AddToViewport(70);
+	PC->PushUIInput(ESlimeUIInputReason::HotbarConfirm, HotbarConfirmWidget);
+}
+
+void USlimeAbilityComponent::CloseHotbarConfirm()
+{
+	if (HotbarConfirmWidget)
+	{
+		HotbarConfirmWidget->RemoveFromParent();
+		HotbarConfirmWidget = nullptr;
+	}
+	if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayerController()))
+	{
+		PC->PopUIInput(ESlimeUIInputReason::HotbarConfirm);
 	}
 }
 
 void USlimeAbilityComponent::OpenWheel()
 {
-	if (bWheelOpen || !Element)
+	if (bWheelOpen)
 	{
-		if (!Element)
-		{
-			UE_LOG(LogSlimeFable, Warning, TEXT("SlimeAbilityComponent: cannot open element wheel — no SlimeElementComponent."));
-		}
 		return;
 	}
 	if (const USlimeDevourComponent* Devour = GetOwner() ? GetOwner()->FindComponentByClass<USlimeDevourComponent>() : nullptr)
@@ -793,7 +927,7 @@ void USlimeAbilityComponent::OpenWheel()
 		APlayerController* PlayerController = GetOwningPlayerController();
 		if (!PlayerController)
 		{
-			UE_LOG(LogSlimeFable, Warning, TEXT("SlimeAbilityComponent: cannot open element wheel — pawn has no PlayerController."));
+			UE_LOG(LogSlimeFable, Warning, TEXT("SlimeAbilityComponent: cannot open hotbar wheel — pawn has no PlayerController."));
 			return;
 		}
 
@@ -804,20 +938,20 @@ void USlimeAbilityComponent::OpenWheel()
 		}
 		if (!WidgetClass)
 		{
-			// No Blueprint shell authored: the pure C++ widget builds its own layout.
-			WidgetClass = USlimeElementWheelWidget::StaticClass();
+			WidgetClass = USlimeHotbarWheelWidget::StaticClass();
 		}
 
-		WheelWidget = CreateWidget<USlimeElementWheelWidget>(PlayerController, WidgetClass);
+		WheelWidget = CreateWidget<USlimeHotbarWheelWidget>(PlayerController, WidgetClass);
 		if (!WheelWidget)
 		{
 			return;
 		}
-		WheelWidget->SetElementComponent(Element);
 	}
 
 	bWheelOpen = true;
-	WheelWidget->SetHighlightedElement(Element->GetPreviewElement());
+	HotbarWheelSlot = FMath::Clamp(HotbarWheelSlot, 0, 5);
+	WheelWidget->SetHighlightedSlot(HotbarWheelSlot);
+	WheelWidget->RefreshSlots();
 	if (!WheelWidget->IsInViewport())
 	{
 		WheelWidget->AddToViewport(50);
@@ -848,15 +982,21 @@ void USlimeAbilityComponent::CloseWheel(bool bCommit)
 		WheelWidget->RemoveFromParent();
 	}
 
-	if (Element)
+	if (bCommit)
 	{
-		if (bCommit)
+		if (APawn* Pawn = Cast<APawn>(GetOwner()))
 		{
-			Element->CommitPreview();
-		}
-		else
-		{
-			Element->CancelPreview();
+			if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+			{
+				if (USlimeInventorySubsystem* Inv = GI->GetSubsystem<USlimeInventorySubsystem>())
+				{
+					const FName ItemId = Inv->GetHotbarItem(HotbarWheelSlot);
+					if (!ItemId.IsNone())
+					{
+						OpenHotbarConfirm(HotbarWheelSlot);
+					}
+				}
+			}
 		}
 	}
 

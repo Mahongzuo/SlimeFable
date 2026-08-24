@@ -21,6 +21,8 @@
 #include "SlimeSliceUtil.h"
 #include "SlimeStatusComponent.h"
 #include "EnemyCharacter.h"
+#include "SlimeCharacter.h"
+#include "UI/SlimeFloatingTextWidget.h"
 #include "Sound/SoundBase.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -82,18 +84,34 @@ ESlimeTeam USlimeHitProbe::GetTeam(const AActor* Actor)
 {
 	if (!Actor)
 	{
-		return ESlimeTeam::Enemy;
+		return ESlimeTeam::Player;
 	}
 	if (const USlimeHealthComponent* Health = Actor->FindComponentByClass<USlimeHealthComponent>())
 	{
 		return Health->Team;
 	}
-	return ESlimeTeam::Enemy;
+	// Props / scenery without health are not combatants — treat as non-hostile to everyone.
+	return ESlimeTeam::Player;
+}
+
+bool USlimeHitProbe::IsValidDamageTarget(const AActor* Target)
+{
+	if (!Target)
+	{
+		return false;
+	}
+	const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>();
+	return Health && Health->IsAlive();
 }
 
 bool USlimeHitProbe::IsHostile(const AActor* A, const AActor* B)
 {
 	if (!A || !B || A == B)
+	{
+		return false;
+	}
+	// Scenery without a health component is never a hostile combat target.
+	if (!B->FindComponentByClass<USlimeHealthComponent>())
 	{
 		return false;
 	}
@@ -249,6 +267,24 @@ void USlimeHitProbe::ApplyToActor(
 		Health->ApplyDamage(DamageAmount, Instigator, HitLocation, Impulse);
 	}
 
+	if (DamageAmount > 0.f && Instigator && Cast<ASlimeCharacter>(Instigator) && IsValidDamageTarget(Target))
+	{
+		FString Line;
+		if (SlimeCombat::IsComboSlot(Skill.Slot))
+		{
+			Line = FString::Printf(TEXT("Combo %d\n%.0f"), SlimeCombat::ComboIndex(Skill.Slot) + 1, DamageAmount);
+		}
+		else
+		{
+			Line = FString::Printf(TEXT("%.0f"), DamageAmount);
+		}
+		USlimeFloatingTextWidget::Spawn(
+			Target,
+			HitLocation + FVector(0.f, 0.f, 40.f),
+			FText::FromString(Line),
+			SlimeCombat::GetElementVfxColor(Skill.Element));
+	}
+
 	if (Skill.bAppliesElementAura)
 	{
 		if (USlimeStatusComponent* Status = Target->FindComponentByClass<USlimeStatusComponent>())
@@ -389,12 +425,9 @@ int32 USlimeHitProbe::PerformHit(
 		{
 			continue;
 		}
-		if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+		if (!IsValidDamageTarget(Target))
 		{
-			if (!Health->IsAlive())
-			{
-				continue;
-			}
+			continue;
 		}
 
 		AlreadyHit.Add(Target);

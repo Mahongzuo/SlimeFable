@@ -13,6 +13,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "SlimeElementComponent.h"
+#include "Slime/SlimeElementProgressSubsystem.h"
 #include "UI/MenuUIStyle.h"
 
 #define LOCTEXT_NAMESPACE "SlimeElementWheel"
@@ -185,7 +186,7 @@ void USlimeElementWheelWidget::BuildLayoutIfNeeded()
 	}
 
 	HintLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HintLabel"));
-	HintLabel->SetText(LOCTEXT("WheelHint", "滚轮切换 · 松开 TAB 确认"));
+	HintLabel->SetText(LOCTEXT("WheelHint", "滚轮切换 · 松开确认"));
 	FMenuUIStyle::ApplyMixedMenuFont(HintLabel, 14.f, FMenuUIStyle::WarmMutedTextColor());
 	if (UVerticalBoxSlot* HintSlot = CenterBox->AddChildToVerticalBox(HintLabel))
 	{
@@ -203,7 +204,11 @@ void USlimeElementWheelWidget::RefreshSectors()
 
 	for (int32 Index = 0; Index < SlimeElement::Count; ++Index)
 	{
-		const ESlimeElement Element = SlimeElement::FromIndex(Index);
+		ESlimeElement Element = SlimeElement::FromIndex(Index);
+		if (const USlimeElementProgressSubsystem* Progress = USlimeElementProgressSubsystem::Get(this))
+		{
+			Element = Progress->GetOrderedElement(Index);
+		}
 		const bool bSelected = Element == HighlightedElement;
 		const FSlimeElementProfile Profile = GetProfile(Element);
 

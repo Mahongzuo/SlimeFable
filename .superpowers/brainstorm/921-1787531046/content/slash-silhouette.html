@@ -1,0 +1,64 @@
+<style>
+  .slash-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-top:24px; }
+  .slash-card { position:relative; min-height:330px; overflow:hidden; background:#0b0f14; border:1px solid #26313d; cursor:pointer; transition:transform .18s,border-color .18s; }
+  .slash-card:hover { transform:translateY(-3px); border-color:#b7d5ee; }
+  .slash-card.selected { border-color:#f3d27b; box-shadow:0 0 0 1px #f3d27b inset; }
+  .stage { position:relative; height:220px; overflow:hidden; background:radial-gradient(circle at 50% 62%,#23303c 0,#111820 36%,#080b0f 75%); }
+  .ground { position:absolute; left:0; right:0; bottom:32px; height:1px; background:#32404c; }
+  .slime { position:absolute; left:35px; bottom:33px; width:58px; height:46px; border-radius:50% 50% 42% 42%; background:#69bdd5; box-shadow:inset 0 10px 16px #b9eef2,0 0 16px #4babc880; }
+  .slime:before,.slime:after { content:""; position:absolute; top:17px; width:5px; height:8px; border-radius:50%; background:#071016; }
+  .slime:before { left:18px; } .slime:after { right:18px; }
+  .direction { position:absolute; left:98px; bottom:53px; color:#91a6b8; font:11px/1.2 sans-serif; letter-spacing:0; }
+  .direction:after { content:""; display:inline-block; width:54px; height:1px; margin:0 0 3px 7px; background:#91a6b8; box-shadow:48px -3px 0 -1px #91a6b8; transform:skewY(-9deg); }
+  svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+  .core { fill:none; stroke:#fff7cf; stroke-linecap:round; filter:drop-shadow(0 0 4px #d8f5ff) drop-shadow(0 0 12px #4cc7ff); }
+  .body { fill:#44bce055; stroke:#74dcff; stroke-width:2; filter:drop-shadow(0 0 10px #24a7e4aa); }
+  .spark { fill:none; stroke:#c7f5ff; stroke-width:1.5; stroke-linecap:round; opacity:.8; }
+  .slash-card h3 { margin:15px 16px 4px; font-size:17px; }
+  .slash-card p { margin:0 16px 18px; color:#a9b4be; font-size:13px; line-height:1.55; }
+  .badge { position:absolute; top:12px; right:12px; z-index:2; padding:4px 7px; border:1px solid #f3d27b88; color:#f3d27b; background:#161610cc; font-size:10px; letter-spacing:0; }
+  @media (max-width:900px){ .slash-grid{grid-template-columns:1fr;} }
+</style>
+
+<h2>普通攻击的剑光轮廓</h2>
+<p class="subtitle">三种方案都固定朝攻击方向生成，不使用运动 Ribbon。点击选择最接近你想要的轮廓。</p>
+
+<div class="slash-grid cards">
+  <div class="slash-card card" data-choice="crescent" onclick="toggleSelect(this)">
+    <span class="badge">推荐</span>
+    <div class="stage card-image">
+      <div class="ground"></div><div class="slime"></div><div class="direction">攻击方向</div>
+      <svg viewBox="0 0 360 220" aria-label="新月剑光">
+        <path class="body" d="M112 154 Q210 28 330 66 Q232 76 148 170 Q127 171 112 154Z"/>
+        <path class="core" stroke-width="5" d="M122 157 Q213 47 316 69"/>
+        <path class="spark" d="M166 134 l-20 12 M226 84 l-9 -16 M279 70 l10 -13"/>
+      </svg>
+    </div>
+    <div class="card-body"><h3>A · 新月刃弧</h3><p>一片有厚度的弧形剑气，中心白热、外缘带属性色。读向最清楚，也最符合“小体型、快速连击”。</p></div>
+  </div>
+
+  <div class="slash-card card" data-choice="planar" onclick="toggleSelect(this)">
+    <div class="stage card-image">
+      <div class="ground"></div><div class="slime"></div><div class="direction">攻击方向</div>
+      <svg viewBox="0 0 360 220" aria-label="平面剑波">
+        <path class="body" d="M116 149 Q217 90 334 90 L310 124 Q211 112 137 171Z"/>
+        <path class="core" stroke-width="6" d="M124 153 Q219 99 321 99"/>
+        <path class="spark" d="M190 128 l-25 0 M250 106 l13 -14 M299 104 l21 8"/>
+      </svg>
+    </div>
+    <div class="card-body"><h3>B · 前掠剑波</h3><p>更像朝前切出的能量片，覆盖面宽、冲击感强；但快速四连时可能显得偏重、容易遮挡敌人。</p></div>
+  </div>
+
+  <div class="slash-card card" data-choice="segmented" onclick="toggleSelect(this)">
+    <div class="stage card-image">
+      <div class="ground"></div><div class="slime"></div><div class="direction">攻击方向</div>
+      <svg viewBox="0 0 360 220" aria-label="分段双刃">
+        <path class="body" d="M118 157 Q205 49 303 70 L286 84 Q210 76 139 169Z"/>
+        <path class="body" d="M150 177 Q232 100 331 103 L310 119 Q234 110 169 185Z" opacity=".62"/>
+        <path class="core" stroke-width="4" d="M127 158 Q207 62 293 74"/>
+        <path class="core" stroke-width="3" d="M161 176 Q236 109 319 108" opacity=".75"/>
+      </svg>
+    </div>
+    <div class="card-body"><h3>C · 分段双刃</h3><p>两层错位切面，节奏感和元素感更强；视觉更华丽，但每段普攻的轮廓会更忙。</p></div>
+  </div>
+</div>

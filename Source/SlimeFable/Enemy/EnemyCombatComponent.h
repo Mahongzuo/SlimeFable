@@ -64,6 +64,7 @@ protected:
 	float ActionElapsed = 0.f;
 	bool bAttacking = false;
 	bool bHitFired = false;
+	bool bActionAnimationStarted = false;
 	bool bPlayerMorphed = false;
 	TSet<TWeakObjectPtr<AActor>> AlreadyHit;
 	FEnemySkillDef PendingGasDef;

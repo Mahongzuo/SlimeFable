@@ -39,6 +39,8 @@ public:
 
 	static bool IsHostile(const AActor* A, const AActor* B);
 	static ESlimeTeam GetTeam(const AActor* Actor);
+	/** True only if Target has a living USlimeHealthComponent (real combatant). */
+	static bool IsValidDamageTarget(const AActor* Target);
 	static FVector ResolveOrigin(AActor* Instigator, const FSlimeHitSpec& Spec, const FVector& Forward);
 
 	/** If Target implements ISlimeSliceable, invoke SliceAt and return true. */

@@ -1,23 +1,18 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/SlimeFableGameInstance.h"
-#include "UI/SSlimeLoadingScreen.h"
 #include "UI/SlimeLoadingGateWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
-#include "MoviePlayer.h"
 #include "SlimeFable.h"
 #include "SlimeFablePlayerController.h"
 
 void USlimeFableGameInstance::Init()
 {
 	Super::Init();
-
-	EnsureLoadingBackgroundBrush();
-	EnsureLoadingStatusFont();
 
 	PreLoadMapHandle = FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &USlimeFableGameInstance::BeginLoadingScreen);
 	PostLoadMapHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &USlimeFableGameInstance::EndLoadingScreen);
@@ -42,27 +37,7 @@ void USlimeFableGameInstance::Shutdown()
 		ActiveLoadingGate = nullptr;
 	}
 
-	CachedLoadingBackground.Reset();
-	bHasCachedLoadingStatusFont = false;
-	CachedLoadingStatusFont = FSlateFontInfo();
 	Super::Shutdown();
-}
-
-void USlimeFableGameInstance::EnsureLoadingBackgroundBrush()
-{
-	if (!CachedLoadingBackground.IsValid())
-	{
-		CachedLoadingBackground = SSlimeLoadingScreen::CreateBackgroundBrushOnGameThread();
-	}
-}
-
-void USlimeFableGameInstance::EnsureLoadingStatusFont()
-{
-	if (!bHasCachedLoadingStatusFont)
-	{
-		CachedLoadingStatusFont = SSlimeLoadingScreen::CreateStatusFontOnGameThread(22.f);
-		bHasCachedLoadingStatusFont = true;
-	}
 }
 
 void USlimeFableGameInstance::BeginLoadingScreen(const FString& MapName)
@@ -72,28 +47,11 @@ void USlimeFableGameInstance::BeginLoadingScreen(const FString& MapName)
 		return;
 	}
 
-	EnsureLoadingBackgroundBrush();
-	EnsureLoadingStatusFont();
-
-	// Hide "Preparing Shaders" chrome for the whole travel; gate restores later.
+	// No MoviePlayer overlay — it conflicted with LoadingGate's menu background.
+	// Only suppress "Preparing Shaders" chrome; the gate restores it when finished.
 	bPrevScreenMessagesEnabled = GAreScreenMessagesEnabled;
 	GAreScreenMessagesEnabled = false;
-
-	FLoadingScreenAttributes Attributes;
-	Attributes.bAutoCompleteWhenLoadingCompletes = true;
-	// Never tick the engine under MoviePlayer when RayTracing is on.
-	Attributes.bAllowEngineTick = false;
-	Attributes.bWaitForManualStop = false;
-	Attributes.MinimumLoadingScreenDisplayTime = 0.2f;
-	Attributes.WidgetLoadingScreen = SNew(SSlimeLoadingScreen)
-		.BackgroundBrush(CachedLoadingBackground)
-		.StatusFont(CachedLoadingStatusFont);
-
-	if (IGameMoviePlayer* MoviePlayer = GetMoviePlayer())
-	{
-		MoviePlayer->SetupLoadingScreen(Attributes);
-		UE_LOG(LogSlimeFable, Log, TEXT("Loading screen started for '%s'"), *MapName);
-	}
+	UE_LOG(LogSlimeFable, Log, TEXT("Map travel started for '%s' (LoadingGate after load)"), *MapName);
 }
 
 void USlimeFableGameInstance::EndLoadingScreen(UWorld* LoadedWorld)

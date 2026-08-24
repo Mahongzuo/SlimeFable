@@ -21,6 +21,7 @@ class USlimeDevourComponent;
 class USlimePlacementComponent;
 class USlimeVehicleComponent;
 class UNiagaraSystem;
+class USoundBase;
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
 class SLIMEFABLE_API USlimeCombatComponent : public UActorComponent
@@ -102,11 +103,29 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "50.0", Units = "cm",
 		ToolTip = "未锁定时终结技/点名技吸附最近敌人的最大距离。锁定时无视此项，圆心落在锁定目标上。默认 450。"))
-	float FinisherSeekRange = 450.f;
+	float FinisherSeekRange = 300.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
 		meta = (ToolTip = "勾选后链式技能（雷 Skill2）首段仍只打锁定目标，后续弹射可以跳到附近其他敌人。关掉则整条链只打锁定目标。默认开。"))
 	bool bChainIgnoresLock = true;
+
+	/** 普通连招（1–3）挥砍音效。空则用 /Game/Audio/SFX/Combat/sfx_attack_01。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "普通连招 1–3。空则 /Game/Audio/SFX/Combat/sfx_attack_01。"))
+	TSoftObjectPtr<USoundBase> ComboAttackSound;
+
+	/** 连招第 4 下终结技音效；六属性 Q/E/R 技能也默认用此音。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "连招终结技 + Q/E/R 技能默认音。空则 /Game/Audio/SFX/Combat/sfx_finisher_01。"))
+	TSoftObjectPtr<USoundBase> FinisherSound;
+
+	/**
+	 * 按属性覆盖技能施放音。索引：Water Wind Fire Lightning Dark Physical。
+	 * 空槽回退到 FinisherSound / sfx_finisher_01。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "按六属性覆盖技能音；空则统一用终结技音 sfx_finisher_01。"))
+	TArray<TSoftObjectPtr<USoundBase>> ElementSkillSounds;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	TSubclassOf<USlimeCombatHUDWidget> HUDWidgetClass;
@@ -145,6 +164,7 @@ private:
 	void ExecuteProjectile(const FSlimeSkillDef& Def, const FVector& Forward);
 	void ExecuteChain(const FSlimeSkillDef& Def, const FVector& Origin, const FVector& Forward);
 	void SpawnVfx(const FSlimeSkillDef& Def, const FVector& Location) const;
+	void PlayCombatSound(bool bFromCombo) const;
 	void AwardResources(const FSlimeSkillDef& Def, int32 HitCount);
 	void TickCooldowns(float DeltaTime);
 	void TickDamageBuff(float DeltaTime);

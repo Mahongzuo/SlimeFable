@@ -43,6 +43,8 @@
 #include "Quest/QuestSubsystem.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
+#include "Slime/SlimeElementProgressSubsystem.h"
+#include "SlimeCombatTypes.h"
 #include "Engine/GameInstance.h"
 
 namespace
@@ -58,7 +60,7 @@ namespace
 USlimeCombatHUDWidget::USlimeCombatHUDWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	// Combat HUD is read/click chrome only. Focusable widgets swallow Tab (element wheel)
+	// Combat HUD is read/click chrome only. Focusable widgets swallow Tab (hotbar wheel)
 	// and Space (jump) via Slate navigation / button activation.
 	SetIsFocusable(false);
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -283,32 +285,56 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	LaunchChargeTrack->AddChild(LaunchChargeBar);
 
 	DevourHoldTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DevourHoldTrack"));
-	DevourHoldTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
-	DevourHoldTrack->SetPadding(FMargin(4.f, 3.f));
+	DevourHoldTrack->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.85f));
+	DevourHoldTrack->SetPadding(FMargin(6.f, 6.f));
 	DevourHoldTrack->SetVisibility(ESlateVisibility::Collapsed);
 	if (UCanvasPanelSlot* HoldSlot = Root->AddChildToCanvas(DevourHoldTrack))
 	{
-		HoldSlot->SetAnchors(FAnchors(0.f, 0.f));
-		HoldSlot->SetAlignment(FVector2D(0.5f, 0.f));
-		HoldSlot->SetPosition(FVector2D(0.f, 0.f));
-		HoldSlot->SetSize(FVector2D(160.f, 14.f));
+		HoldSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		HoldSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		HoldSlot->SetPosition(FVector2D(0.f, -124.f));
+		HoldSlot->SetSize(FVector2D(500.f, 52.f));
 		HoldSlot->SetZOrder(16);
+	}
+	UVerticalBox* HoldColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DevourHoldColumn"));
+	DevourHoldTrack->AddChild(HoldColumn);
+	DevourHoldLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DevourHoldLabel"));
+	DevourHoldLabel->SetText(FText::FromString(TEXT("正在吞噬")));
+	DevourHoldLabel->SetJustification(ETextJustify::Center);
+	FMenuUIStyle::ApplyBrushCJKFont(DevourHoldLabel, 18.f, FMenuUIStyle::WarmTextColor());
+	if (UVerticalBoxSlot* LabelSlot = HoldColumn->AddChildToVerticalBox(DevourHoldLabel))
+	{
+		LabelSlot->SetHorizontalAlignment(HAlign_Center);
+		LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 	}
 	DevourHoldBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("DevourHoldBar"));
 	DevourHoldBar->SetPercent(0.f);
-	DevourHoldBar->SetFillColorAndOpacity(FLinearColor(0.72f, 0.58f, 0.32f, 0.95f));
-	if (ProgressMat)
+	DevourHoldBar->SetFillColorAndOpacity(FLinearColor(0.25f, 0.55f, 0.95f, 1.f));
 	{
 		FProgressBarStyle HoldStyle = DevourHoldBar->GetWidgetStyle();
-		FSlateBrush HoldFill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(152.f, 8.f));
-		HoldFill.TintColor = FSlateColor(FLinearColor(0.92f, 0.78f, 0.48f, 0.95f));
-		HoldStyle.SetFillImage(HoldFill);
-		FSlateBrush HoldEmpty;
-		HoldEmpty.DrawAs = ESlateBrushDrawType::NoDrawType;
-		HoldStyle.SetBackgroundImage(HoldEmpty);
+		FSlateBrush HoldBg;
+		HoldBg.DrawAs = ESlateBrushDrawType::Box;
+		HoldBg.TintColor = FSlateColor(FLinearColor(0.55f, 0.55f, 0.55f, 1.f));
+		HoldStyle.SetBackgroundImage(HoldBg);
+		if (ProgressMat)
+		{
+			FSlateBrush HoldFill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(488.f, 16.f));
+			HoldStyle.SetFillImage(HoldFill);
+		}
+		else
+		{
+			FSlateBrush HoldFill;
+			HoldFill.DrawAs = ESlateBrushDrawType::Box;
+			HoldFill.TintColor = FSlateColor(FLinearColor(0.25f, 0.55f, 0.95f, 1.f));
+			HoldStyle.SetFillImage(HoldFill);
+		}
 		DevourHoldBar->SetWidgetStyle(HoldStyle);
 	}
-	DevourHoldTrack->AddChild(DevourHoldBar);
+	if (UVerticalBoxSlot* BarSlot = HoldColumn->AddChildToVerticalBox(DevourHoldBar))
+	{
+		BarSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		BarSlot->SetHorizontalAlignment(HAlign_Fill);
+	}
 
 	DigestTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DigestTrack"));
 	DigestTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
@@ -620,10 +646,34 @@ void USlimeCombatHUDWidget::Refresh()
 
 	const UGameInstance* GI = GetGameInstance();
 	const USlimeInputSettings* InputSettings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr;
-	USlimeInventorySubsystem* Inv = GI ? GI->GetSubsystem<USlimeInventorySubsystem>() : nullptr;
-	static const ESlimeInputAction HotbarActions[6] = {
-		ESlimeInputAction::Hotbar1, ESlimeInputAction::Hotbar2, ESlimeInputAction::Hotbar3,
-		ESlimeInputAction::Hotbar4, ESlimeInputAction::Hotbar5, ESlimeInputAction::Hotbar6
+	const USlimeElementProgressSubsystem* ElementProgress = GI ? GI->GetSubsystem<USlimeElementProgressSubsystem>() : nullptr;
+	ESlimeElement CurrentElement = ESlimeElement::Water;
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			if (const USlimeElementComponent* El = Pawn->FindComponentByClass<USlimeElementComponent>())
+			{
+				CurrentElement = El->CurrentElement;
+			}
+		}
+	}
+	static const ESlimeInputAction ElementActions[6] = {
+		ESlimeInputAction::Element1, ESlimeInputAction::Element2, ESlimeInputAction::Element3,
+		ESlimeInputAction::Element4, ESlimeInputAction::Element5, ESlimeInputAction::Element6
+	};
+	auto ElementShort = [](ESlimeElement El) -> FString
+	{
+		switch (El)
+		{
+		case ESlimeElement::Water: return TEXT("水");
+		case ESlimeElement::Wind: return TEXT("风");
+		case ESlimeElement::Fire: return TEXT("火");
+		case ESlimeElement::Lightning: return TEXT("雷");
+		case ESlimeElement::Dark: return TEXT("暗");
+		case ESlimeElement::Physical: return TEXT("物");
+		default: return TEXT("?");
+		}
 	};
 	for (int32 Index = 0; Index < HotbarLabels.Num(); ++Index)
 	{
@@ -632,20 +682,25 @@ void USlimeCombatHUDWidget::Refresh()
 		{
 			continue;
 		}
-		FString Line = InputSettings ? InputSettings->GetKeyDisplayName(HotbarActions[Index]).ToString() : FString::FromInt(Index + 1);
-		if (Inv)
+		FString KeyName = FString::FromInt(Index + 1);
+		if (InputSettings)
 		{
-			const FName ItemId = Inv->GetHotbarItem(Index);
-			if (!ItemId.IsNone())
+			const FKey Key = InputSettings->GetKey(ElementActions[Index]);
+			if (Key.IsValid())
 			{
-				if (const USlimeItemDefinition* Def = Inv->FindDefinition(ItemId))
-				{
-					Line = FString::Printf(TEXT("%s\n%s"), *Line, *Def->DisplayName.ToString());
-				}
+				KeyName = InputSettings->GetKeyDisplayName(ElementActions[Index]).ToString();
 			}
 		}
+		const ESlimeElement Ordered = ElementProgress
+			? ElementProgress->GetOrderedElement(Index)
+			: SlimeElement::FromIndex(Index);
+		const FString Line = FString::Printf(TEXT("%s\n%s"), *KeyName, *ElementShort(Ordered));
 		Label->SetText(FText::FromString(Line));
-		FMenuUIStyle::ApplyMixedMenuFont(Label, 14.f, FMenuUIStyle::WarmTitleColor());
+		const bool bCurrent = Ordered == CurrentElement;
+		const FLinearColor Color = bCurrent
+			? SlimeCombat::GetElementVfxColor(Ordered)
+			: FMenuUIStyle::WarmMutedTextColor();
+		FMenuUIStyle::ApplyMixedMenuFont(Label, bCurrent ? 16.f : 14.f, Color);
 	}
 
 	if (InteractPrompt)
@@ -708,20 +763,15 @@ void USlimeCombatHUDWidget::Refresh()
 				if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
 				{
 					Hold = Devour->GetHoldProgress();
-					bShowHold = Hold > KINDA_SMALL_NUMBER && bShow;
+					bShowHold = Devour->GetPhase() == ESlimeDevourPhase::Charging;
 				}
 			}
 			DevourHoldTrack->SetVisibility(bShowHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 			DevourHoldBar->SetPercent(Hold);
 			ApplyProgressBarFill(DevourHoldBar, GetSlimeHudTint());
-			if (bShowHold)
+			if (DevourHoldLabel)
 			{
-				if (UCanvasPanelSlot* HoldSlot = Cast<UCanvasPanelSlot>(DevourHoldTrack->Slot))
-				{
-					HoldSlot->SetAnchors(FAnchors(0.f, 0.f));
-					HoldSlot->SetAlignment(FVector2D(0.5f, 0.f));
-					HoldSlot->SetPosition(ScreenPos + FVector2D(0.f, 6.f));
-				}
+				FMenuUIStyle::ApplyBrushCJKFont(DevourHoldLabel, 18.f, GetSlimeHudTint());
 			}
 		}
 	}

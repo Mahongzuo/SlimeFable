@@ -25,6 +25,8 @@ class USlimeVehicleComponent;
 class USlimeDevourComponent;
 class USlimeMorphComponent;
 class UStaticMeshComponent;
+class USoundBase;
+class UAudioComponent;
 
 /**
  *  The slime pawn.
@@ -42,6 +44,7 @@ public:
 	ASlimeCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	virtual void BeginPlay() override;
+	virtual void PossessedBy(AController* NewController) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void NotifyControllerChanged() override;
 	virtual void Landed(const FHitResult& Hit) override;
@@ -127,6 +130,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
 	UStaticMeshComponent* GetVehicleMesh() const { return VehicleMesh; }
 
+	/** Soft-body crawl while moving. Empty → /Game/Audio/SFX/Movement/sfx_crawl_01. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "地面蠕动/黏软移动。空则 /Game/Audio/SFX/Movement/sfx_crawl_01。"))
+	TSoftObjectPtr<USoundBase> FootstepSound;
+
+	/** Jump launch SFX. Empty → /Game/Audio/SFX/Movement/sfx_jump_01. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "跳跃起跳。空则 /Game/Audio/SFX/Movement/sfx_jump_01。"))
+	TSoftObjectPtr<USoundBase> JumpSound;
+
+	/** Player hit-taken SFX. Empty → /Game/Audio/SFX/Combat/sfx_hit_01. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "被敌人打中。空则 /Game/Audio/SFX/Combat/sfx_hit_01。"))
+	TSoftObjectPtr<USoundBase> HitTakenSound;
+
+	/** Seconds between crawl one-shots while moving on ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ClampMin = "0.1", ClampMax = "1.5", ToolTip = "地面蠕动音间隔（秒）。默认 0.45。"))
+	float FootstepInterval = 0.45f;
+
 	/** Teleport back to this pawn's spawn and reset cling / body. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void Unstuck();
@@ -171,6 +194,11 @@ protected:
 
 	/** When move/jump keys are customized, drive CMC from SlimeInputSettings. */
 	void PollCustomMoveKeys(float DeltaSeconds);
+
+	void TickFootsteps(float DeltaSeconds);
+	void PlayJumpSound();
+	void StopFootstepAudio(bool bImmediate = false);
+	void PlayFootstepAudio();
 
 	/** Surface mesh. Vertices are world space, so this component sits at the world origin. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime")
@@ -244,6 +272,12 @@ protected:
 
 	/** Desired spring-arm length the boom smoothly follows. */
 	float DesiredCameraArmLength = 260.f;
+
+	/** Accumulator for ground footstep cadence. */
+	float FootstepTimer = 0.f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> FootstepAudio;
 
 	/** World transform at BeginPlay; Unstuck returns here. */
 	FTransform SpawnTransform = FTransform::Identity;

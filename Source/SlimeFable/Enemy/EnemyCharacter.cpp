@@ -17,6 +17,7 @@
 #include "AIController.h"
 #include "BrainComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -40,6 +41,7 @@
 #include "Quest/QuestSouvenirPickup.h"
 #include "Quest/QuestSubsystem.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeStatusComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeWorldHealthBar.h"
 #include "Inventory/SlimeItemDefinition.h"
@@ -84,6 +86,7 @@ AEnemyCharacter::AEnemyCharacter()
 	Health->bDestroyOnDeath = false;
 	Health->bRegenOnDeath = false;
 	Health->MaxHP = 200.f;
+	Status = CreateDefaultSubobject<USlimeStatusComponent>(TEXT("Status"));
 	AbilitySystem = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("EnemyAbilitySystem"));
 	AbilitySystem->SetIsReplicated(false);
 	EnemyAttributes = CreateDefaultSubobject<UEnemyAttributeSet>(TEXT("EnemyAttributes"));
@@ -91,6 +94,8 @@ AEnemyCharacter::AEnemyCharacter()
 		FSoftObjectPath(TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact.NS_Dark_Solo_Impact")));
 	DeathDissolveMaterial = TSoftObjectPtr<UMaterialInterface>(
 		FSoftObjectPath(TEXT("/Game/_Slime/FX/M_EnemyDeathDissolve.M_EnemyDeathDissolve")));
+	HitFlashMaterial = TSoftObjectPtr<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/_Slime/FX/M_EnemyHitFlash.M_EnemyHitFlash")));
 	SouvenirDropClass = TSoftClassPtr<AActor>(
 		FSoftObjectPath(TEXT("/Game/_Slime/Days/08/0815/Y1945/Actors/BP_0815_Souvenir_1945.BP_0815_Souvenir_1945_C")));
 
@@ -795,6 +800,243 @@ void AEnemyCharacter::SetDevourLocked(bool bLocked)
 	bDevourLocked = bLocked;
 }
 
+void AEnemyCharacter::PlayHitFlash()
+{
+	if (bDeathSequence || DeathDissolveElapsed > 0.f)
+	{
+		return;
+	}
+	// Prefer keeping the elemental aura tint when re-flashing from damage.
+	if (bAuraFlashActive && HitFlashRemaining > HitFlashDuration)
+	{
+		return;
+	}
+
+	UMaterialInterface* FlashMat = HitFlashMaterial.LoadSynchronous();
+	if (!FlashMat)
+	{
+		return;
+	}
+
+	if (!HitFlashMID || HitFlashMID->Parent != FlashMat)
+	{
+		HitFlashMID = UMaterialInstanceDynamic::Create(FlashMat, this);
+	}
+	if (!HitFlashMID)
+	{
+		return;
+	}
+
+	ApplyHitFlashToMesh(GetMesh());
+	for (USceneComponent* Part : GeneratedParts)
+	{
+		ApplyHitFlashToMesh(Cast<UMeshComponent>(Part));
+	}
+	if (PlaceholderMesh && PlaceholderMesh->IsVisible())
+	{
+		ApplyHitFlashToMesh(PlaceholderMesh);
+	}
+
+	const UWorld* World = GetWorld();
+	// If an aura flash is already running, only pulse intensity — do not reset to short red hit.
+	if (bAuraFlashActive)
+	{
+		HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), 1.f);
+		return;
+	}
+
+	HitFlashStartTime = World ? World->GetTimeSeconds() : 0.f;
+	ActiveFlashDuration = HitFlashDuration;
+	ActiveFlashFrequency = HitFlashFrequency;
+	bAuraFlashActive = false;
+	HitFlashRemaining = ActiveFlashDuration;
+	HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), 1.f);
+
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(HitFlashTimer);
+		World->GetTimerManager().SetTimer(
+			HitFlashTimer,
+			this,
+			&AEnemyCharacter::TickHitFlash,
+			0.016f,
+			true);
+	}
+}
+
+void AEnemyCharacter::PlayElementHitFlash(FLinearColor FlashColor)
+{
+	PlayElementAuraFlash(FlashColor, 8.f);
+}
+
+void AEnemyCharacter::PlayElementAuraFlash(FLinearColor FlashColor, float Duration)
+{
+	if (bDeathSequence || DeathDissolveElapsed > 0.f)
+	{
+		return;
+	}
+	if (Duration <= KINDA_SMALL_NUMBER)
+	{
+		ClearElementAuraFlash();
+		return;
+	}
+
+	UMaterialInterface* FlashMat = HitFlashMaterial.LoadSynchronous();
+	if (!FlashMat)
+	{
+		return;
+	}
+
+	if (!HitFlashMID || HitFlashMID->Parent != FlashMat)
+	{
+		HitFlashMID = UMaterialInstanceDynamic::Create(FlashMat, this);
+	}
+	if (!HitFlashMID)
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	HitFlashStartTime = World ? World->GetTimeSeconds() : 0.f;
+	ActiveFlashDuration = Duration;
+	bAuraFlashActive = true;
+	HitFlashRemaining = ActiveFlashDuration;
+	HitFlashMID->SetVectorParameterValue(TEXT("HitColor"), FlashColor);
+	HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), 1.f);
+	ApplyHitFlashToAllMeshes();
+
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(HitFlashTimer);
+		World->GetTimerManager().SetTimer(
+			HitFlashTimer,
+			this,
+			&AEnemyCharacter::TickHitFlash,
+			0.016f,
+			true);
+	}
+}
+
+void AEnemyCharacter::ClearElementAuraFlash()
+{
+	if (!bAuraFlashActive)
+	{
+		return;
+	}
+	bAuraFlashActive = false;
+	HitFlashRemaining = 0.f;
+	ClearHitFlashOverlay();
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(HitFlashTimer);
+	}
+}
+
+void AEnemyCharacter::ApplyHitFlashToMesh(UMeshComponent* MeshComp)
+{
+	if (!MeshComp || !HitFlashMID)
+	{
+		return;
+	}
+	MeshComp->SetOverlayMaterial(HitFlashMID);
+}
+
+void AEnemyCharacter::ApplyHitFlashToAllMeshes()
+{
+	ApplyHitFlashToMesh(GetMesh());
+	for (USceneComponent* Part : GeneratedParts)
+	{
+		ApplyHitFlashToMesh(Cast<UMeshComponent>(Part));
+	}
+	if (PlaceholderMesh && PlaceholderMesh->IsVisible())
+	{
+		ApplyHitFlashToMesh(PlaceholderMesh);
+	}
+}
+
+void AEnemyCharacter::ClearHitFlashFromMeshes()
+{
+	auto ClearMesh = [](UMeshComponent* MeshComp)
+	{
+		if (MeshComp)
+		{
+			MeshComp->SetOverlayMaterial(nullptr);
+		}
+	};
+	ClearMesh(GetMesh());
+	for (USceneComponent* Part : GeneratedParts)
+	{
+		ClearMesh(Cast<UMeshComponent>(Part));
+	}
+	ClearMesh(PlaceholderMesh);
+}
+
+void AEnemyCharacter::ClearHitFlashOverlay()
+{
+	ClearHitFlashFromMeshes();
+	HitFlashMID = nullptr;
+	bAuraFlashActive = false;
+}
+
+void AEnemyCharacter::TickHitFlash()
+{
+	if (!HitFlashMID || HitFlashRemaining <= 0.f)
+	{
+		ClearHitFlashOverlay();
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(HitFlashTimer);
+		}
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : HitFlashStartTime;
+	const float Age = FMath::Max(Now - HitFlashStartTime, 0.f);
+	const float Duration = ActiveFlashDuration > 0.f ? ActiveFlashDuration : HitFlashDuration;
+	const float Envelope = Duration > 0.f
+		? FMath::Clamp(1.f - Age / Duration, 0.f, 1.f)
+		: 0.f;
+
+	float Pulse = 0.f;
+	if (bAuraFlashActive)
+	{
+		// 0.5s tint on, 1.0s natural color off, repeat for the aura window.
+		const float OnSec = FMath::Max(AuraFlashOnSeconds, 0.05f);
+		const float OffSec = FMath::Max(AuraFlashOffSeconds, 0.05f);
+		const float Cycle = OnSec + OffSec;
+		const float Phase = FMath::Fmod(Age, Cycle);
+		const bool bOn = Phase < OnSec;
+		Pulse = bOn ? 1.f : 0.f;
+		if (bOn)
+		{
+			ApplyHitFlashToAllMeshes();
+			HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), Pulse);
+		}
+		else
+		{
+			ClearHitFlashFromMeshes();
+		}
+	}
+	else
+	{
+		Pulse = Envelope * FMath::Abs(FMath::Sin(Age * ActiveFlashFrequency * PI));
+		HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), Pulse);
+	}
+
+	HitFlashMID->SetScalarParameterValue(TEXT("HitTime"), HitFlashStartTime);
+	HitFlashRemaining = Envelope * Duration;
+
+	if (Envelope <= KINDA_SMALL_NUMBER)
+	{
+		ClearHitFlashOverlay();
+		if (UWorld* WorldMutable = GetWorld())
+		{
+			WorldMutable->GetTimerManager().ClearTimer(HitFlashTimer);
+		}
+	}
+}
+
 FVector AEnemyCharacter::GetLockOnLocation() const
 {
 	return GetActorLocation() + FVector(0.f, 0.f, 60.f);
@@ -1191,6 +1433,12 @@ void AEnemyCharacter::HandleDied()
 		return;
 	}
 
+	ClearElementAuraFlash();
+	if (Status)
+	{
+		Status->ClearAllAuras();
+	}
+
 	bDeathSequence = true;
 	SetActorTickEnabled(false);
 
@@ -1393,6 +1641,13 @@ void AEnemyCharacter::StartDeathDissolve()
 
 	if (UMaterialInterface* DissolveMat = DeathDissolveMaterial.LoadSynchronous())
 	{
+		// Death dissolve owns the overlay slot — cancel any active hit flash first.
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(HitFlashTimer);
+		}
+		HitFlashRemaining = 0.f;
+		HitFlashMID = nullptr;
 		if (USkeletalMeshComponent* Skel = GetMesh())
 		{
 			DeathDissolveMID = UMaterialInstanceDynamic::Create(DissolveMat, this);
@@ -1826,6 +2081,11 @@ void AEnemyCharacter::BeginDevouredDeath(AActor* Devourer)
 	if (bDeathSequence || !Health)
 	{
 		return;
+	}
+	ClearElementAuraFlash();
+	if (Status)
+	{
+		Status->ClearAllAuras();
 	}
 	bDevouredDeath = true;
 	Health->ApplyDamage(FMath::Max(Health->CurrentHP, 1.f), Devourer, GetActorLocation(), FVector::ZeroVector);

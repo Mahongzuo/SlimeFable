@@ -11,6 +11,7 @@
 #include "InputMappingContext.h"
 #include "Inventory/SlimeInteractComponent.h"
 #include "Inventory/SlimeInventorySubsystem.h"
+#include "Slime/SlimeAbilityComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "SlimeFable.h"
 #include "Quest/QuestSubsystem.h"
@@ -31,7 +32,9 @@ namespace
 		return Reason == ESlimeUIInputReason::Pause
 			|| Reason == ESlimeUIInputReason::WeekSelect
 			|| Reason == ESlimeUIInputReason::Inventory
-			|| Reason == ESlimeUIInputReason::Souvenir;
+			|| Reason == ESlimeUIInputReason::Souvenir
+			|| Reason == ESlimeUIInputReason::ElementFormation
+			|| Reason == ESlimeUIInputReason::HotbarConfirm;
 	}
 
 	bool ShouldShowCursor(ESlimeUIInputReason Reason)
@@ -114,6 +117,18 @@ void ASlimeFablePlayerController::SetupInputComponent()
 bool ASlimeFablePlayerController::ShouldUseTouchControls() const
 {
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+}
+
+void ASlimeFablePlayerController::RetargetUIFocus(UUserWidget* FocusWidget)
+{
+	if (!IsLocalPlayerController() || !FocusWidget || UIInputStack.IsEmpty())
+	{
+		return;
+	}
+	UIInputStack.Last().FocusWidget = FocusWidget;
+	ApplyTopUIInput();
+	FocusWidget->SetIsFocusable(true);
+	FocusWidget->SetKeyboardFocus();
 }
 
 void ASlimeFablePlayerController::PushUIInput(ESlimeUIInputReason Reason, UUserWidget* FocusWidget)
@@ -265,6 +280,36 @@ bool ASlimeFablePlayerController::DismissOverlayUI()
 			{
 				Interact->CloseInventory();
 			}
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::ElementFormation))
+	{
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			if (USlimeAbilityComponent* Ability = ControlledPawn->FindComponentByClass<USlimeAbilityComponent>())
+			{
+				Ability->CloseFormation();
+			}
+		}
+		else
+		{
+			PopUIInput(ESlimeUIInputReason::ElementFormation);
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::HotbarConfirm))
+	{
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			if (USlimeAbilityComponent* Ability = ControlledPawn->FindComponentByClass<USlimeAbilityComponent>())
+			{
+				Ability->CloseHotbarConfirm();
+			}
+		}
+		else
+		{
+			PopUIInput(ESlimeUIInputReason::HotbarConfirm);
 		}
 		return true;
 	}

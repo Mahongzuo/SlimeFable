@@ -133,7 +133,7 @@ bool ASlimeEnemyCharacter::CanBeLockedOn() const
 	{
 		return Health->IsAlive();
 	}
-	return true;
+	return false;
 }
 
 FVector ASlimeEnemyCharacter::GetLockOnLocation() const

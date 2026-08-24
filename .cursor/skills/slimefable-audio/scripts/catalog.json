@@ -1,0 +1,93 @@
+{
+  "style_notes": "Earthy NPR cave/ruins slime adventure; warm acoustic underscore; avoid neon EDM unless asked.",
+  "comfy": {
+    "probe_urls": [
+      "http://127.0.0.1:8000",
+      "http://127.0.0.1:8188"
+    ],
+    "workflows": {
+      "sfx": "api_stable_audio_3_sfx_v2.json",
+      "bgm": "api_stable_audio_3_medium.json",
+      "theme": "api_minimax_music_3.json"
+    },
+    "defaults": {
+      "sfx": { "duration": 2.0, "category": "SFX", "timeout_sec": 120 },
+      "bgm": { "duration": 60.0, "category": "Music", "timeout_sec": 600 },
+      "theme": { "duration": 90.0, "timeout_sec": 900 }
+    }
+  },
+  "global_entries": [
+    {
+      "id": "slash_01",
+      "kind": "sfx",
+      "subdir": "SFX/Combat",
+      "asset": "sfx_slash_01",
+      "default_prompt": "Short wet slime sword slash impact, sharp whoosh then soft gelatinous slap, game one-shot SFX, mono-friendly, no music"
+    },
+    {
+      "id": "hit_01",
+      "kind": "sfx",
+      "subdir": "SFX/Combat",
+      "asset": "sfx_hit_01",
+      "default_prompt": "Short slime body hit impact, soft wet thud with light squish, game combat one-shot, no music"
+    },
+    {
+      "id": "footstep_01",
+      "kind": "sfx",
+      "subdir": "SFX/Movement",
+      "asset": "sfx_footstep_01",
+      "default_prompt": "Single slime footstep on stone cave floor, soft wet plop, short game SFX, no music"
+    },
+    {
+      "id": "jump_01",
+      "kind": "sfx",
+      "subdir": "SFX/Movement",
+      "asset": "sfx_jump_01",
+      "default_prompt": "Short slime jump launch whoosh with soft bounce, game movement one-shot, no music"
+    },
+    {
+      "id": "explore",
+      "kind": "bgm",
+      "subdir": "BGM",
+      "asset": "bgm_global_explore",
+      "default_prompt": "Warm earthy adventure underscore for cave ruins exploration, soft acoustic guitar and low percussion, NPR fantasy mood, looping-friendly instrumental, no vocals"
+    },
+    {
+      "id": "combat",
+      "kind": "bgm",
+      "subdir": "BGM",
+      "asset": "bgm_global_combat",
+      "default_prompt": "Tense earthy combat underscore, driving drums and dark strings, slime adventure battle, instrumental, looping-friendly, no vocals"
+    },
+    {
+      "id": "menu",
+      "kind": "bgm",
+      "subdir": "BGM",
+      "asset": "bgm_global_menu",
+      "default_prompt": "Calm earthy menu theme, warm pads and gentle plucked strings, cave dusk mood, instrumental, looping-friendly, no vocals"
+    }
+  ],
+  "day_pack": {
+    "items": [
+      {
+        "id": "explore",
+        "kind": "bgm",
+        "subdir": "BGM",
+        "asset_template": "bgm_{day}_explore",
+        "prompt_template": "Warm earthy exploration BGM for calendar day {day}, cave ruins slime adventure, soft acoustic underscore, instrumental, looping-friendly, no vocals"
+      },
+      {
+        "id": "combat",
+        "kind": "bgm",
+        "subdir": "BGM",
+        "asset_template": "bgm_{day}_combat",
+        "prompt_template": "Tense combat BGM for calendar day {day}, earthy drums and dark strings, slime battle, instrumental, looping-friendly, no vocals"
+      }
+    ]
+  },
+  "sfx_categories": {
+    "Combat": ["slash", "hit", "attack", "impact", "挥砍", "受击", "攻击"],
+    "Movement": ["footstep", "jump", "walk", "land", "脚步", "跳跃", "走路"],
+    "Ambient": ["water", "wind", "ambient", "流水", "环境", "风"]
+  }
+}

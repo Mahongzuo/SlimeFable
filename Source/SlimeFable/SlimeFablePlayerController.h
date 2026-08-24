@@ -19,7 +19,9 @@ enum class ESlimeUIInputReason : uint8
 	Souvenir,
 	QuestLog,
 	LoadingGate,
-	AltCursor
+	AltCursor,
+	ElementFormation,
+	HotbarConfirm
 };
 
 struct FSlimeUIInputEntry
@@ -42,6 +44,9 @@ public:
 	void PopUIInput(ESlimeUIInputReason Reason);
 	bool HasUIInput(ESlimeUIInputReason Reason) const;
 	bool HasModalUI() const;
+
+	/** Retarget keyboard/mouse UI focus while keeping the current pause/modal stack. */
+	void RetargetUIFocus(UUserWidget* FocusWidget);
 
 protected:
 

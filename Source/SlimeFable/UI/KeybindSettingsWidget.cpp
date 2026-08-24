@@ -3,6 +3,7 @@
 #include "UI/KeybindSettingsWidget.h"
 #include "UI/MenuUIStyle.h"
 #include "Settings/SlimeInputSettings.h"
+#include "SlimeFablePlayerController.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -381,5 +382,9 @@ void UKeybindSettingsWidget::OnBackClicked()
 	if (UUserWidget* Target = ReturnTarget.Get())
 	{
 		Target->SetVisibility(ESlateVisibility::Visible);
+		if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayer()))
+		{
+			PC->RetargetUIFocus(Target);
+		}
 	}
 }

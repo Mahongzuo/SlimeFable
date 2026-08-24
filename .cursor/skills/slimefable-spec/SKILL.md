@@ -27,9 +27,10 @@ description: >-
 | `/Game/Maps/Days`、`/Game/_Slime/Days`、DayId、Registry、探索 Tag、按日存档 | 读并遵循 `slimefable-day-levels` |
 | 大厅传送门、OperaHouse 共用大厅、年份子图、1/2/3 周目解锁 | 读并遵循 `slimefable-week-cycle` |
 | 主菜单 / 选关 / HUD / 字体与 UI 视觉 | 读并遵循 `slimefable-ui` |
+| 音乐 / 音效 / BGM / SFX / ComfyUI 音频生成 | 读并遵循 `slimefable-audio` |
 | 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
-手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`。
+手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`。
 
 ## 项目硬事实
 

@@ -17,9 +17,11 @@ class UEnemyAttributeSet;
 class UGameplayEffect;
 enum class EEnemyCombatRole : uint8;
 class USlimeHealthComponent;
+class USlimeStatusComponent;
 class UWidgetComponent;
 class UStaticMeshComponent;
 class USkeletalMeshComponent;
+class UMeshComponent;
 class UAnimMontage;
 class UAnimInstance;
 class UAnimationAsset;
@@ -50,6 +52,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	USlimeHealthComponent* GetEnemyHealth() const { return Health; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	USlimeStatusComponent* GetEnemyStatus() const { return Status; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	UEnemyCombatComponent* GetEnemyCombat() const { return Combat; }
@@ -150,6 +155,20 @@ public:
 	void BeginPhantomExpire();
 
 	FLinearColor ResolveDevourWheelTint() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void PlayHitFlash();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void PlayElementHitFlash(FLinearColor FlashColor);
+
+	/** Sustained elemental aura pulse (matches StatusComponent 8s attachment). */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void PlayElementAuraFlash(FLinearColor FlashColor, float Duration);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void ClearElementAuraFlash();
+
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
@@ -289,6 +308,26 @@ public:
 		meta = (ToolTip = "叠在骨骼上的溶解 Overlay 材质，驱动 DissolveAmount。默认 /Game/_Slime/FX/M_EnemyDeathDissolve。空则只靠淡出网格。"))
 	TSoftObjectPtr<UMaterialInterface> DeathDissolveMaterial;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ToolTip = "受击闪红 Overlay。默认 /Game/_Slime/FX/M_EnemyHitFlash。空则不闪。"))
+	TSoftObjectPtr<UMaterialInterface> HitFlashMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.05", Units = "s",
+		ToolTip = "受击闪红持续时间（秒）。默认 0.35，与史莱姆一致。"))
+	float HitFlashDuration = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "1.0",
+		ToolTip = "受击闪红脉冲频率。默认 18。"))
+	float HitFlashFrequency = 18.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.05", Units = "s",
+		ToolTip = "元素附着闪光：亮起时长（秒）。默认 0.5。"))
+	float AuraFlashOnSeconds = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.05", Units = "s",
+		ToolTip = "元素附着闪光：恢复本色时长（秒）。默认 1.0。"))
+	float AuraFlashOffSeconds = 1.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Souvenir")
 	TSoftObjectPtr<USlimeSouvenirDefinition> SouvenirReward;
 
@@ -369,6 +408,11 @@ protected:
 	void TickDeathDissolve();
 	void FinishDeathSequence();
 	void ApplyDeathDissolveVisual(float Alpha);
+	void TickHitFlash();
+	void ClearHitFlashOverlay();
+	void ApplyHitFlashToMesh(UMeshComponent* MeshComp);
+	void ApplyHitFlashToAllMeshes();
+	void ClearHitFlashFromMeshes();
 	void ApplyPhantomVisuals();
 	void ApplyLabDummyFlags();
 	void ApplyHealthOverridesAfterBeginPlay();
@@ -386,6 +430,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<USlimeHealthComponent> Health;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
+	TObjectPtr<USlimeStatusComponent> Status;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<UAbilitySystemComponent> AbilitySystem;
@@ -458,4 +505,14 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> DeathDissolveMID;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> HitFlashMID;
+
+	float HitFlashRemaining = 0.f;
+	float HitFlashStartTime = 0.f;
+	float ActiveFlashDuration = 0.35f;
+	float ActiveFlashFrequency = 18.f;
+	bool bAuraFlashActive = false;
+	FTimerHandle HitFlashTimer;
 };

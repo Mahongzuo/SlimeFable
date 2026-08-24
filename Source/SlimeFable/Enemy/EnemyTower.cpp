@@ -42,9 +42,9 @@ AEnemyTower::AEnemyTower()
 	AggroSphere = CreateDefaultSubobject<USphereComponent>(TEXT("AggroSphere"));
 	AggroSphere->SetupAttachment(RootComponent);
 	AggroSphere->SetSphereRadius(AttackRange);
-	// Pawn object type so SlimeBody RefreshColliders (WorldStatic/Dynamic only) never gathers this
-	// giant query sphere as a physics shell — that was stretching the slime on range entry.
-	AggroSphere->SetCollisionObjectType(ECC_Pawn);
+	// Not Pawn: HitProbe queries ECC_Pawn and would deal melee damage through this radius.
+	// Not WorldDynamic: SlimeBody RefreshColliders gathers WorldStatic/Dynamic as shells.
+	AggroSphere->SetCollisionObjectType(ECC_PhysicsBody);
 	AggroSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	AggroSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 	AggroSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
@@ -212,7 +212,7 @@ void AEnemyTower::SyncRangeSphere()
 	if (AggroSphere)
 	{
 		AggroSphere->SetSphereRadius(AttackRange);
-		AggroSphere->SetCollisionObjectType(ECC_Pawn);
+		AggroSphere->SetCollisionObjectType(ECC_PhysicsBody);
 		AggroSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
 		AggroSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	}

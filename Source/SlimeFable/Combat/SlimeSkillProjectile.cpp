@@ -10,6 +10,7 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "TimerManager.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
 #include "SlimeSkillVfxSubsystem.h"
@@ -100,6 +101,16 @@ void ASlimeSkillProjectile::ExplodeAndDestroy(bool bSpawnImpact)
 				ImpactComponent->SetVariableLinearColor(TEXT("User.Color"), Skill.VfxColor);
 				ImpactComponent->SetVariableLinearColor(TEXT("User.Tint"), Skill.VfxColor);
 				ImpactComponent->SetVariableLinearColor(TEXT("User.ElementColor"), Skill.VfxColor);
+				TWeakObjectPtr<UNiagaraComponent> WeakImpact(ImpactComponent);
+				FTimerHandle ImpactLifetime;
+				GetWorld()->GetTimerManager().SetTimer(ImpactLifetime, FTimerDelegate::CreateLambda([WeakImpact]()
+				{
+					if (UNiagaraComponent* Component = WeakImpact.Get())
+					{
+						Component->DeactivateImmediate();
+						Component->DestroyComponent();
+					}
+				}), 4.8f, false);
 			}
 		}
 	}

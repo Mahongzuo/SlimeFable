@@ -13,7 +13,7 @@ namespace SlimeInputPrivate
 {
 	static const TCHAR* ConfigSection = TEXT("SlimeInput");
 	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
-	static constexpr int32 CurrentBindSchemeVersion = 5;
+	static constexpr int32 CurrentBindSchemeVersion = 6;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
 	static const TCHAR* DefaultMoveContextPath =
@@ -73,15 +73,23 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::Inventory: return EKeys::B;
 	case ESlimeInputAction::QuestLog: return EKeys::J;
 	case ESlimeInputAction::Interact: return EKeys::F;
-	case ESlimeInputAction::Hotbar1: return EKeys::One;
-	case ESlimeInputAction::Hotbar2: return EKeys::Two;
-	case ESlimeInputAction::Hotbar3: return EKeys::Three;
-	case ESlimeInputAction::Hotbar4: return EKeys::Four;
-	case ESlimeInputAction::Hotbar5: return EKeys::Five;
-	case ESlimeInputAction::Hotbar6: return EKeys::Six;
+	// Direct hotbar keys unbound by default — use Tab wheel (or rebind).
+	case ESlimeInputAction::Hotbar1: return EKeys::Invalid;
+	case ESlimeInputAction::Hotbar2: return EKeys::Invalid;
+	case ESlimeInputAction::Hotbar3: return EKeys::Invalid;
+	case ESlimeInputAction::Hotbar4: return EKeys::Invalid;
+	case ESlimeInputAction::Hotbar5: return EKeys::Invalid;
+	case ESlimeInputAction::Hotbar6: return EKeys::Invalid;
 	case ESlimeInputAction::Morph: return EKeys::Z;
 	case ESlimeInputAction::Dodge: return EKeys::RightMouseButton;
 	case ESlimeInputAction::ShowCursor: return EKeys::LeftAlt;
+	case ESlimeInputAction::Element1: return EKeys::One;
+	case ESlimeInputAction::Element2: return EKeys::Two;
+	case ESlimeInputAction::Element3: return EKeys::Three;
+	case ESlimeInputAction::Element4: return EKeys::Four;
+	case ESlimeInputAction::Element5: return EKeys::Five;
+	case ESlimeInputAction::Element6: return EKeys::Six;
+	case ESlimeInputAction::ElementFormation: return EKeys::L;
 	default: return EKeys::Invalid;
 	}
 }
@@ -118,7 +126,7 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::Absorb: return FText::FromString(TEXT("吸收/召回"));
 	case ESlimeInputAction::ResetBody: return FText::FromString(TEXT("重置身体"));
 	case ESlimeInputAction::Launch: return FText::FromString(TEXT("发射"));
-	case ESlimeInputAction::ElementWheel: return FText::FromString(TEXT("元素轮盘"));
+	case ESlimeInputAction::ElementWheel: return FText::FromString(TEXT("快捷栏轮盘"));
 	case ESlimeInputAction::Attack: return FText::FromString(TEXT("攻击"));
 	case ESlimeInputAction::Skill1: return FText::FromString(TEXT("技能1"));
 	case ESlimeInputAction::Skill2: return FText::FromString(TEXT("技能2"));
@@ -136,6 +144,13 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::Morph: return FText::FromString(TEXT("幻形"));
 	case ESlimeInputAction::Dodge: return FText::FromString(TEXT("闪避"));
 	case ESlimeInputAction::ShowCursor: return FText::FromString(TEXT("显示鼠标"));
+	case ESlimeInputAction::Element1: return FText::FromString(TEXT("属性1（编队）"));
+	case ESlimeInputAction::Element2: return FText::FromString(TEXT("属性2（编队）"));
+	case ESlimeInputAction::Element3: return FText::FromString(TEXT("属性3（编队）"));
+	case ESlimeInputAction::Element4: return FText::FromString(TEXT("属性4（编队）"));
+	case ESlimeInputAction::Element5: return FText::FromString(TEXT("属性5（编队）"));
+	case ESlimeInputAction::Element6: return FText::FromString(TEXT("属性6（编队）"));
+	case ESlimeInputAction::ElementFormation: return FText::FromString(TEXT("属性编队"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -284,13 +299,49 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 		ESlimeInputAction::Hotbar6,
 		ESlimeInputAction::Dodge,
 		ESlimeInputAction::ShowCursor,
-		ESlimeInputAction::Morph
+		ESlimeInputAction::Morph,
+		ESlimeInputAction::Element1,
+		ESlimeInputAction::Element2,
+		ESlimeInputAction::Element3,
+		ESlimeInputAction::Element4,
+		ESlimeInputAction::Element5,
+		ESlimeInputAction::Element6,
+		ESlimeInputAction::ElementFormation
 	};
 	for (ESlimeInputAction Action : NewActions)
 	{
-		if (!Keys.Contains(Action) || !GetKey(Action).IsValid())
+		if (!Keys.Contains(Action))
 		{
 			Keys.Add(Action, GetDefaultKey(Action));
+		}
+	}
+
+	// v6: 1–6 = formation elements; Tab = hotbar wheel; release digit keys from hotbar defaults.
+	if (Version < 6)
+	{
+		const ESlimeInputAction Hotbars[] = {
+			ESlimeInputAction::Hotbar1, ESlimeInputAction::Hotbar2, ESlimeInputAction::Hotbar3,
+			ESlimeInputAction::Hotbar4, ESlimeInputAction::Hotbar5, ESlimeInputAction::Hotbar6
+		};
+		const FKey Digits[] = {
+			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six
+		};
+		for (int32 Index = 0; Index < 6; ++Index)
+		{
+			if (GetKey(Hotbars[Index]) == Digits[Index])
+			{
+				Keys.Add(Hotbars[Index], EKeys::Invalid);
+			}
+		}
+		Keys.Add(ESlimeInputAction::Element1, EKeys::One);
+		Keys.Add(ESlimeInputAction::Element2, EKeys::Two);
+		Keys.Add(ESlimeInputAction::Element3, EKeys::Three);
+		Keys.Add(ESlimeInputAction::Element4, EKeys::Four);
+		Keys.Add(ESlimeInputAction::Element5, EKeys::Five);
+		Keys.Add(ESlimeInputAction::Element6, EKeys::Six);
+		if (!GetKey(ESlimeInputAction::ElementFormation).IsValid())
+		{
+			Keys.Add(ESlimeInputAction::ElementFormation, EKeys::L);
 		}
 	}
 

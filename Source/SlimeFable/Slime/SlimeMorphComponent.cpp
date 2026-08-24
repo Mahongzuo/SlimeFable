@@ -991,8 +991,63 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 		return;
 	}
 
-	const FSlimeElementProfile Profile = Element->GetCurrentProfile();
-	auto Push = [&Profile](UMaterialInstanceDynamic* MID)
+	// Morph-only lift: thin translucent shells read darker than the jelly body.
+	// Fire/Lightning already have strong emissive — leave them alone.
+	FSlimeElementProfile Profile = Element->GetCurrentProfile();
+	float MorphBrightness = 1.35f;
+	float MorphRimBoost = 1.45f;
+	float MorphFillEmissive = 0.18f;
+
+	switch (Profile.Element)
+	{
+	case ESlimeElement::Water:
+	case ESlimeElement::Wind:
+	case ESlimeElement::Physical:
+		Profile.BaseColor *= 1.3f;
+		Profile.SubsurfaceColor *= 1.25f;
+		Profile.RimColor *= 1.35f;
+		Profile.BaseColor.A = 1.f;
+		Profile.SubsurfaceColor.A = 1.f;
+		Profile.RimColor.A = 1.f;
+		break;
+
+	case ESlimeElement::Dark:
+		Profile.BaseColor = FLinearColor(
+			FMath::Max(Profile.BaseColor.R * 1.8f, 0.18f),
+			FMath::Max(Profile.BaseColor.G * 1.8f, 0.18f),
+			FMath::Max(Profile.BaseColor.B * 2.0f, 0.28f),
+			1.f);
+		Profile.SubsurfaceColor = FLinearColor(
+			FMath::Max(Profile.SubsurfaceColor.R * 1.6f, 0.25f),
+			FMath::Max(Profile.SubsurfaceColor.G * 1.6f, 0.25f),
+			FMath::Max(Profile.SubsurfaceColor.B * 1.8f, 0.35f),
+			1.f);
+		Profile.RimColor = FLinearColor(
+			FMath::Max(Profile.RimColor.R * 1.7f, 0.45f),
+			FMath::Max(Profile.RimColor.G * 1.7f, 0.45f),
+			FMath::Max(Profile.RimColor.B * 1.9f, 0.55f),
+			1.f);
+		if (Profile.EmissiveColor.GetLuminance() < 0.05f)
+		{
+			Profile.EmissiveColor = Profile.RimColor;
+		}
+		Profile.EmissiveIntensity = FMath::Max(Profile.EmissiveIntensity, 0.45f);
+		Profile.RimPower = FMath::Clamp(Profile.RimPower, 1.f, 2.4f);
+		MorphBrightness = 1.45f;
+		MorphRimBoost = 1.55f;
+		MorphFillEmissive = 0.22f;
+		break;
+
+	case ESlimeElement::Fire:
+	case ESlimeElement::Lightning:
+	default:
+		MorphBrightness = 1.1f;
+		MorphRimBoost = 1.1f;
+		MorphFillEmissive = 0.05f;
+		break;
+	}
+
+	auto Push = [&Profile, MorphBrightness, MorphRimBoost, MorphFillEmissive](UMaterialInstanceDynamic* MID)
 	{
 		if (!MID)
 		{
@@ -1009,6 +1064,9 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 		MID->SetScalarParameterValue(SlimeMorphParams::FlowSpeed, Profile.FlowSpeed);
 		MID->SetScalarParameterValue(SlimeMorphParams::NoiseScale, Profile.NoiseScale);
 		MID->SetScalarParameterValue(SlimeMorphParams::RimPower, Profile.RimPower);
+		MID->SetScalarParameterValue(TEXT("MorphBrightness"), MorphBrightness);
+		MID->SetScalarParameterValue(TEXT("MorphRimBoost"), MorphRimBoost);
+		MID->SetScalarParameterValue(TEXT("MorphFillEmissive"), MorphFillEmissive);
 	};
 
 	for (UMaterialInstanceDynamic* MID : MorphMIDs)

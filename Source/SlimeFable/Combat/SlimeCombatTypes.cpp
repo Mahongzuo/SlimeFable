@@ -52,7 +52,7 @@ namespace
 		Kit.Combos = { A, B, C, D };
 	}
 
-	FLinearColor GetElementVfxColor(ESlimeElement Element)
+	FLinearColor ElementVfxColor(ESlimeElement Element)
 	{
 		switch (Element)
 		{
@@ -66,9 +66,58 @@ namespace
 		}
 	}
 
+	const TCHAR* MagicVfxPath(ESlimeElement Element)
+	{
+		switch (Element)
+		{
+		case ESlimeElement::Water: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magic_Big_Bubbles_Explosion.NS_Magic_Big_Bubbles_Explosion");
+		case ESlimeElement::Wind: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion.NS_Potion");
+		case ESlimeElement::Dark: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Owner_Cast_Spell.NS_Dark_Owner_Cast_Spell");
+		case ESlimeElement::Lightning: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Lightning_Owner_Cast.NS_Lightning_Owner_Cast");
+		case ESlimeElement::Physical: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Stone_Impact.NS_Dark_Stone_Impact");
+		case ESlimeElement::Fire: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Gelmir_Wizard_Impact.NS_Gelmir_Wizard_Impact");
+		default: return TEXT("");
+		}
+	}
+
+	const TCHAR* RSkillVfxPath(ESlimeElement Element)
+	{
+		switch (Element)
+		{
+		case ESlimeElement::Fire: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magma_Shot.NS_Magma_Shot");
+		case ESlimeElement::Water: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Crystal_Torrent.NS_Crystal_Torrent");
+		case ESlimeElement::Wind: return TEXT("/Game/RPGEffects/ParticlesNiagara/Priest/Beam/NS_Priest_Beam.NS_Priest_Beam");
+		case ESlimeElement::Lightning: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Lightning_Strike.NS_Lightning_Strike");
+		case ESlimeElement::Physical: return TEXT("/Game/RPGEffects/ParticlesNiagara/Archer/ArrowHail/NS_Archer_Arrow_Hail.NS_Archer_Arrow_Hail");
+		case ESlimeElement::Dark: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Mist.NS_Dark_Mist");
+		default: return TEXT("");
+		}
+	}
+
 	void ConfigureSkillVfx(FSlimeSkillDef& Skill)
 	{
-		Skill.VfxColor = GetElementVfxColor(Skill.Element);
+		if (Skill.Slot == ESlimeSkillSlot::Combo4
+			|| Skill.Slot == ESlimeSkillSlot::Skill1
+			|| Skill.Slot == ESlimeSkillSlot::Skill2
+			|| Skill.Slot == ESlimeSkillSlot::Skill3)
+		{
+			Skill.NiagaraSystem = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(MagicVfxPath(Skill.Element)));
+			Skill.ImpactNiagaraSystem = Skill.NiagaraSystem;
+		}
+		if (Skill.Slot == ESlimeSkillSlot::Skill3)
+		{
+			Skill.NiagaraSystem = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(RSkillVfxPath(Skill.Element)));
+			Skill.ImpactNiagaraSystem = Skill.NiagaraSystem;
+			if (Skill.Element == ESlimeElement::Water
+				|| Skill.Element == ESlimeElement::Physical
+				|| Skill.Element == ESlimeElement::Dark)
+			{
+				// These systems author their effect along local +X; align that axis
+				// with the slime's current facing direction.
+				Skill.VfxRotationPolicy = ESlimeVfxRotationPolicy::Owner;
+			}
+		}
+		Skill.VfxColor = ElementVfxColor(Skill.Element);
 		Skill.VfxMinVisibleTime = 0.5f;
 		Skill.VfxLocationOffset = FVector(0.f, 0.f, 10.f);
 		Skill.VfxRotationPolicy = ESlimeVfxRotationPolicy::Aim;
@@ -97,10 +146,7 @@ namespace
 			break;
 		}
 
-		if (Skill.Element == ESlimeElement::Dark && Skill.Slot == ESlimeSkillSlot::Skill2)
-		{
-			Skill.VfxHardLifetime = 1.8f;
-		}
+		Skill.VfxHardLifetime = 4.8f;
 	}
 
 	void ConfigureKitVfx(FSlimeElementKitData& Kit)
@@ -361,3 +407,27 @@ void SlimeCombat::FillDefaultReactions(TArray<FSlimeReactionRow>& OutRows)
 	Add(ESlimeElement::Physical, ESlimeElement::Dark, ESlimeReactionKind::BreakPoise, 8.f, 0.f, 0.f, false, false, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Impact.NS_Slime_Physical_Impact"));
 	Add(ESlimeElement::Physical, ESlimeElement::Wind, ESlimeReactionKind::BreakPoise, 8.f, 0.f, 0.f, false, false, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Impact.NS_Slime_Physical_Impact"));
 }
+
+FLinearColor SlimeCombat::GetElementVfxColor(ESlimeElement Element)
+{
+	return ElementVfxColor(Element);
+}
+
+FText SlimeCombat::GetReactionDisplayName(ESlimeReactionKind Kind)
+{
+	switch (Kind)
+	{
+	case ESlimeReactionKind::Vaporize: return FText::FromString(TEXT("蒸发"));
+	case ESlimeReactionKind::ElectroCharge: return FText::FromString(TEXT("感电"));
+	case ESlimeReactionKind::MistSpread: return FText::FromString(TEXT("雾散"));
+	case ESlimeReactionKind::Overload: return FText::FromString(TEXT("超载"));
+	case ESlimeReactionKind::Combustion: return FText::FromString(TEXT("燃烧"));
+	case ESlimeReactionKind::Cinder: return FText::FromString(TEXT("余烬"));
+	case ESlimeReactionKind::LightningSwirl: return FText::FromString(TEXT("雷涡"));
+	case ESlimeReactionKind::VoidShock: return FText::FromString(TEXT("虚空震"));
+	case ESlimeReactionKind::MurkTide: return FText::FromString(TEXT("浑潮"));
+	case ESlimeReactionKind::BreakPoise: return FText::FromString(TEXT("破势"));
+	default: return FText::FromString(TEXT("反应"));
+	}
+}
+

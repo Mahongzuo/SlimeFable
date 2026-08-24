@@ -12,6 +12,7 @@
 #include "SlimeBodyComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
+#include "EnemyCharacter.h"
 #include "SlimeFable.h"
 #include "TimerManager.h"
 
@@ -80,6 +81,10 @@ float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, con
 		if (USlimeElementComponent* Element = Owner->FindComponentByClass<USlimeElementComponent>())
 		{
 			Element->PlayHitFlash();
+		}
+		else if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+		{
+			Enemy->PlayHitFlash();
 		}
 		if (USlimeBodyComponent* Body = Owner->FindComponentByClass<USlimeBodyComponent>())
 		{

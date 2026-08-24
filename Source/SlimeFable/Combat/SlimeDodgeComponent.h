@@ -8,6 +8,7 @@
 
 class USlimeHealthComponent;
 class ASlimeDodgeAfterimage;
+class USoundBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBlinkDashRequested);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPerfectDodge);
@@ -42,6 +43,14 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Dodge")
 	FOnPerfectDodge OnPerfectDodge;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "安全区右键闪现。空则 /Game/Audio/SFX/Movement/sfx_blink_01。"))
+	TSoftObjectPtr<USoundBase> BlinkDashSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "完美闪避。空则 /Game/Audio/SFX/Combat/sfx_perfect_dodge_01。"))
+	TSoftObjectPtr<USoundBase> PerfectDodgeSound;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge", meta = (ClampMin = "1.0", Units = "cm"))
 	float RollDistance = 200.f;

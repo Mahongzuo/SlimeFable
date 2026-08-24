@@ -152,6 +152,8 @@ void ASlimeDodgeAfterimage::CaptureFromSlime(USlimeBodyComponent* Body, float Li
 	RimColor = FMath::Lerp(RimColor, FLinearColor::White, GhostLighten * 0.5f);
 	Opacity = FMath::Clamp(Opacity * GhostOpacityScale, 0.05f, 1.f);
 	EmissiveIntensity *= GhostEmissiveScale;
+	// No PNO offset on ghosts — Distortion stacks badly with multiple afterimages.
+	Refraction = 1.f;
 
 	Mesh->SetMaterial(0, BaseMat);
 	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
@@ -164,6 +166,7 @@ void ASlimeDodgeAfterimage::CaptureFromSlime(USlimeBodyComponent* Body, float Li
 		MID->SetScalarParameterValue(TEXT("EmissiveIntensity"), EmissiveIntensity);
 		MID->SetScalarParameterValue(TEXT("Roughness"), Roughness);
 		MID->SetScalarParameterValue(TEXT("Refraction"), Refraction);
+		MID->SetScalarParameterValue(TEXT("EnableRefraction"), 0.f);
 	}
 
 	Mesh->SetVisibility(true);

@@ -14,7 +14,9 @@ class UInputAction;
 class UInputMappingContext;
 class USlimeBodyComponent;
 class USlimeElementComponent;
-class USlimeElementWheelWidget;
+class USlimeHotbarWheelWidget;
+class USlimeElementFormationWidget;
+class USlimeHotbarConfirmWidget;
 class USlimeMorphComponent;
 struct FInputActionValue;
 
@@ -66,11 +68,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> LaunchAction;
 
-	/** Tab: hold to open the element wheel. */
+	/** Tab: hold to open the hotbar wheel. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> ElementWheelAction;
 
-	/** Mouse wheel axis: steps the element selection while the wheel is open. */
+	/** Mouse wheel axis: steps hotbar selection while the wheel is open. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> ElementCycleAction;
 
@@ -110,14 +112,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch")
 	bool bDrawTrajectoryPreview = true;
 
-	// ---- Element wheel ---------------------------------------------------------------
+	// ---- Hotbar wheel (Tab) ----------------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Wheel")
-	TSubclassOf<USlimeElementWheelWidget> WheelWidgetClass;
+	TSubclassOf<USlimeHotbarWheelWidget> WheelWidgetClass;
 
 	/** Optional Blueprint shell for the wheel, used when WheelWidgetClass is unset. */
 	UPROPERTY(EditAnywhere, Category = "Slime|Wheel")
-	TSoftClassPtr<USlimeElementWheelWidget> WheelWidgetClassPath;
+	TSoftClassPtr<USlimeHotbarWheelWidget> WheelWidgetClassPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Formation")
+	TSubclassOf<USlimeElementFormationWidget> FormationWidgetClass;
 
 	/** Minimum gap between wheel steps so one flick of the wheel moves exactly one slot. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Wheel", meta = (ClampMin = "0.0", ClampMax = "0.5"))
@@ -130,6 +135,9 @@ public:
 	float WheelTimeDilation = 0.3f;
 
 	// ---- Queries ---------------------------------------------------------------------
+
+	void CloseFormation();
+	void CloseHotbarConfirm();
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsChargingLaunch() const { return bCharging; }
@@ -168,6 +176,9 @@ private:
 
 	void OpenWheel();
 	void CloseWheel(bool bCommit);
+	void OpenFormation();
+	void OpenHotbarConfirm(int32 SlotIndex);
+	void TrySwitchOrderedElement(int32 SlotIndex);
 	void BeginLaunchCharge();
 	void ReleaseLaunchCharge();
 	void AdjustLaunchRange(int32 Step);
@@ -185,7 +196,13 @@ private:
 	TObjectPtr<USlimeElementComponent> Element;
 
 	UPROPERTY(Transient)
-	TObjectPtr<USlimeElementWheelWidget> WheelWidget;
+	TObjectPtr<USlimeHotbarWheelWidget> WheelWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeElementFormationWidget> FormationWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeHotbarConfirmWidget> HotbarConfirmWidget;
 
 	FSlimeLaunchPath PendingLaunchPath;
 	float LaunchExtraArcHeight = 80.f;
@@ -196,11 +213,13 @@ private:
 
 	bool bCharging = false;
 	bool bWheelOpen = false;
+	int32 HotbarWheelSlot = 0;
 
 	/** Edge tracking for Tick polling (mirrors hold/release abilities). */
 	bool bPollFlattenDown = false;
 	bool bPollAbsorbDown = false;
 	bool bPollLaunchDown = false;
+	bool bPollLaunchKey = true;
 	bool bPollWheelDown = false;
 	bool bPollMorphDown = false;
 	float MorphHoldSeconds = 0.f;

@@ -20,10 +20,45 @@
 #include "Settings/SlimeInputSettings.h"
 #include "Engine/GameInstance.h"
 #include "InputCoreTypes.h"
+#include "Sound/SoundBase.h"
+#include "Settings/SlimeAudioPlay.h"
+
+namespace SlimeDodgeAudio
+{
+	static const TCHAR* DefaultBlink = TEXT("/Game/Audio/SFX/Movement/sfx_blink_01.sfx_blink_01");
+	static const TCHAR* DefaultPerfect = TEXT("/Game/Audio/SFX/Combat/sfx_perfect_dodge_01.sfx_perfect_dodge_01");
+
+	USoundBase* Resolve(const TSoftObjectPtr<USoundBase>& Soft, const TCHAR* Fallback)
+	{
+		if (!Soft.IsNull())
+		{
+			if (USoundBase* Loaded = Soft.LoadSynchronous())
+			{
+				return Loaded;
+			}
+		}
+		return LoadObject<USoundBase>(nullptr, Fallback);
+	}
+
+	void PlayAtOwner(const UActorComponent* Comp, const TSoftObjectPtr<USoundBase>& Soft, const TCHAR* Fallback)
+	{
+		AActor* Owner = Comp ? Comp->GetOwner() : nullptr;
+		if (!Owner)
+		{
+			return;
+		}
+		if (USoundBase* Sfx = Resolve(Soft, Fallback))
+		{
+			SlimeAudioPlay::PlaySfxAt(Owner, Sfx, Owner->GetActorLocation());
+		}
+	}
+}
 
 USlimeDodgeComponent::USlimeDodgeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	BlinkDashSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeDodgeAudio::DefaultBlink));
+	PerfectDodgeSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeDodgeAudio::DefaultPerfect));
 }
 
 void USlimeDodgeComponent::BeginPlay()
@@ -198,6 +233,7 @@ void USlimeDodgeComponent::TryHandleRightClick()
 	}
 	if (!IsInEnemyThreatRange())
 	{
+		SlimeDodgeAudio::PlayAtOwner(this, BlinkDashSound, SlimeDodgeAudio::DefaultBlink);
 		OnBlinkDashRequested.Broadcast();
 		return;
 	}
@@ -268,6 +304,7 @@ void USlimeDodgeComponent::PerformPerfectDodge()
 	}
 
 	PerformCombatRoll();
+	SlimeDodgeAudio::PlayAtOwner(this, PerfectDodgeSound, SlimeDodgeAudio::DefaultPerfect);
 	OnPerfectDodge.Broadcast();
 }
 

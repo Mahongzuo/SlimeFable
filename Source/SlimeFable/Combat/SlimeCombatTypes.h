@@ -213,7 +213,7 @@ struct SLIMEFABLE_API FSlimeSkillDef
 		meta = (ClampMin = "0.0", Units = "s", ToolTip = "循环特效的强制回收上限；0 表示完全由 Niagara Auto Destroy 管理。"))
 	float VfxHardLifetime = 0.f;
 
-	float GetTotalDuration() const { return Windup + Recovery; }
+	float GetTotalDuration() const { return FMath::Max(HitEnd, Windup) + Recovery; }
 };
 
 USTRUCT(BlueprintType)
@@ -305,4 +305,6 @@ namespace SlimeCombat
 	SLIMEFABLE_API FSlimeCombatPoseState MakePose(ESlimeCombatPose Pose, const FVector& Forward, float Strength = 1.f);
 	SLIMEFABLE_API FSlimeElementKitData MakeDefaultKit(ESlimeElement Element);
 	SLIMEFABLE_API void FillDefaultReactions(TArray<FSlimeReactionRow>& OutRows);
+	SLIMEFABLE_API FLinearColor GetElementVfxColor(ESlimeElement Element);
+	SLIMEFABLE_API FText GetReactionDisplayName(ESlimeReactionKind Kind);
 }

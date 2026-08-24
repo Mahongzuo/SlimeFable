@@ -20,6 +20,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "SlimeVehicleComponent.h"
+#include "SlimeFablePlayerController.h"
 
 USlimeLockOnComponent::USlimeLockOnComponent()
 {
@@ -51,6 +52,9 @@ void USlimeLockOnComponent::BindInput(UEnhancedInputComponent* EnhancedInput)
 	if (EnhancedInput && LockOnAction)
 	{
 		EnhancedInput->BindAction(LockOnAction, ETriggerEvent::Started, this, &USlimeLockOnComponent::ToggleLockOn);
+		bLockOnActionBound = true;
+		// Enhanced Input already owns the press edge — polling the same MiddleMouse would double-toggle.
+		bPollLockOnKey = false;
 	}
 }
 
@@ -63,6 +67,12 @@ APlayerController* USlimeLockOnComponent::GetPlayerController() const
 	return nullptr;
 }
 
+bool USlimeLockOnComponent::CanAcquireLock() const
+{
+	const UWorld* World = GetWorld();
+	return !World || World->GetTimeSeconds() >= RelockBlockUntil;
+}
+
 void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -73,7 +83,7 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		return;
 	}
 
-	if (bPollLockOnKey)
+	if (bPollLockOnKey && !bLockOnActionBound)
 	{
 		if (APlayerController* PC = GetPlayerController())
 		{
@@ -88,16 +98,19 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			}
 			if (InputSettings)
 			{
-				bDown = InputSettings->WasKeyPressed(PC, ESlimeInputAction::LockOn);
+				bDown = InputSettings->IsKeyDown(PC, ESlimeInputAction::LockOn);
 			}
 			else
 			{
-				bDown = PC->WasInputKeyJustPressed(EKeys::MiddleMouseButton);
+				bDown = PC->IsInputKeyDown(EKeys::MiddleMouseButton);
 			}
-			if (bDown)
+
+			// Rising edge only — WasInputKeyJustPressed can fire two frames on MMB.
+			if (bDown && !bPollLockDown)
 			{
 				ToggleLockOn();
 			}
+			bPollLockDown = bDown;
 		}
 	}
 
@@ -138,8 +151,23 @@ void USlimeLockOnComponent::ToggleLockOn()
 		return;
 	}
 
+	if (!CanAcquireLock())
+	{
+		return;
+	}
+
 	if (const AActor* Owner = GetOwner())
 	{
+		if (const APawn* OwnerPawn = Cast<APawn>(Owner))
+		{
+			if (const ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(OwnerPawn->GetController()))
+			{
+				if (SlimePC->HasModalUI())
+				{
+					return;
+				}
+			}
+		}
 		if (const USlimeVehicleComponent* Vehicle = Owner->FindComponentByClass<USlimeVehicleComponent>())
 		{
 			if (Vehicle->IsUsingVehicle())
@@ -170,6 +198,7 @@ void USlimeLockOnComponent::ToggleLockOn()
 
 void USlimeLockOnComponent::ClearLockOn()
 {
+	const bool bHadLock = LockedTarget.IsValid();
 	LockedTarget.Reset();
 	LockedHealth.Reset();
 	RestoreMovement();
@@ -180,6 +209,13 @@ void USlimeLockOnComponent::ClearLockOn()
 		Rot.Pitch = 0.f;
 		Rot.Roll = 0.f;
 		PC->SetControlRotation(Rot);
+	}
+	if (bHadLock)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			RelockBlockUntil = World->GetTimeSeconds() + FMath::Max(RelockCooldown, 0.f);
+		}
 	}
 }
 

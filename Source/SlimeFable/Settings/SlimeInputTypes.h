@@ -17,7 +17,7 @@ enum class ESlimeInputAction : uint8
 	Absorb UMETA(DisplayName = "吸收/召回"),
 	ResetBody UMETA(DisplayName = "重置身体"),
 	Launch UMETA(DisplayName = "发射"),
-	ElementWheel UMETA(DisplayName = "元素轮盘"),
+	ElementWheel UMETA(DisplayName = "快捷栏轮盘"),
 	Attack UMETA(DisplayName = "攻击"),
 	Skill1 UMETA(DisplayName = "技能1"),
 	Skill2 UMETA(DisplayName = "技能2"),
@@ -35,5 +35,12 @@ enum class ESlimeInputAction : uint8
 	Morph UMETA(DisplayName = "幻形"),
 	Dodge UMETA(DisplayName = "闪避"),
 	ShowCursor UMETA(DisplayName = "显示鼠标"),
+	Element1 UMETA(DisplayName = "属性1"),
+	Element2 UMETA(DisplayName = "属性2"),
+	Element3 UMETA(DisplayName = "属性3"),
+	Element4 UMETA(DisplayName = "属性4"),
+	Element5 UMETA(DisplayName = "属性5"),
+	Element6 UMETA(DisplayName = "属性6"),
+	ElementFormation UMETA(DisplayName = "属性编队"),
 	COUNT UMETA(Hidden)
 };

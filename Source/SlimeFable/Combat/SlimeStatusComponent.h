@@ -8,6 +8,8 @@
 #include "SlimeStatusComponent.generated.h"
 
 class UNiagaraSystem;
+class UWidgetComponent;
+class USlimeAuraMarkerWidget;
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
 class SLIMEFABLE_API USlimeStatusComponent : public UActorComponent
@@ -17,6 +19,7 @@ class SLIMEFABLE_API USlimeStatusComponent : public UActorComponent
 public:
 	USlimeStatusComponent();
 
+	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -34,10 +37,33 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void ClearAllAuras();
 
+	UPROPERTY(Transient)
+	TMap<ESlimeElement, float> AuraRemaining;
+
+	/** After a reaction: blended color flash duration (no single-element aura). */
+	UPROPERTY(Transient)
+	float ReactionResidueRemaining = 0.f;
+
+	UPROPERTY(Transient)
+	FLinearColor ReactionResidueColor = FLinearColor::White;
+
+	UPROPERTY(Transient)
+	ESlimeReactionKind ReactionResidueKind = ESlimeReactionKind::Vaporize;
+
+	void RefreshAuraMarker();
+
 private:
 	void TriggerReaction(ESlimeElement Incoming, ESlimeElement Existing, AActor* Instigator);
 	void ApplyReactionRow(const FSlimeReactionRow& Row, AActor* Instigator);
+	void EnsureAuraMarker();
+	void ClearReactionResidue();
+	void BeginReactionResidue(ESlimeElement A, ESlimeElement B, ESlimeReactionKind Kind, float Duration = 8.f);
+	void SyncOwnerAuraFlash();
 
 	UPROPERTY(Transient)
-	TMap<ESlimeElement, float> AuraRemaining;
+	TObjectPtr<UWidgetComponent> AuraMarker;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Combat",
+		meta = (ToolTip = "附着标记相对角色原点的高度（厘米）。默认 95。"))
+	float AuraMarkerZOffset = 95.f;
 };

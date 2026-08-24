@@ -4,6 +4,7 @@
 #include "UI/MenuUIStyle.h"
 #include "Settings/SlimeGraphicsSettings.h"
 #include "Settings/SlimeGraphicsTypes.h"
+#include "SlimeFablePlayerController.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -388,5 +389,9 @@ void UGraphicsSettingsWidget::OnBackClicked()
 	if (UUserWidget* Target = ReturnTarget.Get())
 	{
 		Target->SetVisibility(ESlateVisibility::Visible);
+		if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayer()))
+		{
+			PC->RetargetUIFocus(Target);
+		}
 	}
 }
