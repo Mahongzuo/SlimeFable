@@ -20,6 +20,7 @@ namespace SlimeElementParams
 	static const FName Opacity(TEXT("Opacity"));
 	static const FName Roughness(TEXT("Roughness"));
 	static const FName Refraction(TEXT("Refraction"));
+	static const FName EnableRefraction(TEXT("EnableRefraction"));
 	static const FName FlowSpeed(TEXT("FlowSpeed"));
 	static const FName NoiseScale(TEXT("NoiseScale"));
 	static const FName RimPower(TEXT("RimPower"));
@@ -226,6 +227,7 @@ void USlimeElementComponent::ApplyProfileToMaterial(const FSlimeElementProfile& 
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, Profile.Opacity * OpacityScale);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Roughness, Profile.Roughness);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Refraction, Profile.Refraction);
+		BodyMaterial->SetScalarParameterValue(SlimeElementParams::EnableRefraction, 0.f);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::FlowSpeed, Profile.FlowSpeed);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::NoiseScale, Profile.NoiseScale);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::RimPower, Profile.RimPower);

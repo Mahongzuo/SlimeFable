@@ -44,7 +44,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.EmissiveIntensity = 0.f;
 		Profile.Opacity = 0.62f;
 		Profile.Roughness = 0.18f;
-		Profile.Refraction = 1.08f;
+		Profile.Refraction = 1.16f;
 		Profile.FlowSpeed = 0.35f;
 		Profile.NoiseScale = 3.f;
 		Profile.RimPower = 2.6f;
@@ -60,7 +60,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.EmissiveIntensity = 0.f;
 		Profile.Opacity = 0.6f;
 		Profile.Roughness = 0.15f;
-		Profile.Refraction = 1.04f;
+		Profile.Refraction = 1.12f;
 		Profile.FlowSpeed = 1.1f;
 		Profile.NoiseScale = 2.2f;
 		Profile.RimPower = 1.8f;
@@ -76,7 +76,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.EmissiveIntensity = 1.6f;
 		Profile.Opacity = 0.58f;
 		Profile.Roughness = 0.3f;
-		Profile.Refraction = 1.06f;
+		Profile.Refraction = 1.14f;
 		Profile.FlowSpeed = 0.7f;
 		Profile.NoiseScale = 3.4f;
 		Profile.RimPower = 2.2f;
@@ -92,7 +92,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.EmissiveIntensity = 2.2f;
 		Profile.Opacity = 0.58f;
 		Profile.Roughness = 0.22f;
-		Profile.Refraction = 1.07f;
+		Profile.Refraction = 1.15f;
 		Profile.FlowSpeed = 1.4f;
 		Profile.NoiseScale = 5.5f;
 		Profile.RimPower = 2.f;
@@ -108,7 +108,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.EmissiveIntensity = 0.25f;
 		Profile.Opacity = 0.55f;
 		Profile.Roughness = 0.35f;
-		Profile.Refraction = 1.1f;
+		Profile.Refraction = 1.18f;
 		Profile.FlowSpeed = 0.25f;
 		Profile.NoiseScale = 2.6f;
 		// High power so the rim stays a thin edge and the body keeps swallowing light.
@@ -126,7 +126,7 @@ FSlimeElementProfile USlimeElementDataAsset::MakeDefaultProfile(ESlimeElement El
 		Profile.EmissiveIntensity = 0.f;
 		Profile.Opacity = 0.6f;
 		Profile.Roughness = 0.55f;
-		Profile.Refraction = 1.02f;
+		Profile.Refraction = 1.08f;
 		Profile.FlowSpeed = 0.08f;
 		Profile.NoiseScale = 8.f;
 		Profile.RimPower = 3.4f;

@@ -45,6 +45,7 @@ description: >-
 
 ## 强制约束
 
+- **搜资产以本机目录为准**：`Content/` 在 `.gitignore` 中，Grep/Glob 会跳过并报 0，**不等于盘上没有**。找 WBP / uasset / 贴图 / Python 脚本时，对本机路径列目录（PowerShell `Get-ChildItem -Path E:\UE\SlimeFable\Content -Recurse -Filter *Inventory*`，或 Python `os.walk`）。禁止用 Grep 无结果或 git status 未列出判断资产不存在；git 只约束是否提交。
 - **先读再改**：未读本 spec（及任务相关 skill）不得批量改 Content/Source。
 - **MCP 串行**：Tool 在游戏线程串行执行；禁止并行叠 MCP 调用。
 - **批量建关**：用 `Content/Python/create_day_levels.py`，禁止用 MCP 逐个创建 366 关。

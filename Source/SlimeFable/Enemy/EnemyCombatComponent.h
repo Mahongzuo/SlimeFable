@@ -40,6 +40,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.0"))
 	float AttackPower = 12.f;
 
+	/** Extra seconds after Windup+HitStart before damage fires (aligns hit with montage contact). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.0", Units = "s",
+		ToolTip = "命中相对招表 Windup+HitStart 再推迟多少秒，用来对齐攻击动画出手帧。默认 0.8。"))
+	float GlobalHitDelay = 0.5f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat")
 	FName MuzzleSocket = NAME_None;
 
@@ -49,6 +54,7 @@ protected:
 	void TickAction(float DeltaTime);
 	void FinishAction();
 	void FireHit();
+	float GetHitFireTime() const;
 	void ExecuteDash(const FEnemySkillDef& Def, const FVector& Forward);
 	void ExecuteProjectile(const FEnemySkillDef& Def, const FVector& Forward);
 	void SpawnVfx(const TSoftObjectPtr<UNiagaraSystem>& SoftSystem, const FVector& Location) const;

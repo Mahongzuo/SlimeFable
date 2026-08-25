@@ -43,6 +43,7 @@
 #include "SlimeHealthComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeLockOnComponent.h"
+#include "SlimeCombatTypes.h"
 #include "SlimeWorldHealthBar.h"
 #include "Inventory/SlimeItemDefinition.h"
 #include "Engine/GameInstance.h"
@@ -96,6 +97,10 @@ AEnemyCharacter::AEnemyCharacter()
 		FSoftObjectPath(TEXT("/Game/_Slime/FX/M_EnemyDeathDissolve.M_EnemyDeathDissolve")));
 	HitFlashMaterial = TSoftObjectPtr<UMaterialInterface>(
 		FSoftObjectPath(TEXT("/Game/_Slime/FX/M_EnemyHitFlash.M_EnemyHitFlash")));
+	LightningHitOverlay = TSoftObjectPtr<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/NiagaraExamples/Materials/MI_Mesh_Overlay_TeslaCoil_Player.MI_Mesh_Overlay_TeslaCoil_Player")));
+	WindHitOverlay = TSoftObjectPtr<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/_Slime/FX/MI_EnemyHitOverlay_Wind.MI_EnemyHitOverlay_Wind")));
 	SouvenirDropClass = TSoftClassPtr<AActor>(
 		FSoftObjectPath(TEXT("/Game/_Slime/Days/08/0815/Y1945/Actors/BP_0815_Souvenir_1945.BP_0815_Souvenir_1945_C")));
 
@@ -818,6 +823,12 @@ void AEnemyCharacter::PlayHitFlash()
 		return;
 	}
 
+	// Specialty aura overlays do not expose HitFlash — leave them alone during damage pulses.
+	if (bAuraFlashActive && !bAuraOverlayUsesHitFlashParams)
+	{
+		return;
+	}
+
 	if (!HitFlashMID || HitFlashMID->Parent != FlashMat)
 	{
 		HitFlashMID = UMaterialInstanceDynamic::Create(FlashMat, this);
@@ -841,16 +852,17 @@ void AEnemyCharacter::PlayHitFlash()
 	// If an aura flash is already running, only pulse intensity — do not reset to short red hit.
 	if (bAuraFlashActive)
 	{
-		HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), 1.f);
+		DriveAuraOverlayIntensity(1.f);
 		return;
 	}
 
+	bAuraOverlayUsesHitFlashParams = true;
 	HitFlashStartTime = World ? World->GetTimeSeconds() : 0.f;
 	ActiveFlashDuration = HitFlashDuration;
 	ActiveFlashFrequency = HitFlashFrequency;
 	bAuraFlashActive = false;
 	HitFlashRemaining = ActiveFlashDuration;
-	HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), 1.f);
+	DriveAuraOverlayIntensity(1.f);
 
 	if (World)
 	{
@@ -866,10 +878,125 @@ void AEnemyCharacter::PlayHitFlash()
 
 void AEnemyCharacter::PlayElementHitFlash(FLinearColor FlashColor)
 {
-	PlayElementAuraFlash(FlashColor, 8.f);
+	PlayElementAuraFlashByColor(FlashColor, 8.f);
 }
 
-void AEnemyCharacter::PlayElementAuraFlash(FLinearColor FlashColor, float Duration)
+UMaterialInterface* AEnemyCharacter::ResolveElementHitOverlay(ESlimeElement Element) const
+{
+	switch (Element)
+	{
+	case ESlimeElement::Lightning:
+		if (UMaterialInterface* Lightning = LightningHitOverlay.LoadSynchronous())
+		{
+			return Lightning;
+		}
+		break;
+	case ESlimeElement::Wind:
+		if (UMaterialInterface* Wind = WindHitOverlay.LoadSynchronous())
+		{
+			return Wind;
+		}
+		break;
+	default:
+		break;
+	}
+	return HitFlashMaterial.LoadSynchronous();
+}
+
+void AEnemyCharacter::BeginAuraOverlay(UMaterialInterface* FlashMat, bool bUsesHitFlashParams, float Duration)
+{
+	if (!FlashMat)
+	{
+		return;
+	}
+
+	if (!HitFlashMID || HitFlashMID->Parent != FlashMat)
+	{
+		HitFlashMID = UMaterialInstanceDynamic::Create(FlashMat, this);
+	}
+	if (!HitFlashMID)
+	{
+		return;
+	}
+
+	bAuraOverlayUsesHitFlashParams = bUsesHitFlashParams;
+	if (!bUsesHitFlashParams)
+	{
+		float Mul = 2.f;
+		FlashMat->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Opacity Multiplier")), Mul);
+		AuraOverlayOpacityMul = Mul > KINDA_SMALL_NUMBER ? Mul : 2.f;
+	}
+
+	const UWorld* World = GetWorld();
+	HitFlashStartTime = World ? World->GetTimeSeconds() : 0.f;
+	ActiveFlashDuration = Duration;
+	bAuraFlashActive = true;
+	HitFlashRemaining = ActiveFlashDuration;
+	DriveAuraOverlayIntensity(1.f);
+	ApplyHitFlashToAllMeshes();
+
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(HitFlashTimer);
+		World->GetTimerManager().SetTimer(
+			HitFlashTimer,
+			this,
+			&AEnemyCharacter::TickHitFlash,
+			0.016f,
+			true);
+	}
+}
+
+void AEnemyCharacter::DriveAuraOverlayIntensity(float Pulse)
+{
+	if (!HitFlashMID)
+	{
+		return;
+	}
+	if (bAuraOverlayUsesHitFlashParams)
+	{
+		HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), Pulse);
+	}
+	else
+	{
+		HitFlashMID->SetScalarParameterValue(TEXT("Opacity Multiplier"), AuraOverlayOpacityMul * Pulse);
+	}
+	HitFlashMID->SetScalarParameterValue(TEXT("HitTime"), HitFlashStartTime);
+}
+
+void AEnemyCharacter::PlayElementAuraFlash(ESlimeElement Element, float Duration)
+{
+	if (bDeathSequence || DeathDissolveElapsed > 0.f)
+	{
+		return;
+	}
+	if (Duration <= KINDA_SMALL_NUMBER)
+	{
+		ClearElementAuraFlash();
+		return;
+	}
+
+	UMaterialInterface* FlashMat = ResolveElementHitOverlay(Element);
+	if (!FlashMat)
+	{
+		return;
+	}
+
+	const bool bUsesHitParams =
+		FlashMat == HitFlashMaterial.LoadSynchronous()
+		|| Element == ESlimeElement::Water
+		|| Element == ESlimeElement::Fire
+		|| Element == ESlimeElement::Dark
+		|| Element == ESlimeElement::Physical;
+
+	BeginAuraOverlay(FlashMat, bUsesHitParams, Duration);
+	if (HitFlashMID && bUsesHitParams)
+	{
+		HitFlashMID->SetVectorParameterValue(TEXT("HitColor"), SlimeCombat::GetElementVfxColor(Element));
+	}
+}
+
+void AEnemyCharacter::PlayElementAuraFlashByColor(FLinearColor FlashColor, float Duration)
 {
 	if (bDeathSequence || DeathDissolveElapsed > 0.f)
 	{
@@ -887,33 +1014,10 @@ void AEnemyCharacter::PlayElementAuraFlash(FLinearColor FlashColor, float Durati
 		return;
 	}
 
-	if (!HitFlashMID || HitFlashMID->Parent != FlashMat)
+	BeginAuraOverlay(FlashMat, true, Duration);
+	if (HitFlashMID)
 	{
-		HitFlashMID = UMaterialInstanceDynamic::Create(FlashMat, this);
-	}
-	if (!HitFlashMID)
-	{
-		return;
-	}
-
-	const UWorld* World = GetWorld();
-	HitFlashStartTime = World ? World->GetTimeSeconds() : 0.f;
-	ActiveFlashDuration = Duration;
-	bAuraFlashActive = true;
-	HitFlashRemaining = ActiveFlashDuration;
-	HitFlashMID->SetVectorParameterValue(TEXT("HitColor"), FlashColor);
-	HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), 1.f);
-	ApplyHitFlashToAllMeshes();
-
-	if (World)
-	{
-		World->GetTimerManager().ClearTimer(HitFlashTimer);
-		World->GetTimerManager().SetTimer(
-			HitFlashTimer,
-			this,
-			&AEnemyCharacter::TickHitFlash,
-			0.016f,
-			true);
+		HitFlashMID->SetVectorParameterValue(TEXT("HitColor"), FlashColor);
 	}
 }
 
@@ -976,6 +1080,7 @@ void AEnemyCharacter::ClearHitFlashOverlay()
 	ClearHitFlashFromMeshes();
 	HitFlashMID = nullptr;
 	bAuraFlashActive = false;
+	bAuraOverlayUsesHitFlashParams = true;
 }
 
 void AEnemyCharacter::TickHitFlash()
@@ -1011,7 +1116,7 @@ void AEnemyCharacter::TickHitFlash()
 		if (bOn)
 		{
 			ApplyHitFlashToAllMeshes();
-			HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), Pulse);
+			DriveAuraOverlayIntensity(Pulse);
 		}
 		else
 		{
@@ -1021,10 +1126,9 @@ void AEnemyCharacter::TickHitFlash()
 	else
 	{
 		Pulse = Envelope * FMath::Abs(FMath::Sin(Age * ActiveFlashFrequency * PI));
-		HitFlashMID->SetScalarParameterValue(TEXT("HitFlash"), Pulse);
+		DriveAuraOverlayIntensity(Pulse);
 	}
 
-	HitFlashMID->SetScalarParameterValue(TEXT("HitTime"), HitFlashStartTime);
 	HitFlashRemaining = Envelope * Duration;
 
 	if (Envelope <= KINDA_SMALL_NUMBER)

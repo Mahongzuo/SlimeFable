@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeCombatComponent.h"
+#include "SlimePathSwordComponent.h"
 
 #include "EnhancedInputComponent.h"
 #include "GameFramework/Character.h"
@@ -813,12 +814,29 @@ bool USlimeCombatComponent::StartAction(const FSlimeSkillDef& Def, bool bFromCom
 
 	PlayCombatSound(bFromCombo);
 
-	const bool bComboFinisherVfx = bFromCombo && Def.Slot == ESlimeSkillSlot::Combo4 && !Def.NiagaraSystem.IsNull();
+	if (bFromCombo)
+	{
+		if (USlimePathSwordComponent* PathSword = GetOwner()->FindComponentByClass<USlimePathSwordComponent>())
+		{
+			ESlimeElement SwingElement = Def.Element;
+			if (Element)
+			{
+				SwingElement = Element->CurrentElement;
+			}
+			const float SwingDuration = FMath::Max(Def.HitEnd - Def.HitStart, 0.12f);
+			PathSword->PlaySwing(
+				SwingElement,
+				SlimeCombat::ComboIndex(Def.Slot),
+				ActiveForward,
+				SwingDuration);
+		}
+	}
+
 	const bool bTargetedSkillVfx = !bFromCombo && bUseExplicitHitOrigin && Def.Exec != ESlimeSkillExec::Projectile;
-	if ((!bFromCombo && Def.Exec != ESlimeSkillExec::Projectile) || bComboFinisherVfx)
+	if (!bFromCombo && Def.Exec != ESlimeSkillExec::Projectile)
 	{
 		FVector VfxLoc = ActiveHitOrigin;
-		if (bComboFinisherVfx || bTargetedSkillVfx)
+		if (bTargetedSkillVfx)
 		{
 			VfxLoc = ActiveHitOrigin;
 		}
@@ -1271,5 +1289,12 @@ void USlimeCombatComponent::InterruptCombat()
 	if (Body)
 	{
 		Body->ClearCombatPose();
+	}
+	if (AActor* Owner = GetOwner())
+	{
+		if (USlimePathSwordComponent* PathSword = Owner->FindComponentByClass<USlimePathSwordComponent>())
+		{
+			PathSword->AbortSwing();
+		}
 	}
 }

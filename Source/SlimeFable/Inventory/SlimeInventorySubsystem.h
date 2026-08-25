@@ -123,6 +123,9 @@ public:
 	/** Built-in test definitions used when Content DataAssets are not cooked yet. */
 	void EnsureBuiltinDefinitions();
 
+	/** Give starter potions when the bag has none of that id (for PIE / Tab hotbar testing). */
+	void GrantStarterConsumablesIfNeeded();
+
 protected:
 	UPROPERTY()
 	TArray<FSlimeInventoryEntry> Entries;

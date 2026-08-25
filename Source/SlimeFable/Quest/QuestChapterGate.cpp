@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Misc/PackageName.h"
+#include "TimerManager.h"
 
 AQuestChapterGate::AQuestChapterGate()
 {
@@ -11,6 +12,16 @@ AQuestChapterGate::AQuestChapterGate()
 	{
 		Mesh->SetRelativeScale3D(FVector(0.7f, 0.35f, 1.4f));
 	}
+}
+
+void AQuestChapterGate::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(EnterDelayHandle);
+	}
+	bEnterPending = false;
+	Super::EndPlay(EndPlayReason);
 }
 
 bool AQuestChapterGate::CanBeFocused() const
@@ -121,6 +132,15 @@ TArray<FString> AQuestChapterGate::GetTargetChapterIdOptions() const
 	return Options;
 }
 
+FString AQuestChapterGate::ResolveEnterLabel() const
+{
+	if (TargetChapterId == FName(TEXT("Hub")))
+	{
+		return TEXT("大厅");
+	}
+	return TargetChapterId.ToString();
+}
+
 bool AQuestChapterGate::TryInteract(APawn* Interactor)
 {
 	return RequestEnter(Interactor);
@@ -129,6 +149,10 @@ bool AQuestChapterGate::TryInteract(APawn* Interactor)
 bool AQuestChapterGate::RequestEnter(APawn* Interactor)
 {
 	if (!Interactor || TargetChapterId.IsNone())
+	{
+		return false;
+	}
+	if (bEnterPending)
 	{
 		return false;
 	}
@@ -153,20 +177,69 @@ bool AQuestChapterGate::RequestEnter(APawn* Interactor)
 			Quests->ShowLockedChapterBanner(TargetChapterId);
 			return false;
 		}
-		return Quests->TravelToHub(TravelDayId);
 	}
-
-	if (!Quests->IsChapterUnlocked(TargetChapterId))
+	else if (!Quests->IsChapterUnlocked(TargetChapterId))
 	{
 		Quests->ShowLockedChapterBanner(TargetChapterId);
 		return false;
 	}
 
+	const float Delay = FMath::Max(0.f, EnterDelaySeconds);
+	const FString Body = FString::Printf(TEXT("正在进入%s"), *ResolveEnterLabel());
+	Quests->ShowCenterBanner(
+		FText::FromString(TEXT("传送")),
+		FText::FromString(Body),
+		FMath::Max(Delay, 0.5f));
+
+	PendingTravelDayId = TravelDayId;
+	bEnterPending = true;
+
+	if (Delay <= KINDA_SMALL_NUMBER)
+	{
+		FinishPendingEnter();
+		return true;
+	}
+
+	World->GetTimerManager().ClearTimer(EnterDelayHandle);
+	World->GetTimerManager().SetTimer(
+		EnterDelayHandle,
+		this,
+		&AQuestChapterGate::FinishPendingEnter,
+		Delay,
+		false);
+	return true;
+}
+
+void AQuestChapterGate::FinishPendingEnter()
+{
+	bEnterPending = false;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(EnterDelayHandle);
+	}
+
+	UWorld* World = GetWorld();
+	UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+	UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
+	if (!Quests || TargetChapterId.IsNone())
+	{
+		return;
+	}
+
+	const FName TravelDayId = PendingTravelDayId.IsNone() ? ResolveTravelDayId() : PendingTravelDayId;
+	PendingTravelDayId = NAME_None;
+
+	if (TargetChapterId == FName(TEXT("Hub")))
+	{
+		Quests->TravelToHub(TravelDayId);
+		return;
+	}
+
 	if (Quests->GetHighestWeek(TargetChapterId) <= 1)
 	{
-		return Quests->TravelToChapter(TravelDayId, TargetChapterId, 1);
+		Quests->TravelToChapter(TravelDayId, TargetChapterId, 1);
+		return;
 	}
 
 	Quests->OpenWeekSelect(TravelDayId, TargetChapterId);
-	return true;
 }

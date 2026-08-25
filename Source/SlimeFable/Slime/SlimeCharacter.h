@@ -24,6 +24,7 @@ class USlimeDodgeComponent;
 class USlimeVehicleComponent;
 class USlimeDevourComponent;
 class USlimeMorphComponent;
+class USlimePathSwordComponent;
 class UStaticMeshComponent;
 class USoundBase;
 class UAudioComponent;
@@ -126,6 +127,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Morph")
 	USlimeMorphComponent* GetSlimeMorph() const { return SlimeMorph; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	USlimePathSwordComponent* GetPathSword() const { return PathSword; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Vehicle")
 	UStaticMeshComponent* GetVehicleMesh() const { return VehicleMesh; }
@@ -267,6 +271,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Morph")
 	TObjectPtr<USlimeMorphComponent> SlimeMorph;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<USlimePathSwordComponent> PathSword;
+
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;
 
@@ -275,6 +282,7 @@ protected:
 
 	/** Accumulator for ground footstep cadence. */
 	float FootstepTimer = 0.f;
+	bool bWasMovingForFootstep = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> FootstepAudio;

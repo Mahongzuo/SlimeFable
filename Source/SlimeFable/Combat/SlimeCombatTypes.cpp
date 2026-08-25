@@ -49,6 +49,7 @@ namespace
 		B.Slot = ESlimeSkillSlot::Combo2;
 		C.Slot = ESlimeSkillSlot::Combo3;
 		D.Slot = ESlimeSkillSlot::Combo4;
+		D.Damage *= 1.3f;
 		Kit.Combos = { A, B, C, D };
 	}
 
@@ -71,7 +72,7 @@ namespace
 		switch (Element)
 		{
 		case ESlimeElement::Water: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magic_Big_Bubbles_Explosion.NS_Magic_Big_Bubbles_Explosion");
-		case ESlimeElement::Wind: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion.NS_Potion");
+		case ESlimeElement::Wind: return TEXT("/Game/Characters/Slime/FX/Skills/Wind/NS_Slime_Wind_Impact.NS_Slime_Wind_Impact");
 		case ESlimeElement::Dark: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Owner_Cast_Spell.NS_Dark_Owner_Cast_Spell");
 		case ESlimeElement::Lightning: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Lightning_Owner_Cast.NS_Lightning_Owner_Cast");
 		case ESlimeElement::Physical: return TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Stone_Impact.NS_Dark_Stone_Impact");
@@ -96,8 +97,7 @@ namespace
 
 	void ConfigureSkillVfx(FSlimeSkillDef& Skill)
 	{
-		if (Skill.Slot == ESlimeSkillSlot::Combo4
-			|| Skill.Slot == ESlimeSkillSlot::Skill1
+		if (Skill.Slot == ESlimeSkillSlot::Skill1
 			|| Skill.Slot == ESlimeSkillSlot::Skill2
 			|| Skill.Slot == ESlimeSkillSlot::Skill3)
 		{
@@ -240,7 +240,7 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 			MakeSkill(TEXT("水戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::WhipSnap, ESlimeHitShape::Capsule, 160.f, 28.f, 10.f, 0.1f, 0.12f, 0.2f, 0.28f),
 			MakeSkill(TEXT("水扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Capsule, 170.f, 32.f, 11.f, 0.1f, 0.12f, 0.22f, 0.3f),
 			MakeSkill(TEXT("水挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Capsule, 165.f, 30.f, 12.f, 0.12f, 0.14f, 0.24f, 0.32f),
-			MakeSkill(TEXT("浪砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::Melee, ESlimeCombatPose::SlamFlatten, ESlimeHitShape::Cone, 200.f, 50.f, 18.f, 0.14f, 0.18f, 0.32f, 0.42f, TEXT("/Game/Characters/Slime/FX/Skills/Water/NS_Slime_Water_ComboFinisher.NS_Slime_Water_ComboFinisher")));
+			MakeSkill(TEXT("浪砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::Melee, ESlimeCombatPose::SlamFlatten, ESlimeHitShape::Cone, 200.f, 50.f, 18.f, 0.14f, 0.18f, 0.32f, 0.42f));
 		Kit.Combos[0].DashDistance = 100.f;
 		Kit.Combos[1].DashDistance = 100.f;
 		Kit.Combos[2].DashDistance = 110.f;
@@ -257,10 +257,10 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 
 	case ESlimeElement::Wind:
 		PushCombos(Kit,
-			MakeSkill(TEXT("风戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 90.f, 36.f, 8.f, 0.05f, 0.06f, 0.12f, 0.16f),
-			MakeSkill(TEXT("风扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::WhipSnap, ESlimeHitShape::Sphere, 95.f, 38.f, 9.f, 0.05f, 0.06f, 0.12f, 0.16f),
-			MakeSkill(TEXT("风挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 100.f, 40.f, 10.f, 0.06f, 0.07f, 0.14f, 0.18f),
-			MakeSkill(TEXT("风砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::Dash, ESlimeCombatPose::DashRibbon, ESlimeHitShape::Sphere, 110.f, 44.f, 14.f, 0.08f, 0.08f, 0.2f, 0.24f, TEXT("/Game/Characters/Slime/FX/Skills/Wind/NS_Slime_Wind_ComboFinisher.NS_Slime_Wind_ComboFinisher")));
+			MakeSkill(TEXT("风戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 140.f, 42.f, 8.f, 0.05f, 0.06f, 0.12f, 0.16f),
+			MakeSkill(TEXT("风扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::WhipSnap, ESlimeHitShape::Sphere, 145.f, 44.f, 9.f, 0.05f, 0.06f, 0.12f, 0.16f),
+			MakeSkill(TEXT("风挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 150.f, 46.f, 10.f, 0.06f, 0.07f, 0.14f, 0.18f),
+			MakeSkill(TEXT("风砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::Dash, ESlimeCombatPose::DashRibbon, ESlimeHitShape::Sphere, 150.f, 48.f, 14.f, 0.08f, 0.08f, 0.2f, 0.24f));
 		Kit.Combos[0].DashDistance = 100.f;
 		Kit.Combos[1].DashDistance = 100.f;
 		Kit.Combos[2].DashDistance = 110.f;
@@ -278,10 +278,10 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 
 	case ESlimeElement::Fire:
 		PushCombos(Kit,
-			MakeSkill(TEXT("火戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 110.f, 40.f, 11.f, 0.08f, 0.1f, 0.18f, 0.22f),
-			MakeSkill(TEXT("火扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 115.f, 42.f, 12.f, 0.08f, 0.1f, 0.18f, 0.24f),
-			MakeSkill(TEXT("火挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 120.f, 44.f, 13.f, 0.1f, 0.12f, 0.2f, 0.26f),
-			MakeSkill(TEXT("焰砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::AoE, ESlimeCombatPose::Pulse, ESlimeHitShape::Sphere, 0.f, 160.f, 20.f, 0.12f, 0.16f, 0.3f, 0.38f, TEXT("/Game/Characters/Slime/FX/Skills/Fire/NS_Slime_Fire_ComboFinisher.NS_Slime_Fire_ComboFinisher")));
+			MakeSkill(TEXT("火戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 130.f, 42.f, 11.f, 0.08f, 0.1f, 0.18f, 0.22f),
+			MakeSkill(TEXT("火扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 135.f, 44.f, 12.f, 0.08f, 0.1f, 0.18f, 0.24f),
+			MakeSkill(TEXT("火挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 140.f, 46.f, 13.f, 0.1f, 0.12f, 0.2f, 0.26f),
+			MakeSkill(TEXT("焰砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::AoE, ESlimeCombatPose::Pulse, ESlimeHitShape::Sphere, 0.f, 160.f, 20.f, 0.12f, 0.16f, 0.3f, 0.38f));
 		Kit.Combos[0].DashDistance = 100.f;
 		Kit.Combos[1].DashDistance = 100.f;
 		Kit.Combos[2].DashDistance = 110.f;
@@ -301,7 +301,7 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 			MakeSkill(TEXT("雷戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::Spike, ESlimeHitShape::Capsule, 140.f, 22.f, 11.f, 0.06f, 0.07f, 0.12f, 0.2f),
 			MakeSkill(TEXT("雷扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::Spike, ESlimeHitShape::Capsule, 145.f, 24.f, 12.f, 0.06f, 0.07f, 0.12f, 0.2f),
 			MakeSkill(TEXT("雷挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Capsule, 140.f, 24.f, 13.f, 0.07f, 0.08f, 0.14f, 0.22f),
-			MakeSkill(TEXT("雷炸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::AoE, ESlimeCombatPose::Pulse, ESlimeHitShape::Sphere, 0.f, 120.f, 18.f, 0.1f, 0.1f, 0.2f, 0.3f, TEXT("/Game/Characters/Slime/FX/Skills/Lightning/NS_Slime_Lightning_ComboFinisher.NS_Slime_Lightning_ComboFinisher")));
+			MakeSkill(TEXT("雷炸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::AoE, ESlimeCombatPose::Pulse, ESlimeHitShape::Sphere, 0.f, 120.f, 18.f, 0.1f, 0.1f, 0.2f, 0.3f));
 		Kit.Combos[0].DashDistance = 100.f;
 		Kit.Combos[1].DashDistance = 100.f;
 		Kit.Combos[2].DashDistance = 110.f;
@@ -319,10 +319,10 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 
 	case ESlimeElement::Dark:
 		PushCombos(Kit,
-			MakeSkill(TEXT("暗戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 100.f, 40.f, 12.f, 0.12f, 0.14f, 0.22f, 0.3f),
-			MakeSkill(TEXT("暗扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::WhipSnap, ESlimeHitShape::Sphere, 105.f, 42.f, 13.f, 0.12f, 0.14f, 0.22f, 0.32f),
-			MakeSkill(TEXT("暗挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 110.f, 44.f, 14.f, 0.14f, 0.16f, 0.26f, 0.34f),
-			MakeSkill(TEXT("雾砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::AoE, ESlimeCombatPose::Pulse, ESlimeHitShape::Sphere, 0.f, 180.f, 20.f, 0.16f, 0.2f, 0.36f, 0.45f, TEXT("/Game/Characters/Slime/FX/Skills/Dark/NS_Slime_Dark_ComboFinisher.NS_Slime_Dark_ComboFinisher")));
+			MakeSkill(TEXT("暗戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 130.f, 42.f, 12.f, 0.12f, 0.14f, 0.22f, 0.3f),
+			MakeSkill(TEXT("暗扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::WhipSnap, ESlimeHitShape::Sphere, 135.f, 44.f, 13.f, 0.12f, 0.14f, 0.22f, 0.32f),
+			MakeSkill(TEXT("暗挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 140.f, 46.f, 14.f, 0.14f, 0.16f, 0.26f, 0.34f),
+			MakeSkill(TEXT("雾砸"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::AoE, ESlimeCombatPose::Pulse, ESlimeHitShape::Sphere, 0.f, 180.f, 20.f, 0.16f, 0.2f, 0.36f, 0.45f));
 		Kit.Combos[0].DashDistance = 100.f;
 		Kit.Combos[1].DashDistance = 100.f;
 		Kit.Combos[2].DashDistance = 110.f;
@@ -341,10 +341,10 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 	case ESlimeElement::Physical:
 	default:
 		PushCombos(Kit,
-			MakeSkill(TEXT("锤戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 80.f, 36.f, 14.f, 0.1f, 0.12f, 0.2f, 0.24f),
-			MakeSkill(TEXT("锤扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 85.f, 38.f, 15.f, 0.1f, 0.12f, 0.22f, 0.26f),
-			MakeSkill(TEXT("上挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 90.f, 40.f, 16.f, 0.12f, 0.14f, 0.24f, 0.3f),
-			MakeSkill(TEXT("砸地"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::Melee, ESlimeCombatPose::SlamFlatten, ESlimeHitShape::Sphere, 140.f, 60.f, 24.f, 0.14f, 0.18f, 0.32f, 0.4f, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_ComboFinisher.NS_Slime_Physical_ComboFinisher")));
+			MakeSkill(TEXT("锤戳"), Element, ESlimeSkillSlot::Combo1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 130.f, 42.f, 14.f, 0.1f, 0.12f, 0.2f, 0.24f),
+			MakeSkill(TEXT("锤扫"), Element, ESlimeSkillSlot::Combo2, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 135.f, 44.f, 15.f, 0.1f, 0.12f, 0.22f, 0.26f),
+			MakeSkill(TEXT("上挑"), Element, ESlimeSkillSlot::Combo3, ESlimeSkillExec::Melee, ESlimeCombatPose::UpperStretch, ESlimeHitShape::Sphere, 140.f, 46.f, 16.f, 0.12f, 0.14f, 0.24f, 0.3f),
+			MakeSkill(TEXT("砸地"), Element, ESlimeSkillSlot::Combo4, ESlimeSkillExec::Melee, ESlimeCombatPose::SlamFlatten, ESlimeHitShape::Sphere, 145.f, 60.f, 24.f, 0.14f, 0.18f, 0.32f, 0.4f));
 		Kit.Combos[0].DashDistance = 100.f;
 		Kit.Combos[1].DashDistance = 100.f;
 		Kit.Combos[2].DashDistance = 110.f;

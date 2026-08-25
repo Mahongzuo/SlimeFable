@@ -24,6 +24,8 @@ struct FMenuUIStyle
 
 	static UTexture2D* LoadMenuBackgroundTexture();
 	static UMaterialInterface* LoadButtonMaterial();
+	/** Inventory / hotbar cell chrome from UIMaterialLab (MI_UI_Slot_1). */
+	static UMaterialInterface* LoadSlotMaterial();
 	static UMaterialInterface* LoadHealthBarMaterial();
 	static UMaterialInstanceDynamic* CreateHealthBarMID(UObject* Outer);
 	static void ApplyHealthBarImage(UImage* Image, UMaterialInstanceDynamic* MID, FVector2D Size);

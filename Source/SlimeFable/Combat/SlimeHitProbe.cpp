@@ -125,7 +125,9 @@ FVector USlimeHitProbe::ResolveOrigin(AActor* Instigator, const FSlimeHitSpec& S
 	{
 		Origin = Body->GetBlobCenter();
 	}
-	return Origin + Forward.GetSafeNormal() * Spec.OriginForwardOffset;
+	Origin += Forward.GetSafeNormal() * Spec.OriginForwardOffset;
+	Origin.Z += Spec.OriginZOffset;
+	return Origin;
 }
 
 bool USlimeHitProbe::GatherOverlaps(
@@ -406,10 +408,15 @@ int32 USlimeHitProbe::PerformHit(
 		const FVector HitLocation = Target->GetActorLocation();
 		if (Skill.Hit.Shape == ESlimeHitShape::Cone)
 		{
-			const FVector ToTarget = (HitLocation - Origin).GetSafeNormal();
-			const float Cos = FVector::DotProduct(Dir, ToTarget);
+			// Horizontal cone so short targets (slime) are not rejected by downward pitch.
+			const FVector Dir2D = FVector(Dir.X, Dir.Y, 0.f).GetSafeNormal();
+			const FVector ToTarget2D = FVector(
+				HitLocation.X - Origin.X,
+				HitLocation.Y - Origin.Y,
+				0.f).GetSafeNormal();
+			const float Cos = FVector::DotProduct(Dir2D, ToTarget2D);
 			const float MinCos = FMath::Cos(FMath::DegreesToRadians(Skill.Hit.ConeHalfAngle));
-			if (Cos < MinCos)
+			if (Dir2D.IsNearlyZero() || ToTarget2D.IsNearlyZero() || Cos < MinCos)
 			{
 				continue;
 			}

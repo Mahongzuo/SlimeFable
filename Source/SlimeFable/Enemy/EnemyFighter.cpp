@@ -3,6 +3,7 @@
 #include "EnemyFighter.h"
 
 #include "Components/SphereComponent.h"
+#include "EnemyCombatComponent.h"
 #include "EnemyFighterAIController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -86,6 +87,17 @@ void AEnemyFighter::BeginPlay()
 	Super::BeginPlay();
 	EnsureMoveKit();
 	SyncRangeVisuals();
+	// Watchdog bite kits stay on GlobalHitDelay 0.5. Default/samurai montages contact ~0.4s earlier.
+	if (!bBiteOnlyKit)
+	{
+		if (UEnemyCombatComponent* EnemyCombatComp = GetEnemyCombat())
+		{
+			if (FMath::IsNearlyEqual(EnemyCombatComp->GlobalHitDelay, 0.5f, 0.05f))
+			{
+				EnemyCombatComp->GlobalHitDelay = 0.1f;
+			}
+		}
+	}
 	if (bUseSingleNodeAnims && IdleMontages.Num() > 0)
 	{
 		if (UAnimMontage* Idle = IdleMontages[0].LoadSynchronous())

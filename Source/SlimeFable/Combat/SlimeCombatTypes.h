@@ -105,6 +105,11 @@ struct SLIMEFABLE_API FSlimeHitSpec
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hit", meta = (ClampMin = "0.0", Units = "cm"))
 	float OriginForwardOffset = 20.f;
+
+	/** Extra Z on hit origin (cm). Negative lowers the query toward short targets like the slime. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hit", meta = (Units = "cm",
+		ToolTip = "命中取点额外高度（厘米）。负数往下瞄，方便打到矮史莱姆。"))
+	float OriginZOffset = 0.f;
 };
 
 USTRUCT(BlueprintType)

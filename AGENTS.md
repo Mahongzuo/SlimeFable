@@ -14,6 +14,8 @@
 
 Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefable-agent-spec.mdc)（`alwaysApply`）会要求遵守上述流程。
 
+**搜 Content**：目录被 gitignore，Grep/Glob 常为 0。找资产用本机列目录（`Get-ChildItem -Recurse`），不要拿 git 当清单。细则见 spec skill「强制约束」。
+
 ## 快速事实
 
 | 项 | 值 |

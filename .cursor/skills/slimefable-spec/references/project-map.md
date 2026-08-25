@@ -6,7 +6,7 @@
 |------|------|
 | `SlimeFable.uproject` | UE 5.8 工程；模块 `SlimeFable`；引擎根 `D:\Program Files\Epic Games\UE_5.8` |
 | `Source/SlimeFable/` | 游戏 C++ |
-| `Content/` | 资产（地图、蓝图、模板变体） |
+| `Content/` | 资产（地图、蓝图、模板变体）。**gitignore，Grep/Glob 会漏；搜文件用本机列目录** |
 | `Config/` | 默认 ini（含 GameplayTags、AssetManager） |
 | `Content/Python/` | 编辑器批处理脚本 |
 | `.mcp.json` | Cursor → Unreal MCP（8010） |

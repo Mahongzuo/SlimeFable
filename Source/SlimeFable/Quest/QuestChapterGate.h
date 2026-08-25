@@ -12,6 +12,8 @@ class SLIMEFABLE_API AQuestChapterGate : public AQuestInteractActor
 public:
 	AQuestChapterGate();
 
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	virtual bool TryInteract(APawn* Interactor) override;
 	virtual FText GetInteractPromptVerb() const override;
 	virtual bool CanBeFocused() const override;
@@ -34,6 +36,10 @@ public:
 			ToolTip = "仅取消「用宿主日」时手填 MMDD，例如 0815。勾选宿主日时隐藏。"))
 	FName DayId = FName(TEXT("0815"));
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Gate", meta = (ClampMin = "0.0", Units = "s",
+		ToolTip = "解锁后先横幅「正在进入XXX」，再等多久才切图/开周目。默认 1 秒。0 = 立刻进。"))
+	float EnterDelaySeconds = 1.f;
+
 	UFUNCTION()
 	TArray<FString> GetTargetChapterIdOptions() const;
 
@@ -41,4 +47,10 @@ protected:
 	bool IsUnlocked() const;
 	FName ResolveTravelDayId() const;
 	FName ResolveOptionsDayId() const;
+	FString ResolveEnterLabel() const;
+	void FinishPendingEnter();
+
+	bool bEnterPending = false;
+	FName PendingTravelDayId = NAME_None;
+	FTimerHandle EnterDelayHandle;
 };

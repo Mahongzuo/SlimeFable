@@ -18,9 +18,15 @@ class SLIMEFABLE_API USlimeFloatingTextWidget : public UUserWidget
 public:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
-	void InitFloating(const FText& InText, const FLinearColor& InColor, const FVector& InWorldLocation, bool bUseCjkFont = false);
+	void InitFloating(
+		const FText& InText,
+		const FLinearColor& InColor,
+		const FVector& InWorldLocation,
+		bool bUseCjkFont,
+		int32 StackIndex);
 
 	static void Spawn(
 		UObject* WorldContext,
@@ -32,19 +38,23 @@ public:
 protected:
 	void BuildLayoutIfNeeded();
 	bool UpdateScreenPosition();
-	void TickFloat();
+	void TickFloat(float DeltaSeconds);
+	void OnFloatTimerTick();
+	static int32 AllocateStackIndex(const FVector& WorldLocation, double NowSeconds);
+	static void ReleaseStackIndex(int32 Index);
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> LabelText;
 
 	FVector WorldLocation = FVector::ZeroVector;
 	float Age = 0.f;
-	float Lifetime = 1.8f;
+	float Lifetime = 1.5f;
 	float RiseSpeed = 35.f;
 	float FontSize = 34.f;
 	FVector2D ScreenOffset = FVector2D::ZeroVector;
 	FLinearColor BaseColor = FLinearColor::White;
 	bool bCjkFont = false;
+	int32 StackSlot = INDEX_NONE;
 	FTimerHandle TickHandle;
 	bool bBuiltInCode = false;
 };

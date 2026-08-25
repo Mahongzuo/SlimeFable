@@ -76,7 +76,7 @@ private:
 	bool bSavedOrientToMovement = true;
 	bool bHaveSavedMovement = false;
 	bool bHaveSavedBoom = false;
-	FVector SavedBoomSocketOffset = FVector(0.f, 0.f, 40.f);
+	FVector SavedBoomSocketOffset = FVector(0.f, 0.f, 12.f);
 	bool bPollLockDown = false;
 	bool bLockOnActionBound = false;
 	float RelockBlockUntil = 0.f;

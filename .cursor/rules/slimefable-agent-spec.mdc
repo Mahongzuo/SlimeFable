@@ -16,6 +16,7 @@ alwaysApply: true
 
 ## 硬约束（摘要）
 
+- **搜资产以本机目录为准**：`Content/` 被 gitignore，Cursor 的 Grep/Glob 常返回 0。找 WBP / uasset / 贴图时用本机列目录（PowerShell `Get-ChildItem -Recurse`，或 Python `os.walk`）。禁止用 Grep 无结果或 git status 未列出，判断资产不存在。git 只约束提交，不当资产清单。
 - 引擎 UE 5.8，根目录 `D:\Program Files\Epic Games\UE_5.8`；UBT / 无头 / GUI 路径见 `.cursor/skills/slimefable-spec/references/toolchain.md`，不要满盘搜 `Build.bat`。
 - 改代码时编辑器默认关：C++ 走 UBT；刷资产走 `UnrealEditor-Cmd.exe`；MCP 需主动开 GUI 后 `StartServer 8010`。
 - MCP 使用 `http://127.0.0.1:8010/mcp`；Tool 串行调用，禁止并行叠 MCP。

@@ -200,17 +200,23 @@ void UEnemyCombatComponent::TickAction(float DeltaTime)
 	}
 	ActionElapsed += DeltaTime;
 
-	if (bActionAnimationStarted && !bHitFired && ActionElapsed >= ActiveDef.HitStart)
+	const float HitTime = GetHitFireTime();
+	if (bActionAnimationStarted && !bHitFired && ActionElapsed >= HitTime)
 	{
 		bHitFired = true;
 		FireHit();
 	}
 
-	const float EndTime = ActiveDef.HitStart + ActiveDef.Recovery;
+	const float EndTime = HitTime + ActiveDef.Recovery;
 	if (ActionElapsed >= EndTime)
 	{
 		FinishAction();
 	}
+}
+
+float UEnemyCombatComponent::GetHitFireTime() const
+{
+	return FMath::Max(0.f, ActiveDef.Windup + ActiveDef.HitStart + GlobalHitDelay);
 }
 
 void UEnemyCombatComponent::FinishAction()

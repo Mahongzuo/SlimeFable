@@ -76,7 +76,7 @@ struct SLIMEFABLE_API FSlimeElementProfile
 	float Roughness = 0.18f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Element|Scalar", meta = (ClampMin = "1.0", ClampMax = "1.5"))
-	float Refraction = 1.08f;
+	float Refraction = 1.16f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Element|Scalar", meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float FlowSpeed = 0.35f;

@@ -33,6 +33,7 @@ protected:
 	UFUNCTION() void OnCancelClicked();
 
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UImage> DimOverlay;
+	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UImage> ItemIcon;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> UseButton;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> DiscardButton;

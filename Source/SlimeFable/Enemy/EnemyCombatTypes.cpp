@@ -77,9 +77,10 @@ void EnemyCombat::FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 18.f;
 		Move.Skill.Knockback = 380.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 70.f;
-		Move.Skill.Hit.Range = 120.f;
+		Move.Skill.Hit.Radius = 80.f;
+		Move.Skill.Hit.Range = 130.f;
 		Move.Skill.Hit.OriginForwardOffset = 40.f;
+		Move.Skill.Hit.OriginZOffset = -55.f;
 		Move.MinRange = 0.f;
 		Move.MaxRange = 220.f;
 		Move.Weight = 1.4f;
@@ -101,8 +102,9 @@ void EnemyCombat::FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.DashDistance = 450.f;
 		Move.Skill.Knockback = 420.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Capsule;
-		Move.Skill.Hit.Radius = 55.f;
+		Move.Skill.Hit.Radius = 65.f;
 		Move.Skill.Hit.Range = 280.f;
+		Move.Skill.Hit.OriginZOffset = -40.f;
 		Move.MinRange = 250.f;
 		Move.MaxRange = 900.f;
 		Move.Weight = 1.f;
@@ -168,9 +170,10 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 10.f;
 		Move.Skill.Knockback = 220.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 80.f;
+		Move.Skill.Hit.Radius = 85.f;
 		Move.Skill.Hit.Range = 140.f;
 		Move.Skill.Hit.OriginForwardOffset = 45.f;
+		Move.Skill.Hit.OriginZOffset = -55.f;
 		Move.MinRange = 0.f;
 		Move.MaxRange = 240.f;
 		Move.Weight = 1.5f;
@@ -194,6 +197,7 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Hit.Radius = 85.f;
 		Move.Skill.Hit.Range = 150.f;
 		Move.Skill.Hit.OriginForwardOffset = 50.f;
+		Move.Skill.Hit.OriginZOffset = -55.f;
 		Move.MinRange = 0.f;
 		Move.MaxRange = 260.f;
 		Move.Weight = 1.1f;
@@ -215,9 +219,10 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 14.f;
 		Move.Skill.Knockback = 340.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Capsule;
-		Move.Skill.Hit.Radius = 70.f;
+		Move.Skill.Hit.Radius = 75.f;
 		Move.Skill.Hit.Range = 200.f;
 		Move.Skill.Hit.OriginForwardOffset = 60.f;
+		Move.Skill.Hit.OriginZOffset = -40.f;
 		Move.MinRange = 80.f;
 		Move.MaxRange = 320.f;
 		Move.Weight = 0.9f;

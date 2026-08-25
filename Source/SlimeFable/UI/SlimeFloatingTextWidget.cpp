@@ -12,6 +12,22 @@
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
+namespace SlimeFloatingTextStack
+{
+	constexpr int32 MaxSlots = 8;
+	constexpr float StackWindowSeconds = 0.35f;
+	constexpr float ClusterRadiusCm = 120.f;
+
+	struct FSlot
+	{
+		bool bOccupied = false;
+		FVector WorldLocation = FVector::ZeroVector;
+		double LastSpawnTime = 0.0;
+	};
+
+	FSlot GSlots[MaxSlots];
+}
+
 TSharedRef<SWidget> USlimeFloatingTextWidget::RebuildWidget()
 {
 	BuildLayoutIfNeeded();
@@ -24,10 +40,25 @@ void USlimeFloatingTextWidget::NativeConstruct()
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
+void USlimeFloatingTextWidget::NativeDestruct()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TickHandle);
+	}
+	ReleaseStackIndex(StackSlot);
+	StackSlot = INDEX_NONE;
+	Super::NativeDestruct();
+}
+
 void USlimeFloatingTextWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	TickFloat();
+}
+
+void USlimeFloatingTextWidget::OnFloatTimerTick()
+{
+	TickFloat(0.016f);
 }
 
 void USlimeFloatingTextWidget::BuildLayoutIfNeeded()
@@ -49,22 +80,79 @@ void USlimeFloatingTextWidget::BuildLayoutIfNeeded()
 	}
 }
 
+int32 USlimeFloatingTextWidget::AllocateStackIndex(const FVector& WorldLocation, double NowSeconds)
+{
+	using namespace SlimeFloatingTextStack;
+	int32 BestFree = INDEX_NONE;
+	int32 ClusterCount = 0;
+	for (int32 i = 0; i < MaxSlots; ++i)
+	{
+		FSlot& Slot = GSlots[i];
+		if (!Slot.bOccupied)
+		{
+			if (BestFree == INDEX_NONE)
+			{
+				BestFree = i;
+			}
+			continue;
+		}
+		if ((NowSeconds - Slot.LastSpawnTime) > StackWindowSeconds)
+		{
+			Slot.bOccupied = false;
+			if (BestFree == INDEX_NONE)
+			{
+				BestFree = i;
+			}
+			continue;
+		}
+		if (FVector::DistSquared(Slot.WorldLocation, WorldLocation) <= FMath::Square(ClusterRadiusCm))
+		{
+			++ClusterCount;
+		}
+	}
+
+	const int32 Index = BestFree != INDEX_NONE ? BestFree : (ClusterCount % MaxSlots);
+	GSlots[Index].bOccupied = true;
+	GSlots[Index].WorldLocation = WorldLocation;
+	GSlots[Index].LastSpawnTime = NowSeconds;
+	return FMath::Clamp(ClusterCount, 0, MaxSlots - 1);
+}
+
+void USlimeFloatingTextWidget::ReleaseStackIndex(int32 Index)
+{
+	using namespace SlimeFloatingTextStack;
+	if (Index >= 0 && Index < MaxSlots)
+	{
+		GSlots[Index].bOccupied = false;
+	}
+}
+
 void USlimeFloatingTextWidget::InitFloating(
 	const FText& InText,
 	const FLinearColor& InColor,
 	const FVector& InWorldLocation,
-	bool bUseCjkFont)
+	bool bUseCjkFont,
+	int32 StackIndex)
 {
 	BuildLayoutIfNeeded();
-	WorldLocation = InWorldLocation;
+	WorldLocation = InWorldLocation + FVector(0.f, 0.f, StackIndex * 18.f);
 	Age = 0.f;
+	Lifetime = 1.5f;
 	BaseColor = InColor;
 	bCjkFont = bUseCjkFont;
+	StackSlot = StackIndex;
+	ScreenOffset = FVector2D(
+		(StackIndex % 2 == 0 ? -1.f : 1.f) * static_cast<float>(StackIndex / 2 + 1) * 12.f,
+		-static_cast<float>(StackIndex) * 36.f);
 	if (bCjkFont)
 	{
 		FontSize = 38.f;
 		RiseSpeed = 42.f;
-		Lifetime = 2.2f;
+	}
+	else
+	{
+		FontSize = 34.f;
+		RiseSpeed = 35.f;
 	}
 	if (LabelText)
 	{
@@ -82,7 +170,7 @@ void USlimeFloatingTextWidget::InitFloating(
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
-			TickHandle, this, &USlimeFloatingTextWidget::TickFloat, 0.016f, true);
+			TickHandle, this, &USlimeFloatingTextWidget::OnFloatTimerTick, 0.016f, true);
 	}
 }
 
@@ -113,10 +201,9 @@ bool USlimeFloatingTextWidget::UpdateScreenPosition()
 	return true;
 }
 
-void USlimeFloatingTextWidget::TickFloat()
+void USlimeFloatingTextWidget::TickFloat(float DeltaSeconds)
 {
-	const float Delta = 0.016f;
-	Age += Delta;
+	Age += DeltaSeconds;
 	const float Alpha = 1.f - FMath::Clamp(Age / Lifetime, 0.f, 1.f);
 	if (LabelText)
 	{
@@ -158,6 +245,13 @@ void USlimeFloatingTextWidget::Spawn(
 	{
 		return;
 	}
+
+	double Now = 0.0;
+	if (const UWorld* World = WorldContext->GetWorld())
+	{
+		Now = World->GetTimeSeconds();
+	}
+	const int32 StackIndex = AllocateStackIndex(WorldLocation, Now);
 	Widget->AddToViewport(bUseCjkFont ? 60 : 50);
-	Widget->InitFloating(Text, Color, WorldLocation, bUseCjkFont);
+	Widget->InitFloating(Text, Color, WorldLocation, bUseCjkFont, StackIndex);
 }

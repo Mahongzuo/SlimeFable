@@ -33,25 +33,34 @@ void USlimeInventorySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	EnsureBuiltinDefinitions();
 	ScanSouvenirAssets();
 	RestoreInventory();
+	GrantStarterConsumablesIfNeeded();
 }
 
 void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
 {
-	auto MakeConsumable = [this](FName Id, const FString& Name, float Heal, float CdReduce, float DmgMul, float Duration)
+	const FSoftObjectPath PotionIconPath(TEXT("/Game/UIMaterialLab/Textures/T_UI_Potion.T_UI_Potion"));
+	const FSoftObjectPath SwordIconPath(TEXT("/Game/UIMaterialLab/Textures/T_UI_Sword.T_UI_Sword"));
+
+	auto MakeConsumable = [this](FName Id, const FString& Name, const FString& Desc, float Heal, float CdReduce,
+		float DmgMul, float Duration, const FSoftObjectPath& IconPath)
 	{
-		if (Definitions.Contains(Id))
+		USlimeConsumableDefinition* Def = Cast<USlimeConsumableDefinition>(FindDefinition(Id));
+		if (!Def)
 		{
-			return;
+			Def = NewObject<USlimeConsumableDefinition>(this, Id);
+			Def->ItemId = Id;
+			Definitions.Add(Id, Def);
 		}
-		USlimeConsumableDefinition* Def = NewObject<USlimeConsumableDefinition>(this, Id);
-		Def->ItemId = Id;
 		Def->DisplayName = FText::FromString(Name);
-		Def->Description = FText::FromString(TEXT("测试消耗品"));
+		Def->Description = FText::FromString(Desc);
 		Def->HealAmount = Heal;
 		Def->CooldownReduceSeconds = CdReduce;
 		Def->DamageBonusMul = DmgMul;
 		Def->BuffDuration = Duration;
-		Definitions.Add(Id, Def);
+		if (!IconPath.IsNull())
+		{
+			Def->Icon = TSoftObjectPtr<UTexture2D>(IconPath);
+		}
 	};
 
 	auto MakePlaceable = [this](FName Id, const FString& Name)
@@ -102,11 +111,26 @@ void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
 		Definitions.Add(Id, Def);
 	};
 
-	MakeConsumable(TEXT("HealJelly"), TEXT("回血果冻"), 30.f, 0.f, 1.f, 0.f);
-	MakeConsumable(TEXT("CdTea"), TEXT("冷却茶"), 0.f, 5.f, 1.f, 0.f);
-	MakeConsumable(TEXT("PowerCandy"), TEXT("增伤糖果"), 0.f, 0.f, 1.35f, 12.f);
+	MakeConsumable(TEXT("HealJelly"), TEXT("回血药"),
+		TEXT("立即恢复 30 点生命。"), 30.f, 0.f, 1.f, 0.f, PotionIconPath);
+	MakeConsumable(TEXT("CdTea"), TEXT("冷却茶"),
+		TEXT("缩短技能冷却 5 秒。"), 0.f, 5.f, 1.f, 0.f, PotionIconPath);
+	MakeConsumable(TEXT("PowerCandy"), TEXT("加攻药"),
+		TEXT("12 秒内攻击伤害 ×1.35。"), 0.f, 0.f, 1.35f, 12.f, SwordIconPath);
 	MakePlaceable(TEXT("FlatStone"), TEXT("平坦石"));
 	MakeSouvenir(TEXT("OldPostcard"), TEXT("旧明信片"));
+}
+
+void USlimeInventorySubsystem::GrantStarterConsumablesIfNeeded()
+{
+	if (GetItemCount(TEXT("HealJelly")) <= 0)
+	{
+		AddItem(TEXT("HealJelly"), 5);
+	}
+	if (GetItemCount(TEXT("PowerCandy")) <= 0)
+	{
+		AddItem(TEXT("PowerCandy"), 5);
+	}
 }
 
 void USlimeInventorySubsystem::RegisterItemDefinition(USlimeItemDefinition* Definition)

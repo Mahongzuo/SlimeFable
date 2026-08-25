@@ -8,6 +8,7 @@
 #include "GameFramework/Character.h"
 #include "EnemyCombatTypes.h"
 #include "EnemyEncounterSubsystem.h"
+#include "Slime/SlimeElementTypes.h"
 #include "SlimeLockTarget.h"
 #include "EnemyCharacter.generated.h"
 
@@ -162,9 +163,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void PlayElementHitFlash(FLinearColor FlashColor);
 
-	/** Sustained elemental aura pulse (matches StatusComponent 8s attachment). */
+	/** Sustained elemental aura using the per-element overlay table (Lightning/Wind special MIs). */
 	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void PlayElementAuraFlash(FLinearColor FlashColor, float Duration);
+	void PlayElementAuraFlash(ESlimeElement Element, float Duration);
+
+	/** Sustained tint via M_EnemyHitFlash + HitColor (reaction residue / color-only callers). */
+	UFUNCTION(BlueprintCallable, Category = "Combat", meta = (DisplayName = "Play Element Aura Flash (Color)"))
+	void PlayElementAuraFlashByColor(FLinearColor FlashColor, float Duration);
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void ClearElementAuraFlash();
@@ -309,8 +314,16 @@ public:
 	TSoftObjectPtr<UMaterialInterface> DeathDissolveMaterial;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
-		meta = (ToolTip = "受击闪红 Overlay。默认 /Game/_Slime/FX/M_EnemyHitFlash。空则不闪。"))
+		meta = (ToolTip = "受击闪红 / 水火暗物附着 Overlay。默认 /Game/_Slime/FX/M_EnemyHitFlash。空则不闪。驱动 HitFlash+HitColor。"))
 	TSoftObjectPtr<UMaterialInterface> HitFlashMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ToolTip = "雷属性附着 Overlay。默认 MI_Mesh_Overlay_TeslaCoil_Player。空则退回 HitFlashMaterial。"))
+	TSoftObjectPtr<UMaterialInterface> LightningHitOverlay;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
+		meta = (ToolTip = "风属性附着 Overlay。默认 MI_Overlay_Player_DeBuff。空则退回 HitFlashMaterial。"))
+	TSoftObjectPtr<UMaterialInterface> WindHitOverlay;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.05", Units = "s",
 		ToolTip = "受击闪红持续时间（秒）。默认 0.35，与史莱姆一致。"))
@@ -413,6 +426,9 @@ protected:
 	void ApplyHitFlashToMesh(UMeshComponent* MeshComp);
 	void ApplyHitFlashToAllMeshes();
 	void ClearHitFlashFromMeshes();
+	UMaterialInterface* ResolveElementHitOverlay(ESlimeElement Element) const;
+	void BeginAuraOverlay(UMaterialInterface* FlashMat, bool bUsesHitFlashParams, float Duration);
+	void DriveAuraOverlayIntensity(float Pulse);
 	void ApplyPhantomVisuals();
 	void ApplyLabDummyFlags();
 	void ApplyHealthOverridesAfterBeginPlay();
@@ -514,5 +530,8 @@ protected:
 	float ActiveFlashDuration = 0.35f;
 	float ActiveFlashFrequency = 18.f;
 	bool bAuraFlashActive = false;
+	/** When false, aura uses specialty overlays (TeslaCoil / DeBuff) via Opacity Multiplier + show/hide. */
+	bool bAuraOverlayUsesHitFlashParams = true;
+	float AuraOverlayOpacityMul = 2.f;
 	FTimerHandle HitFlashTimer;
 };

@@ -224,6 +224,12 @@ UMaterialInterface* FMenuUIStyle::LoadButtonMaterial()
 		TEXT("/Game/UIMaterialLab/Widgets/ComponentMaterials/MaterialInstances/MI_UI_Button.MI_UI_Button"));
 }
 
+UMaterialInterface* FMenuUIStyle::LoadSlotMaterial()
+{
+	return MenuUIStylePrivate::LoadObj<UMaterialInterface>(
+		TEXT("/Game/UIMaterialLab/Widgets/ComponentMaterials/MaterialInstances/MI_UI_Slot_1.MI_UI_Slot_1"));
+}
+
 UMaterialInterface* FMenuUIStyle::LoadHealthBarMaterial()
 {
 	if (UMaterialInterface* Inst = MenuUIStylePrivate::LoadObj<UMaterialInterface>(

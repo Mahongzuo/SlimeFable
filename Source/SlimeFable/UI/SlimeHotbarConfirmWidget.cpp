@@ -5,6 +5,7 @@
 #include "Slime/SlimeAbilityComponent.h"
 #include "SlimeFablePlayerController.h"
 #include "Inventory/SlimeInventorySubsystem.h"
+#include "Inventory/SlimeItemDefinition.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -15,6 +16,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "Engine/GameInstance.h"
+#include "Engine/Texture2D.h"
 #include "GameFramework/Pawn.h"
 #include "InputCoreTypes.h"
 
@@ -54,6 +56,29 @@ void USlimeHotbarConfirmWidget::Setup(int32 InSlotIndex, FName InItemId, const F
 			? FText::FromString(TEXT("快捷栏"))
 			: InDisplayName);
 	}
+	if (ItemIcon)
+	{
+		UTexture2D* Tex = nullptr;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (USlimeInventorySubsystem* Inv = GI->GetSubsystem<USlimeInventorySubsystem>())
+			{
+				if (const USlimeItemDefinition* Def = Inv->FindDefinition(InItemId))
+				{
+					Tex = Def->Icon.LoadSynchronous();
+				}
+			}
+		}
+		if (Tex)
+		{
+			ItemIcon->SetBrush(FMenuUIStyle::MakeTextureBrush(Tex, FVector2D(72.f)));
+			ItemIcon->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+		else
+		{
+			ItemIcon->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
 }
 
 void USlimeHotbarConfirmWidget::BuildLayoutIfNeeded()
@@ -85,6 +110,18 @@ void USlimeHotbarConfirmWidget::BuildLayoutIfNeeded()
 
 	UVerticalBox* VBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("VBox"));
 	Panel->AddChild(VBox);
+
+	USizeBox* IconBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ItemIconBox"));
+	IconBox->SetWidthOverride(72.f);
+	IconBox->SetHeightOverride(72.f);
+	if (UVerticalBoxSlot* IconSlot = VBox->AddChildToVerticalBox(IconBox))
+	{
+		IconSlot->SetHorizontalAlignment(HAlign_Center);
+		IconSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+	}
+	ItemIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("ItemIcon"));
+	ItemIcon->SetVisibility(ESlateVisibility::Collapsed);
+	IconBox->AddChild(ItemIcon);
 
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
 	TitleText->SetText(FText::FromString(TEXT("快捷栏")));

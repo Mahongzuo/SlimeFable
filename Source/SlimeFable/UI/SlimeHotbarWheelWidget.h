@@ -56,6 +56,9 @@ private:
 	TArray<TObjectPtr<UImage>> SectorImages;
 
 	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> SectorIcons;
+
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> SectorNames;
 
 	int32 HighlightedSlot = 0;

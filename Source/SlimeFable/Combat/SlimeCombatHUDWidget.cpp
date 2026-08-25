@@ -284,57 +284,36 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	}
 	LaunchChargeTrack->AddChild(LaunchChargeBar);
 
+	// Same chrome as Skill1Charge / LaunchCharge: short dark track + solid fill (no ProgressMat dots).
 	DevourHoldTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DevourHoldTrack"));
-	DevourHoldTrack->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.85f));
-	DevourHoldTrack->SetPadding(FMargin(6.f, 6.f));
+	DevourHoldTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
+	DevourHoldTrack->SetPadding(FMargin(4.f, 3.f));
 	DevourHoldTrack->SetVisibility(ESlateVisibility::Collapsed);
 	if (UCanvasPanelSlot* HoldSlot = Root->AddChildToCanvas(DevourHoldTrack))
 	{
 		HoldSlot->SetAnchors(FAnchors(0.5f, 1.f));
 		HoldSlot->SetAlignment(FVector2D(0.5f, 1.f));
 		HoldSlot->SetPosition(FVector2D(0.f, -124.f));
-		HoldSlot->SetSize(FVector2D(500.f, 52.f));
+		HoldSlot->SetSize(FVector2D(140.f, 12.f));
 		HoldSlot->SetZOrder(16);
-	}
-	UVerticalBox* HoldColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DevourHoldColumn"));
-	DevourHoldTrack->AddChild(HoldColumn);
-	DevourHoldLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DevourHoldLabel"));
-	DevourHoldLabel->SetText(FText::FromString(TEXT("正在吞噬")));
-	DevourHoldLabel->SetJustification(ETextJustify::Center);
-	FMenuUIStyle::ApplyBrushCJKFont(DevourHoldLabel, 18.f, FMenuUIStyle::WarmTextColor());
-	if (UVerticalBoxSlot* LabelSlot = HoldColumn->AddChildToVerticalBox(DevourHoldLabel))
-	{
-		LabelSlot->SetHorizontalAlignment(HAlign_Center);
-		LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 	}
 	DevourHoldBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("DevourHoldBar"));
 	DevourHoldBar->SetPercent(0.f);
-	DevourHoldBar->SetFillColorAndOpacity(FLinearColor(0.25f, 0.55f, 0.95f, 1.f));
+	DevourHoldBar->SetFillColorAndOpacity(FLinearColor(0.25f, 0.55f, 0.95f, 0.95f));
 	{
 		FProgressBarStyle HoldStyle = DevourHoldBar->GetWidgetStyle();
-		FSlateBrush HoldBg;
-		HoldBg.DrawAs = ESlateBrushDrawType::Box;
-		HoldBg.TintColor = FSlateColor(FLinearColor(0.55f, 0.55f, 0.55f, 1.f));
-		HoldStyle.SetBackgroundImage(HoldBg);
-		if (ProgressMat)
-		{
-			FSlateBrush HoldFill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(488.f, 16.f));
-			HoldStyle.SetFillImage(HoldFill);
-		}
-		else
-		{
-			FSlateBrush HoldFill;
-			HoldFill.DrawAs = ESlateBrushDrawType::Box;
-			HoldFill.TintColor = FSlateColor(FLinearColor(0.25f, 0.55f, 0.95f, 1.f));
-			HoldStyle.SetFillImage(HoldFill);
-		}
+		FSlateBrush HoldFill;
+		HoldFill.DrawAs = ESlateBrushDrawType::Box;
+		HoldFill.TintColor = FSlateColor(FLinearColor(0.25f, 0.55f, 0.95f, 0.95f));
+		HoldStyle.SetFillImage(HoldFill);
+		FSlateBrush HoldEmpty;
+		HoldEmpty.DrawAs = ESlateBrushDrawType::Box;
+		HoldEmpty.TintColor = FSlateColor(FLinearColor(0.35f, 0.35f, 0.35f, 0.55f));
+		HoldStyle.SetBackgroundImage(HoldEmpty);
 		DevourHoldBar->SetWidgetStyle(HoldStyle);
 	}
-	if (UVerticalBoxSlot* BarSlot = HoldColumn->AddChildToVerticalBox(DevourHoldBar))
-	{
-		BarSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		BarSlot->SetHorizontalAlignment(HAlign_Fill);
-	}
+	DevourHoldTrack->AddChild(DevourHoldBar);
+	DevourHoldLabel = nullptr;
 
 	DigestTrack = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DigestTrack"));
 	DigestTrack->SetBrushColor(FLinearColor(0.08f, 0.07f, 0.05f, 0.72f));
@@ -769,10 +748,6 @@ void USlimeCombatHUDWidget::Refresh()
 			DevourHoldTrack->SetVisibility(bShowHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 			DevourHoldBar->SetPercent(Hold);
 			ApplyProgressBarFill(DevourHoldBar, GetSlimeHudTint());
-			if (DevourHoldLabel)
-			{
-				FMenuUIStyle::ApplyBrushCJKFont(DevourHoldLabel, 18.f, GetSlimeHudTint());
-			}
 		}
 	}
 

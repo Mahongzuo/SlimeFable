@@ -139,7 +139,7 @@ void USlimeStatusComponent::SyncOwnerAuraFlash()
 
 	if (ReactionResidueRemaining > 0.f)
 	{
-		Enemy->PlayElementAuraFlash(ReactionResidueColor, ReactionResidueRemaining);
+		Enemy->PlayElementAuraFlashByColor(ReactionResidueColor, ReactionResidueRemaining);
 		return;
 	}
 
@@ -149,7 +149,7 @@ void USlimeStatusComponent::SyncOwnerAuraFlash()
 	{
 		const float* Time = AuraRemaining.Find(Primary);
 		const float Duration = Time ? *Time : 8.f;
-		Enemy->PlayElementAuraFlash(SlimeCombat::GetElementVfxColor(Primary), Duration);
+		Enemy->PlayElementAuraFlash(Primary, Duration);
 	}
 	else
 	{

@@ -42,6 +42,7 @@ description: >-
 
 ## 硬性规则
 
+- **先列本机 Content 再 MCP**：`Content/` gitignore 会使 Grep/Glob 报 0。找 WBP/贴图先 `Get-ChildItem -Recurse`，不要先下结论「没有这个资产」。
 - **串行调用**：MCP Tool 在游戏线程串行执行；禁止并行 / 重叠 Tool 调用。
 - **批量关卡**：366 日关卡用 `Content/Python/create_day_levels.py`，禁止 MCP 逐关创建。
 - **先描述后调用**：不确定参数时先 `describe_toolset`，再 `call_tool`。

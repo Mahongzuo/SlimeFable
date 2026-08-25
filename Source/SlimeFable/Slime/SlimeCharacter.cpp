@@ -21,6 +21,7 @@
 #include "Quest/QuestSubsystem.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeDevourComponent.h"
+#include "SlimePathSwordComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeMorphComponent.h"
 #include "SlimeStatusComponent.h"
@@ -88,7 +89,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	if (USpringArmComponent* Boom = GetCameraBoom())
 	{
 		Boom->TargetArmLength = CameraArmLengthDefault;
-		Boom->SocketOffset = FVector(0.f, 0.f, 40.f);
+		Boom->SocketOffset = FVector(0.f, 0.f, 12.f);
 		Boom->ProbeSize = 8.f;
 		Boom->bEnableCameraLag = true;
 		Boom->CameraLagSpeed = 12.f;
@@ -191,6 +192,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SlimeDevour = CreateDefaultSubobject<USlimeDevourComponent>(TEXT("SlimeDevour"));
 	SlimeVehicle = CreateDefaultSubobject<USlimeVehicleComponent>(TEXT("SlimeVehicle"));
 	SlimeMorph = CreateDefaultSubobject<USlimeMorphComponent>(TEXT("SlimeMorph"));
+	PathSword = CreateDefaultSubobject<USlimePathSwordComponent>(TEXT("PathSword"));
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(RootComponent);
@@ -308,7 +310,17 @@ void ASlimeCharacter::TickFootsteps(float DeltaSeconds)
 	if (!bMovingOnGround)
 	{
 		FootstepTimer = 0.f;
+		bWasMovingForFootstep = false;
 		StopFootstepAudio(false);
+		return;
+	}
+
+	// First step plays immediately so leading silence in the wave is less noticeable.
+	if (!bWasMovingForFootstep)
+	{
+		bWasMovingForFootstep = true;
+		FootstepTimer = 0.f;
+		PlayFootstepAudio();
 		return;
 	}
 
@@ -400,6 +412,18 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 	Boom->TargetArmLength = FMath::FInterpTo(
 		Boom->TargetArmLength,
 		DesiredCameraArmLength,
+		DeltaSeconds,
+		CameraZoomInterpSpeed);
+
+	// Lower socket when zoomed in so the short slime stays framed (capsule ~40cm tall).
+	const float ArmAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(CameraArmLengthMin, CameraArmLengthMax),
+		FVector2D(0.f, 1.f),
+		Boom->TargetArmLength);
+	const float DesiredSocketZ = FMath::Lerp(8.f, 20.f, ArmAlpha);
+	Boom->SocketOffset = FMath::VInterpTo(
+		Boom->SocketOffset,
+		FVector(0.f, 0.f, DesiredSocketZ),
 		DeltaSeconds,
 		CameraZoomInterpSpeed);
 }
