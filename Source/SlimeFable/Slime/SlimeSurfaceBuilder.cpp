@@ -751,7 +751,7 @@ void FSlimeSurfaceBuilder::ClipDensityBelowFloor()
 		return;
 	}
 
-	constexpr float Eps = 1.f;
+	constexpr float Eps = 0.25f;
 	const float CutZ = ClipFloorZ + Eps;
 	for (int32 Z = 0; Z < Dims.Z; ++Z)
 	{

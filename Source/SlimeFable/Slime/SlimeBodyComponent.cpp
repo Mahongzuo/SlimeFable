@@ -25,6 +25,7 @@
 #include "SlimeHitProbe.h"
 #include "SlimeStatusComponent.h"
 #include "UI/SlimeFloatingTextWidget.h"
+#include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 
 using namespace SlimeSim;
@@ -47,6 +48,33 @@ namespace SlimeBodyPrivate
 	constexpr float SqueezeReportEpsilon = 0.02f;
 
 	constexpr float NoCeilingZ = 1.e9f;
+
+	bool OwnerLooksLikeNinjaLive(const AActor* Owner)
+	{
+		if (!Owner)
+		{
+			return false;
+		}
+		const FString ClassName = Owner->GetClass()->GetName();
+		if (ClassName.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		return Owner->GetName().Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase);
+	}
+
+	bool ComponentLooksLikeNinjaSimGeom(const UPrimitiveComponent* Component)
+	{
+		if (!Component)
+		{
+			return false;
+		}
+		const FString Name = Component->GetName();
+		return Name.Contains(TEXT("TraceMesh"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("InteractionVolume"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("InteractionVol"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("ActivationVolume"), ESearchCase::IgnoreCase);
+	}
 }
 
 USlimeBodyComponent::USlimeBodyComponent()
@@ -226,7 +254,7 @@ void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
 	}
 	const ESlimeElement Element = ElementComp ? ElementComp->CurrentElement : ESlimeElement::Physical;
 	HitSkill.Element = Element;
-	HitSkill.bAppliesElementAura = Element != ESlimeElement::Physical;
+	HitSkill.bAppliesElementAura = true;
 	HitSkill.Damage = FMath::Max(HitSkill.Damage * FragmentAttackDamageScale, 0.f);
 
 	const float Interval = FMath::Max(FragmentAttackInterval, 0.1f);
@@ -506,7 +534,7 @@ void USlimeBodyComponent::UpdateFloor()
 {
 	const FVector Foot = GetFootLocation();
 
-	auto TraceFloorUnder = [this](const FVector& Origin, float ProxyRadius, float& OutZ, bool bIgnorePawns = false)
+	auto TraceFloorUnder = [this](const FVector& Origin, float ProxyRadius, float& OutZ, bool bIgnorePawns = true)
 	{
 		UWorld* World = GetWorld();
 		if (!World)
@@ -518,22 +546,63 @@ void USlimeBodyComponent::UpdateFloor()
 		FCollisionResponseParams ResponseParams = FCollisionResponseParams::DefaultResponseParam;
 		if (bIgnorePawns)
 		{
-			// Fragment floor must not treat enemy capsules as ground (was lifting shots onto heads).
+			// Body + fragment floor must not treat enemy capsules as ground
+			// (was lifting shots onto heads / clipping the blob against gunners).
 			ResponseParams.CollisionResponse.SetResponse(ECC_Pawn, ECR_Ignore);
 		}
-		FHitResult Hit;
 		const FVector Start = Origin + FVector(0.0, 0.0, 40.0);
 		const FVector End = Origin - FVector(0.0, 0.0, 800.0);
 		const float Radius = FMath::Max(ProxyRadius, 2.f);
-		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(Radius), Query, ResponseParams))
+		const FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+
+		// Prefer the first hit that is not FluidNinja TraceMesh / InteractionVolume —
+		// those boards sit above the real ground and would ClipZ the whole blob away.
+		TArray<FHitResult> Hits;
+		if (World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Pawn, Shape, Query, ResponseParams))
 		{
-			OutZ = float(Hit.ImpactPoint.Z);
-			return true;
+			for (const FHitResult& Hit : Hits)
+			{
+				if (ShouldIgnoreFluidNinjaCollider(Hit.GetComponent()))
+				{
+					continue;
+				}
+				if (bIgnorePawns)
+				{
+					if (const AActor* HitActor = Hit.GetActor())
+					{
+						if (Cast<APawn>(HitActor) && HitActor != GetOwner())
+						{
+							continue;
+						}
+					}
+				}
+				OutZ = float(Hit.ImpactPoint.Z);
+				return true;
+			}
 		}
-		if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Query, ResponseParams))
+
+		Hits.Reset();
+		if (World->LineTraceMultiByChannel(Hits, Start, End, ECC_Pawn, Query, ResponseParams))
 		{
-			OutZ = float(Hit.ImpactPoint.Z);
-			return true;
+			for (const FHitResult& Hit : Hits)
+			{
+				if (ShouldIgnoreFluidNinjaCollider(Hit.GetComponent()))
+				{
+					continue;
+				}
+				if (bIgnorePawns)
+				{
+					if (const AActor* HitActor = Hit.GetActor())
+					{
+						if (Cast<APawn>(HitActor) && HitActor != GetOwner())
+						{
+							continue;
+						}
+					}
+				}
+				OutZ = float(Hit.ImpactPoint.Z);
+				return true;
+			}
 		}
 		return false;
 	};
@@ -552,9 +621,15 @@ void USlimeBodyComponent::UpdateFloor()
 		const UCharacterMovementComponent* Movement = OwnerCharacter->GetCharacterMovement();
 		if (Movement && Movement->CurrentFloor.bBlockingHit)
 		{
-			MovementFloorZ = float(Movement->CurrentFloor.HitResult.ImpactPoint.Z);
-			FloorZ = MovementFloorZ;
-			bBodyFloor = true;
+			UPrimitiveComponent* FloorComp = Movement->CurrentFloor.HitResult.GetComponent();
+			const AActor* FloorActor = FloorComp ? FloorComp->GetOwner() : nullptr;
+			const bool bFloorIsOtherPawn = FloorActor && Cast<APawn>(FloorActor) && FloorActor != GetOwner();
+			if (FloorComp && !ShouldIgnoreFluidNinjaCollider(FloorComp) && !bFloorIsOtherPawn)
+			{
+				MovementFloorZ = float(Movement->CurrentFloor.HitResult.ImpactPoint.Z);
+				FloorZ = MovementFloorZ;
+				bBodyFloor = true;
+			}
 		}
 	}
 	if (!bBodyFloor)
@@ -583,7 +658,7 @@ void USlimeBodyComponent::UpdateFloor()
 			const float MaxSnap = FMath::Max(Movement->MaxStepHeight, DefaultStepHeight);
 			if (HorizVel.SizeSquared() < 400.0
 				&& Movement->Velocity.Z > -50.f
-				&& Hang > 4.f
+				&& Hang > 1.5f
 				&& Hang <= MaxSnap)
 			{
 				if (USlimeCharacterMovementComponent* SlimeMovement = Cast<USlimeCharacterMovementComponent>(Movement))
@@ -702,7 +777,7 @@ void USlimeBodyComponent::RefreshColliders()
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> Ordered;
 	Ordered.Reserve(Overlaps.Num() + 1);
 	TSet<UPrimitiveComponent*> Seen;
-	if (FloorComponent)
+	if (FloorComponent && !ShouldIgnoreFluidNinjaCollider(FloorComponent))
 	{
 		Ordered.Add(FloorComponent);
 		Seen.Add(FloorComponent);
@@ -710,7 +785,8 @@ void USlimeBodyComponent::RefreshColliders()
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
 		UPrimitiveComponent* Component = Overlap.GetComponent();
-		if (Component && Component->IsCollisionEnabled() && !Seen.Contains(Component))
+		if (Component && Component->IsCollisionEnabled() && !Seen.Contains(Component)
+			&& !ShouldIgnoreFluidNinjaCollider(Component))
 		{
 			Seen.Add(Component);
 			Ordered.Add(Component);
@@ -833,6 +909,8 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 	FCollisionQueryParams Query(TEXT("SlimeSqueeze"), false, GetOwner());
 
 	// ---- Low ceiling -----------------------------------------------------------------
+	// Nearest-blocking-hit semantics (HEAD): FluidNinja boards may be skipped, but another
+	// Pawn stops the probe — do NOT look through enemies for a farther "ceiling".
 
 	const float ProbeCeiling = DefaultCapsuleHalfHeight * 2.f + 40.f;
 	const float StepCeilingIgnore = DefaultStepHeight + 8.f;
@@ -841,15 +919,33 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 		const float SphereRadius = FMath::Max(MinCapsuleRadius * 0.9f, 2.f);
 		const FVector Start = Foot + FVector(0.0, 0.0, double(SphereRadius + ProbeGroundLift));
 		const FVector End = Foot + FVector(0.0, 0.0, double(ProbeCeiling));
-		FHitResult Hit;
-		if (World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(SphereRadius), Query)
-			&& float(Hit.ImpactNormal.GetSafeNormal().Z) <= -0.45f)
+		TArray<FHitResult> Hits;
+		if (World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Pawn, FCollisionShape::MakeSphere(SphereRadius), Query))
 		{
-			const float HitHeight = float(Hit.ImpactPoint.Z - Foot.Z);
-			// Stair tread undersides sit within one step of the feet — not a real ceiling.
-			if (HitHeight > StepCeilingIgnore)
+			for (const FHitResult& Hit : Hits)
 			{
-				AvailableHeight = HitHeight;
+				if (ShouldIgnoreFluidNinjaCollider(Hit.GetComponent()))
+				{
+					continue;
+				}
+				if (const AActor* HitActor = Hit.GetActor())
+				{
+					if (Cast<APawn>(HitActor) && HitActor != GetOwner())
+					{
+						// Nearest solid is another pawn — same as SweepSingle hitting them: stop.
+						break;
+					}
+				}
+				if (float(Hit.ImpactNormal.GetSafeNormal().Z) <= -0.45f)
+				{
+					const float HitHeight = float(Hit.ImpactPoint.Z - Foot.Z);
+					// Stair tread undersides sit within one step of the feet — not a real ceiling.
+					if (HitHeight > StepCeilingIgnore)
+					{
+						AvailableHeight = HitHeight;
+					}
+				}
+				break;
 			}
 		}
 		CeilingZ = AvailableHeight < ProbeCeiling ? float(Foot.Z) + AvailableHeight : NoCeilingZ;
@@ -886,11 +982,25 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 			ProbeCenter += HeadingDir * double(LookAheadDistance);
 		}
 
-		auto IsBlockedAt = [World, ProbeHalfHeight, &Query](const FVector& Center, float Radius)
+		auto IsBlockedAt = [this, World, ProbeHalfHeight, &Query](const FVector& Center, float Radius)
 		{
-			return World->OverlapBlockingTestByChannel(
-				Center, FQuat::Identity, ECC_Pawn,
-				FCollisionShape::MakeCapsule(Radius, ProbeHalfHeight), Query);
+			TArray<FOverlapResult> Overlaps;
+			if (!World->OverlapMultiByChannel(
+				Overlaps, Center, FQuat::Identity, ECC_Pawn,
+				FCollisionShape::MakeCapsule(Radius, ProbeHalfHeight), Query))
+			{
+				return false;
+			}
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				// Match HEAD OverlapBlockingTest, but skip FluidNinja sim boards.
+				if (ShouldIgnoreFluidNinjaCollider(Overlap.GetComponent()))
+				{
+					continue;
+				}
+				return true;
+			}
+			return false;
 		};
 
 		auto IsStepRiserPinch = [&]() -> bool
@@ -901,20 +1011,28 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 			}
 			const FVector SweepStart = BaseCenter;
 			const FVector SweepEnd = BaseCenter + HeadingDir * double(FMath::Max(LookAheadDistance, DefaultCapsuleRadius));
-			FHitResult RiserHit;
-			if (!World->SweepSingleByChannel(
-				RiserHit, SweepStart, SweepEnd, FQuat::Identity, ECC_Pawn,
+			TArray<FHitResult> RiserHits;
+			if (!World->SweepMultiByChannel(
+				RiserHits, SweepStart, SweepEnd, FQuat::Identity, ECC_Pawn,
 				FCollisionShape::MakeSphere(FMath::Max(MinCapsuleRadius * 0.8f, 2.f)), Query))
 			{
 				return false;
 			}
-			const float NormalZ = float(RiserHit.ImpactNormal.GetSafeNormal().Z);
-			if (FMath::Abs(NormalZ) > 0.35f)
+			for (const FHitResult& RiserHit : RiserHits)
 			{
-				return false;
+				if (ShouldIgnoreFluidNinjaCollider(RiserHit.GetComponent()))
+				{
+					continue;
+				}
+				const float NormalZ = float(RiserHit.ImpactNormal.GetSafeNormal().Z);
+				if (FMath::Abs(NormalZ) > 0.35f)
+				{
+					return false;
+				}
+				const float HitAboveFoot = float(RiserHit.ImpactPoint.Z - Foot.Z);
+				return HitAboveFoot >= -4.f && HitAboveFoot <= DefaultStepHeight + 8.f;
 			}
-			const float HitAboveFoot = float(RiserHit.ImpactPoint.Z - Foot.Z);
-			return HitAboveFoot >= -4.f && HitAboveFoot <= DefaultStepHeight + 8.f;
+			return false;
 		};
 
 		// A solid wall / stair riser ahead is not a corridor. Only shrink radius for true side pinches.
@@ -999,7 +1117,7 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
 				UPrimitiveComponent* Comp = Overlap.GetComponent();
-				if (!Comp)
+				if (!Comp || ShouldIgnoreFluidNinjaCollider(Comp))
 				{
 					continue;
 				}
@@ -1024,6 +1142,16 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 	{
 		ApplyCapsuleSize(NewRadius, NewHalfHeight);
 	}
+}
+
+bool USlimeBodyComponent::ShouldIgnoreFluidNinjaCollider(const UPrimitiveComponent* Component)
+{
+	using namespace SlimeBodyPrivate;
+	if (!ComponentLooksLikeNinjaSimGeom(Component))
+	{
+		return false;
+	}
+	return OwnerLooksLikeNinjaLive(Component->GetOwner());
 }
 
 void USlimeBodyComponent::TryOozeEscape(float DeltaTime)
@@ -1273,6 +1401,8 @@ void USlimeBodyComponent::RebuildSurface()
 
 	VisualZLift = 0.f;
 	float ClipZ = -1.e9f;
+	// Only clip when devour visual-scale is inflated (HEAD). Always-on ClipZ flattened
+	// the blob against enemy capsules mistaken for FloorZ near gunners.
 	if (bVisualOnly && RequestedBodyScale > 1.05f && FloorZ > -1.e8f)
 	{
 		const float VisualR = SolverParams.RestRadius * RequestedBodyScale;

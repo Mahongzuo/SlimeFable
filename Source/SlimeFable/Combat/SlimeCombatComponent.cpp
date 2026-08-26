@@ -996,7 +996,7 @@ void USlimeCombatComponent::FireHit()
 		if (Element && Cast<ASlimeCharacter>(GetOwner()))
 		{
 			HitDef.Element = Element->CurrentElement;
-			HitDef.bAppliesElementAura = Element->CurrentElement != ESlimeElement::Physical;
+			HitDef.bAppliesElementAura = true;
 			HitDef.VfxColor = SlimeCombat::GetElementVfxColor(Element->CurrentElement);
 		}
 		Hits = USlimeHitProbe::PerformHit(

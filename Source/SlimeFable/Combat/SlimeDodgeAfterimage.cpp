@@ -2,6 +2,9 @@
 
 #include "SlimeDodgeAfterimage.h"
 
+#include "Components/MeshComponent.h"
+#include "Components/PoseableMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -27,6 +30,17 @@ ASlimeDodgeAfterimage::ASlimeDodgeAfterimage()
 	Mesh->bCastDynamicShadow = false;
 	Mesh->bCastContactShadow = false;
 	Mesh->SetCanEverAffectNavigation(false);
+
+	PoseableMesh = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("AfterimagePoseable"));
+	PoseableMesh->SetupAttachment(RootComponent);
+	PoseableMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PoseableMesh->SetGenerateOverlapEvents(false);
+	PoseableMesh->SetCastShadow(false);
+	PoseableMesh->bCastDynamicShadow = false;
+	PoseableMesh->bCastContactShadow = false;
+	PoseableMesh->SetCanEverAffectNavigation(false);
+	PoseableMesh->SetHiddenInGame(true);
+	PoseableMesh->SetVisibility(false);
 }
 
 void ASlimeDodgeAfterimage::CaptureFromSlime(USlimeBodyComponent* Body, float LifeSeconds)
@@ -173,4 +187,64 @@ void ASlimeDodgeAfterimage::CaptureFromSlime(USlimeBodyComponent* Body, float Li
 	Mesh->SetHiddenInGame(false);
 	SetActorHiddenInGame(false);
 	SetLifeSpan(FMath::Max(LifeSeconds, 0.05f));
+}
+
+void ASlimeDodgeAfterimage::CaptureFromSkeletalMesh(USkeletalMeshComponent* Source, float LifeSeconds)
+{
+	if (!PoseableMesh || !Source || !Source->GetSkeletalMeshAsset())
+	{
+		Destroy();
+		return;
+	}
+
+	if (Mesh)
+	{
+		Mesh->SetVisibility(false);
+		Mesh->SetHiddenInGame(true);
+	}
+
+	PoseableMesh->SetSkinnedAssetAndUpdate(Source->GetSkeletalMeshAsset());
+	PoseableMesh->SetWorldTransform(Source->GetComponentTransform());
+	PoseableMesh->CopyPoseFromSkeletalComponent(Source);
+
+	const int32 NumMats = Source->GetNumMaterials();
+	for (int32 Index = 0; Index < NumMats; ++Index)
+	{
+		if (UMaterialInterface* SrcMat = Source->GetMaterial(Index))
+		{
+			PoseableMesh->SetMaterial(Index, SrcMat);
+		}
+	}
+	ApplyGhostOpacityToComponent(PoseableMesh);
+
+	PoseableMesh->SetVisibility(true);
+	PoseableMesh->SetHiddenInGame(false);
+	SetActorHiddenInGame(false);
+	SetLifeSpan(FMath::Max(LifeSeconds, 0.05f));
+}
+
+void ASlimeDodgeAfterimage::ApplyGhostOpacityToComponent(UMeshComponent* TargetMesh) const
+{
+	if (!TargetMesh)
+	{
+		return;
+	}
+	const int32 Num = TargetMesh->GetNumMaterials();
+	for (int32 Index = 0; Index < Num; ++Index)
+	{
+		UMaterialInterface* Base = TargetMesh->GetMaterial(Index);
+		if (!Base)
+		{
+			continue;
+		}
+		if (UMaterialInstanceDynamic* MID = TargetMesh->CreateAndSetMaterialInstanceDynamic(Index))
+		{
+			float Opacity = 1.f;
+			MID->GetScalarParameterValue(TEXT("Opacity"), Opacity);
+			MID->SetScalarParameterValue(TEXT("Opacity"), FMath::Clamp(Opacity * GhostOpacityScale, 0.05f, 1.f));
+			float OpacityMask = 1.f;
+			MID->GetScalarParameterValue(TEXT("OpacityMask"), OpacityMask);
+			MID->SetScalarParameterValue(TEXT("OpacityMask"), FMath::Clamp(OpacityMask * GhostOpacityScale, 0.05f, 1.f));
+		}
+	}
 }

@@ -41,6 +41,8 @@
 #include "Misc/App.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
+#include "Settings/SlimeAudioPlay.h"
+#include "Sound/SoundBase.h"
 #include "Blueprint/UserWidget.h"
 #include "InputCoreTypes.h"
 #include "Engine/GameInstance.h"
@@ -49,6 +51,8 @@ USlimeDevourComponent::USlimeDevourComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
+	SwallowSound = TSoftObjectPtr<USoundBase>(
+		FSoftObjectPath(TEXT("/Game/Audio/SFX/Combat/sfx_swallow_01.sfx_swallow_01")));
 }
 
 void USlimeDevourComponent::BeginPlay()
@@ -1238,6 +1242,16 @@ void USlimeDevourComponent::SwallowTarget()
 	{
 		AbortDevour(true);
 		return;
+	}
+
+	if (USoundBase* Sfx = SwallowSound.LoadSynchronous())
+	{
+		SlimeAudioPlay::PlaySfxAt(GetOwner(), Sfx, GetBlobCenter());
+	}
+	else if (USoundBase* Fallback = LoadObject<USoundBase>(
+		nullptr, TEXT("/Game/Audio/SFX/Combat/sfx_swallow_01.sfx_swallow_01")))
+	{
+		SlimeAudioPlay::PlaySfxAt(GetOwner(), Fallback, GetBlobCenter());
 	}
 
 	CaptureEnemy(Target, ActiveCapture);

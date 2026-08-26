@@ -90,6 +90,8 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::Element5: return EKeys::Five;
 	case ESlimeInputAction::Element6: return EKeys::Six;
 	case ESlimeInputAction::ElementFormation: return EKeys::L;
+	case ESlimeInputAction::CheatConsole: return EKeys::Enter;
+	case ESlimeInputAction::Sprint: return EKeys::LeftShift;
 	default: return EKeys::Invalid;
 	}
 }
@@ -151,6 +153,8 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::Element5: return FText::FromString(TEXT("属性5（编队）"));
 	case ESlimeInputAction::Element6: return FText::FromString(TEXT("属性6（编队）"));
 	case ESlimeInputAction::ElementFormation: return FText::FromString(TEXT("属性编队"));
+	case ESlimeInputAction::CheatConsole: return FText::FromString(TEXT("作弊台"));
+	case ESlimeInputAction::Sprint: return FText::FromString(TEXT("冲刺"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -306,7 +310,9 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 		ESlimeInputAction::Element4,
 		ESlimeInputAction::Element5,
 		ESlimeInputAction::Element6,
-		ESlimeInputAction::ElementFormation
+		ESlimeInputAction::ElementFormation,
+		ESlimeInputAction::CheatConsole,
+		ESlimeInputAction::Sprint
 	};
 	for (ESlimeInputAction Action : NewActions)
 	{

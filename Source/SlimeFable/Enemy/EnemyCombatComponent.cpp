@@ -20,8 +20,10 @@
 #include "Settings/SlimeInputTypes.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeHitProbe.h"
+#include "SlimeStatusComponent.h"
 #include "SlimeEnemyGameplayTags.h"
 #include "Engine/GameInstance.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
 UEnemyCombatComponent::UEnemyCombatComponent()
@@ -44,6 +46,8 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 	}
 
+	AttackLockRemaining = FMath::Max(AttackLockRemaining - DeltaTime, 0.f);
+
 	// Player morph path: poll combat keys instead of waiting for AI.
 	if (bPlayerMorphed)
 	{
@@ -58,7 +62,7 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 bool UEnemyCombatComponent::CanStartAction() const
 {
-	if (bAttacking)
+	if (bAttacking || AttackLockRemaining > 0.f)
 	{
 		return false;
 	}
@@ -244,6 +248,9 @@ void UEnemyCombatComponent::FinishAction()
 		ActiveGasAbility.Reset();
 		Ability->EndFromCombat();
 	}
+
+	const float IntervalMul = GetAuraAttackIntervalMul();
+	AttackLockRemaining = FMath::Max(0.f, (IntervalMul - 1.f) * FMath::Max(ActiveDef.Recovery, 0.2f));
 }
 
 void UEnemyCombatComponent::FireHit()
@@ -266,6 +273,32 @@ void UEnemyCombatComponent::FireHit()
 	{
 		ExecuteProjectile(ActiveDef, Forward);
 		return;
+	}
+
+	// Hard gate: melee / AoE / Dash must not damage when Dist2D exceeds engage + reach.
+	if (ActiveDef.Exec == EEnemySkillExec::Melee
+		|| ActiveDef.Exec == EEnemySkillExec::AoE
+		|| ActiveDef.Exec == EEnemySkillExec::Dash)
+	{
+		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			const float Dist2D = FVector::Dist2D(Owner->GetActorLocation(), Player->GetActorLocation());
+			const float Reach =
+				ActiveDef.Hit.Radius + ActiveDef.Hit.Range + ActiveDef.Hit.OriginForwardOffset;
+			float Cap = MaxMeleeHitDistance;
+			if (ActiveDef.Exec == EEnemySkillExec::Dash)
+			{
+				Cap = FMath::Min(250.f, FMath::Max(MaxMeleeHitDistance, Reach));
+			}
+			else if (ActiveDef.Exec == EEnemySkillExec::AoE)
+			{
+				Cap = FMath::Min(250.f, FMath::Max(MaxMeleeHitDistance, Reach));
+			}
+			if (Dist2D > Cap)
+			{
+				return;
+			}
+		}
 	}
 
 	FSlimeSkillDef HitSkill = EnemyCombat::ToSlimeHitSkill(ActiveDef);
@@ -420,7 +453,27 @@ float UEnemyCombatComponent::ResolveDamage(const FEnemySkillDef& Skill) const
 			return 0.f;
 		}
 	}
-	return FMath::Max(Skill.Damage + AttackPower * 0.35f, 0.f);
+	float Damage = FMath::Max(Skill.Damage + AttackPower * 0.35f, 0.f);
+	if (const AActor* Owner = GetOwner())
+	{
+		if (const USlimeStatusComponent* Status = Owner->FindComponentByClass<USlimeStatusComponent>())
+		{
+			Damage *= Status->GetOutgoingDamageMul();
+		}
+	}
+	return Damage;
+}
+
+float UEnemyCombatComponent::GetAuraAttackIntervalMul() const
+{
+	if (const AActor* Owner = GetOwner())
+	{
+		if (const USlimeStatusComponent* Status = Owner->FindComponentByClass<USlimeStatusComponent>())
+		{
+			return Status->GetAttackIntervalMul();
+		}
+	}
+	return 1.f;
 }
 
 void UEnemyCombatComponent::PollPlayerCombatKeys(float DeltaTime)

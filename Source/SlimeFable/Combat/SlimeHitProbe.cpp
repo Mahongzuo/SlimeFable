@@ -22,6 +22,8 @@
 #include "SlimeStatusComponent.h"
 #include "EnemyCharacter.h"
 #include "SlimeCharacter.h"
+#include "Settings/SlimeCheatSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "UI/SlimeFloatingTextWidget.h"
 #include "Sound/SoundBase.h"
 #include "UObject/UObjectGlobals.h"
@@ -260,6 +262,35 @@ void USlimeHitProbe::ApplyToActor(
 		}
 	}
 
+	if (DamageAmount > 0.f && Instigator && Cast<ASlimeCharacter>(Instigator) && IsValidDamageTarget(Target))
+	{
+		if (const UWorld* World = Instigator->GetWorld())
+		{
+			if (const UGameInstance* GI = World->GetGameInstance())
+			{
+				if (const USlimeCheatSubsystem* Cheats = GI->GetSubsystem<USlimeCheatSubsystem>())
+				{
+					if (Cheats->IsKillYou())
+					{
+						float TargetMaxHP = 0.f;
+						if (const USlimeHealthComponent* HealthComp = Target->FindComponentByClass<USlimeHealthComponent>())
+						{
+							TargetMaxHP = HealthComp->MaxHP;
+						}
+						else if (const AEnemyCharacter* EnemyTarget = Cast<AEnemyCharacter>(Target))
+						{
+							TargetMaxHP = EnemyTarget->MaxHP;
+						}
+						if (TargetMaxHP > 0.f)
+						{
+							DamageAmount = TargetMaxHP * 0.9f;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if (ICombatDamageable* Damageable = Cast<ICombatDamageable>(Target))
 	{
 		Damageable->ApplyDamage(DamageAmount, Instigator, HitLocation, Impulse);
@@ -435,6 +466,23 @@ int32 USlimeHitProbe::PerformHit(
 		if (!IsValidDamageTarget(Target))
 		{
 			continue;
+		}
+
+		// Enemy close-range skills must not apply damage beyond engage + reach (hard safety).
+		const bool bEnemyCloseRange =
+			Cast<AEnemyCharacter>(Instigator) != nullptr
+			&& (Skill.Exec == ESlimeSkillExec::Melee
+				|| Skill.Exec == ESlimeSkillExec::Dash
+				|| Skill.Exec == ESlimeSkillExec::AoE);
+		if (bEnemyCloseRange)
+		{
+			const float Reach =
+				Skill.Hit.Radius + Skill.Hit.Range + Skill.Hit.OriginForwardOffset;
+			const float Cap = FMath::Min(250.f, FMath::Max(200.f, Reach));
+			if (FVector::Dist2D(Instigator->GetActorLocation(), Target->GetActorLocation()) > Cap)
+			{
+				continue;
+			}
 		}
 
 		AlreadyHit.Add(Target);

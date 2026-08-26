@@ -458,6 +458,9 @@ private:
 	void RefreshColliders();
 	void UpdateFloor();
 	void ProbeSqueeze(float DeltaTime);
+
+	/** FluidNinja TraceMesh / InteractionVolume / ActivationVolume — keep Overlap, skip soft-body squeeze & floor. */
+	static bool ShouldIgnoreFluidNinjaCollider(const UPrimitiveComponent* Component);
 	void TryOozeEscape(float DeltaTime);
 	void ApplyCapsuleSize(float NewRadius, float NewHalfHeight);
 	void UpdateAnchor();

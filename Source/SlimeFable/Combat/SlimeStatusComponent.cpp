@@ -9,12 +9,16 @@
 #include "SlimeHitProbe.h"
 #include "SlimeSkillVfxSubsystem.h"
 #include "EnemyCharacter.h"
+#include "EnemyFighter.h"
+#include "EnemyFighterAIController.h"
+#include "EnemyTower.h"
 #include "UI/SlimeFloatingTextWidget.h"
 #include "UI/SlimeAuraMarkerWidget.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 
 USlimeStatusComponent::USlimeStatusComponent()
@@ -25,6 +29,14 @@ USlimeStatusComponent::USlimeStatusComponent()
 void USlimeStatusComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	if (const ACharacter* Character = Cast<ACharacter>(GetOwner()))
+	{
+		if (const UCharacterMovementComponent* Move = Character->GetCharacterMovement())
+		{
+			BaseWalkSpeed = Move->MaxWalkSpeed;
+			bCapturedBaseWalkSpeed = true;
+		}
+	}
 	EnsureAuraMarker();
 	RefreshAuraMarker();
 }
@@ -63,10 +75,15 @@ void USlimeStatusComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 	}
 
+	TickBurnDot(DeltaTime);
+
 	if (bChanged)
 	{
+		OnAurasChanged();
+	}
+	else if (AuraRemaining.Num() > 0)
+	{
 		RefreshAuraMarker();
-		SyncOwnerAuraFlash();
 	}
 }
 
@@ -93,19 +110,55 @@ ESlimeElement USlimeStatusComponent::GetPrimaryAura(bool& bHasAura) const
 	return Best;
 }
 
+float USlimeStatusComponent::GetPrimaryAuraRemaining() const
+{
+	bool bHas = false;
+	const ESlimeElement Primary = GetPrimaryAura(bHas);
+	if (!bHas)
+	{
+		return 0.f;
+	}
+	const float* Time = AuraRemaining.Find(Primary);
+	return Time ? *Time : 0.f;
+}
+
+float USlimeStatusComponent::GetOutgoingDamageMul() const
+{
+	return HasAura(ESlimeElement::Wind) ? WindOutgoingDamageMul : 1.f;
+}
+
+float USlimeStatusComponent::GetIncomingDamageMul() const
+{
+	return HasAura(ESlimeElement::Lightning) ? LightningIncomingDamageMul : 1.f;
+}
+
+float USlimeStatusComponent::GetMoveSpeedMul() const
+{
+	return HasAura(ESlimeElement::Physical) ? PhysicalMoveSpeedMul : 1.f;
+}
+
+float USlimeStatusComponent::GetAttackIntervalMul() const
+{
+	return HasAura(ESlimeElement::Water) ? WaterAttackIntervalMul : 1.f;
+}
+
+float USlimeStatusComponent::GetAnnihilateLifestealFraction() const
+{
+	return HasAura(ESlimeElement::Dark) ? DarkLifestealFraction : 0.f;
+}
+
 void USlimeStatusComponent::ClearAura(ESlimeElement Element)
 {
 	AuraRemaining.Remove(Element);
-	RefreshAuraMarker();
-	SyncOwnerAuraFlash();
+	OnAurasChanged();
 }
 
 void USlimeStatusComponent::ClearAllAuras()
 {
 	AuraRemaining.Reset();
 	ClearReactionResidue();
-	RefreshAuraMarker();
-	SyncOwnerAuraFlash();
+	BurnDamageCarry = 0.f;
+	OnAurasChanged();
 }
 
 void USlimeStatusComponent::ClearReactionResidue()
@@ -127,6 +180,80 @@ void USlimeStatusComponent::BeginReactionResidue(
 		0.5f);
 	ReactionResidueColor.A = 1.f;
 	ReactionResidueRemaining = Duration;
+}
+
+void USlimeStatusComponent::OnAurasChanged()
+{
+	RefreshAuraMarker();
+	SyncOwnerAuraFlash();
+	RefreshOwnerMoveSpeed();
+	RefreshOwnerAttackCadence();
+}
+
+void USlimeStatusComponent::TickBurnDot(float DeltaTime)
+{
+	if (!HasAura(ESlimeElement::Fire) || FireDotPerSecond <= 0.f)
+	{
+		BurnDamageCarry = 0.f;
+		return;
+	}
+	AActor* Owner = GetOwner();
+	USlimeHealthComponent* Health = Owner ? Owner->FindComponentByClass<USlimeHealthComponent>() : nullptr;
+	if (!Health || !Health->IsAlive())
+	{
+		return;
+	}
+	BurnDamageCarry += FireDotPerSecond * DeltaTime;
+	if (BurnDamageCarry < 1.f)
+	{
+		return;
+	}
+	const float Chunk = FMath::FloorToFloat(BurnDamageCarry);
+	BurnDamageCarry -= Chunk;
+	AActor* Causer = LastAuraInstigator.Get();
+	Health->ApplyDamage(Chunk, Causer, Owner->GetActorLocation(), FVector::ZeroVector);
+}
+
+void USlimeStatusComponent::RefreshOwnerMoveSpeed()
+{
+	ACharacter* Character = Cast<ACharacter>(GetOwner());
+	if (!Character)
+	{
+		return;
+	}
+	UCharacterMovementComponent* Move = Character->GetCharacterMovement();
+	if (!Move)
+	{
+		return;
+	}
+	const float Mul = GetMoveSpeedMul();
+	if (AEnemyFighter* Fighter = Cast<AEnemyFighter>(Character))
+	{
+		if (Fighter->bABPDrivenLocomotion)
+		{
+			bool bChasing = false;
+			if (const AEnemyFighterAIController* AIC = Cast<AEnemyFighterAIController>(Fighter->GetController()))
+			{
+				bChasing = AIC->IsEngaged();
+			}
+			Move->MaxWalkSpeed = (bChasing ? Fighter->ChaseSpeed : Fighter->WalkSpeed) * Mul;
+			return;
+		}
+	}
+	if (!bCapturedBaseWalkSpeed)
+	{
+		BaseWalkSpeed = Move->MaxWalkSpeed;
+		bCapturedBaseWalkSpeed = true;
+	}
+	Move->MaxWalkSpeed = BaseWalkSpeed * Mul;
+}
+
+void USlimeStatusComponent::RefreshOwnerAttackCadence()
+{
+	if (AEnemyTower* Tower = Cast<AEnemyTower>(GetOwner()))
+	{
+		Tower->RefreshFireCadence();
+	}
 }
 
 void USlimeStatusComponent::SyncOwnerAuraFlash()
@@ -206,26 +333,13 @@ void USlimeStatusComponent::RefreshAuraMarker()
 		Marker = Cast<USlimeAuraMarkerWidget>(AuraMarker->GetWidget());
 	}
 
-	bool bShow = false;
-	if (ReactionResidueRemaining > 0.f)
+	bool bHas = false;
+	const ESlimeElement Primary = GetPrimaryAura(bHas);
+	const float Remaining = GetPrimaryAuraRemaining();
+	const bool bShow = bHas && Remaining > 0.f;
+	if (Marker)
 	{
-		bShow = true;
-		if (Marker)
-		{
-			Marker->SetReactionResidue(
-				SlimeCombat::GetReactionDisplayName(ReactionResidueKind),
-				ReactionResidueColor);
-		}
-	}
-	else
-	{
-		bool bHas = false;
-		const ESlimeElement Primary = GetPrimaryAura(bHas);
-		bShow = bHas;
-		if (Marker)
-		{
-			Marker->SetAura(Primary, bHas);
-		}
+		Marker->SetAura(Primary, Remaining, bShow);
 	}
 
 	AuraMarker->SetHiddenInGame(!bShow);
@@ -234,22 +348,15 @@ void USlimeStatusComponent::RefreshAuraMarker()
 
 void USlimeStatusComponent::ApplyAura(ESlimeElement Element, AActor* Instigator, float Duration)
 {
-	// New element clears reaction residue (e.g. lightning after vaporize blend).
+	if (Instigator)
+	{
+		LastAuraInstigator = Instigator;
+	}
+
 	if (ReactionResidueRemaining > 0.f)
 	{
 		ClearReactionResidue();
 		AuraRemaining.Reset();
-	}
-
-	if (Element == ESlimeElement::Physical)
-	{
-		bool bHas = false;
-		const ESlimeElement Existing = GetPrimaryAura(bHas);
-		if (bHas)
-		{
-			TriggerReaction(Element, Existing, Instigator);
-		}
-		return;
 	}
 
 	TArray<ESlimeElement> Others;
@@ -268,8 +375,7 @@ void USlimeStatusComponent::ApplyAura(ESlimeElement Element, AActor* Instigator,
 	}
 
 	AuraRemaining.Add(Element, Duration);
-	RefreshAuraMarker();
-	SyncOwnerAuraFlash();
+	OnAurasChanged();
 }
 
 void USlimeStatusComponent::TriggerReaction(ESlimeElement Incoming, ESlimeElement Existing, AActor* Instigator)
@@ -290,19 +396,20 @@ void USlimeStatusComponent::TriggerReaction(ESlimeElement Incoming, ESlimeElemen
 	}
 	if (!Match)
 	{
+		// No authored pair: replace existing aura instead of stacking (prevents dual-debuff mul).
+		AuraRemaining.Reset();
 		AuraRemaining.Add(Incoming, 8.f);
-		RefreshAuraMarker();
-		SyncOwnerAuraFlash();
+		OnAurasChanged();
 		return;
 	}
 
 	ApplyReactionRow(*Match, Instigator);
 
-	// Consume both, then hang blended residue for 8s.
+	// Reactions always clear both auras (bConsume* table fields are unused at runtime).
 	AuraRemaining.Reset();
-	BeginReactionResidue(Match->First, Match->Second, Match->Kind, 8.f);
-	RefreshAuraMarker();
-	SyncOwnerAuraFlash();
+	BurnDamageCarry = 0.f;
+	BeginReactionResidue(Match->First, Match->Second, Match->Kind, 0.35f);
+	OnAurasChanged();
 }
 
 void USlimeStatusComponent::ApplyReactionRow(const FSlimeReactionRow& Row, AActor* Instigator)
@@ -313,7 +420,12 @@ void USlimeStatusComponent::ApplyReactionRow(const FSlimeReactionRow& Row, AActo
 		return;
 	}
 
-	if (USlimeHealthComponent* Health = Owner->FindComponentByClass<USlimeHealthComponent>())
+	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+	{
+		const FVector Impulse = FVector::UpVector * (Row.Kind == ESlimeReactionKind::Overload ? 420.f : 80.f);
+		Enemy->ApplyDamage(Row.ExtraDamage, Instigator, Owner->GetActorLocation(), Impulse);
+	}
+	else if (USlimeHealthComponent* Health = Owner->FindComponentByClass<USlimeHealthComponent>())
 	{
 		const FVector Impulse = FVector::UpVector * (Row.Kind == ESlimeReactionKind::Overload ? 420.f : 80.f);
 		Health->ApplyDamage(Row.ExtraDamage, Instigator, Owner->GetActorLocation(), Impulse);
@@ -360,7 +472,11 @@ void USlimeStatusComponent::ApplyReactionRow(const FSlimeReactionRow& Row, AActo
 			{
 				continue;
 			}
-			if (USlimeHealthComponent* OtherHealth = Other->FindComponentByClass<USlimeHealthComponent>())
+			if (AEnemyCharacter* OtherEnemy = Cast<AEnemyCharacter>(Other))
+			{
+				OtherEnemy->ApplyDamage(Row.ExtraDamage * 0.5f, Instigator, Other->GetActorLocation(), FVector::ZeroVector);
+			}
+			else if (USlimeHealthComponent* OtherHealth = Other->FindComponentByClass<USlimeHealthComponent>())
 			{
 				OtherHealth->ApplyDamage(Row.ExtraDamage * 0.5f, Instigator, Other->GetActorLocation(), FVector::ZeroVector);
 			}
@@ -369,10 +485,11 @@ void USlimeStatusComponent::ApplyReactionRow(const FSlimeReactionRow& Row, AActo
 				if (USlimeStatusComponent* OtherStatus = Other->FindComponentByClass<USlimeStatusComponent>())
 				{
 					OtherStatus->ClearReactionResidue();
+					OtherStatus->LastAuraInstigator = Instigator;
+					OtherStatus->AuraRemaining.Reset();
 					OtherStatus->AuraRemaining.Add(
 						Row.Kind == ESlimeReactionKind::MistSpread ? ESlimeElement::Water : ESlimeElement::Fire, 6.f);
-					OtherStatus->RefreshAuraMarker();
-					OtherStatus->SyncOwnerAuraFlash();
+					OtherStatus->OnAurasChanged();
 				}
 			}
 		}

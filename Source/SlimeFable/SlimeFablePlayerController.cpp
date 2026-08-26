@@ -16,7 +16,9 @@
 #include "SlimeFable.h"
 #include "Quest/QuestSubsystem.h"
 #include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeCheatComponent.h"
 #include "UI/PauseMenuWidget.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 namespace
@@ -24,7 +26,8 @@ namespace
 	bool IsOverlayReason(ESlimeUIInputReason Reason)
 	{
 		return Reason == ESlimeUIInputReason::QuestLog
-			|| Reason == ESlimeUIInputReason::AltCursor;
+			|| Reason == ESlimeUIInputReason::AltCursor
+			|| Reason == ESlimeUIInputReason::CheatConsole;
 	}
 
 	bool ShouldPauseReason(ESlimeUIInputReason Reason)
@@ -199,6 +202,33 @@ bool ASlimeFablePlayerController::HasModalUI() const
 	return false;
 }
 
+void ASlimeFablePlayerController::RestoreGameplayInput()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+
+	if (UIInputStack.IsEmpty())
+	{
+		if (bPausedByUIInput)
+		{
+			UGameplayStatics::SetGamePaused(this, false);
+			bPausedByUIInput = false;
+		}
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+		bShowMouseCursor = false;
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::SetDirectly);
+		}
+		return;
+	}
+
+	ApplyTopUIInput();
+}
+
 void ASlimeFablePlayerController::ApplyTopUIInput()
 {
 	if (UIInputStack.IsEmpty())
@@ -318,6 +348,21 @@ bool ASlimeFablePlayerController::DismissOverlayUI()
 		if (Quests)
 		{
 			Quests->CloseQuestLog();
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::CheatConsole))
+	{
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			if (USlimeCheatComponent* Cheat = ControlledPawn->FindComponentByClass<USlimeCheatComponent>())
+			{
+				Cheat->CloseConsole();
+			}
+		}
+		else
+		{
+			PopUIInput(ESlimeUIInputReason::CheatConsole);
 		}
 		return true;
 	}

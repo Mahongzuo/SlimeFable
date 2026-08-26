@@ -14,10 +14,14 @@
 #include "SlimeBodyComponent.h"
 #include "SlimeCharacter.h"
 #include "SlimeDevourComponent.h"
+#include "SlimeDodgeComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeElementTypes.h"
 #include "SlimeFable.h"
+#include "SlimeSpringArmComponent.h"
 #include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
+#include "InputCoreTypes.h"
 #include "UI/SlimePhantomWheelWidget.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -28,6 +32,7 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 
 // Material parameter names 鈥?mirror SlimeElementParams in SlimeElementComponent.cpp.
@@ -104,6 +109,15 @@ namespace
 			TargetBoom->CameraLagMaxTimeStep = SourceBoom->CameraLagMaxTimeStep;
 			TargetBoom->bEnableCameraRotationLag = SourceBoom->bEnableCameraRotationLag;
 			TargetBoom->CameraRotationLagSpeed = SourceBoom->CameraRotationLagSpeed;
+			if (const USlimeSpringArmComponent* SourceSlimeBoom = Cast<USlimeSpringArmComponent>(SourceBoom))
+			{
+				if (USlimeSpringArmComponent* TargetSlimeBoom = Cast<USlimeSpringArmComponent>(TargetBoom))
+				{
+					TargetSlimeBoom->MinCameraClearance = SourceSlimeBoom->MinCameraClearance;
+					TargetSlimeBoom->FootClampRadius = SourceSlimeBoom->FootClampRadius;
+					TargetSlimeBoom->MaxFootLift = SourceSlimeBoom->MaxFootLift;
+				}
+			}
 		}
 
 		if (SourceCamera && TargetCamera)
@@ -689,6 +703,8 @@ void USlimeMorphComponent::DestroyMorphTarget()
 {
 	if (MorphTarget)
 	{
+		ClearMorphDodge();
+
 		// Drop the shell and restore the real materials so the enemy can dissolve properly.
 		SetShellActive(false);
 		ApplyOriginalMaterials();
@@ -706,6 +722,10 @@ void USlimeMorphComponent::DestroyMorphTarget()
 	SavedEnemyMaterials.Reset();
 	bOriginalMaterialsActive = false;
 	bShellActive = false;
+	bMorphWalkPlaying = false;
+	bMorphRunPlaying = false;
+	bMorphJumpPlaying = false;
+	MorphIdleTimer = 0.f;
 }
 
 UMaterialInterface* USlimeMorphComponent::LoadMorphMaterial()
@@ -795,6 +815,29 @@ void USlimeMorphComponent::PossessEnemy()
 	{
 		EnemyCombat->SetPlayerMorphed(true);
 	}
+
+	EnsureMorphDodge();
+}
+
+void USlimeMorphComponent::EnsureMorphDodge()
+{
+	ClearMorphDodge();
+	if (!MorphTarget)
+	{
+		return;
+	}
+	USlimeDodgeComponent* Created = NewObject<USlimeDodgeComponent>(MorphTarget, TEXT("MorphSlimeDodge"));
+	Created->RegisterComponent();
+	MorphDodge = Created;
+}
+
+void USlimeMorphComponent::ClearMorphDodge()
+{
+	if (USlimeDodgeComponent* Dodge = MorphDodge.Get())
+	{
+		Dodge->DestroyComponent();
+	}
+	MorphDodge = nullptr;
 }
 
 void USlimeMorphComponent::PossessSlime()
@@ -818,6 +861,8 @@ void USlimeMorphComponent::PossessSlime()
 		return;
 	}
 	const FRotator PreservedViewRotation = PC->GetControlRotation();
+
+	ClearMorphDodge();
 
 	if (UEnemyCombatComponent* EnemyCombat = MorphTarget->GetEnemyCombat())
 	{
@@ -1083,7 +1128,7 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 		return;
 	}
 
-	// Only single-node-anim enemies need manual locomotion 鈥?AnimBP-driven enemies handle it themselves.
+	// Only single-node-anim enemies need manual locomotion — AnimBP-driven enemies handle it themselves.
 	if (!MorphTarget->UsesSingleNodeAnims())
 	{
 		return;
@@ -1101,45 +1146,112 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 		return;
 	}
 
-	const float Speed = Move->Velocity.Size2D();
-	const bool bShouldWalk = Speed > 10.f;
-
-	if (bShouldWalk && !bMorphWalkPlaying)
+	// Jump anim is started in MorphJump on key press — never invent a jump just because spawn
+	// briefly reported !IsMovingOnGround (that caused the "default pose jumps" bug).
+	if (MorphTarget->IsMorphJumpAnimActive())
 	{
-		if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
-		{
-			Fighter->PlayMeshAnimation(Walk, true);
-			bMorphWalkPlaying = true;
-			MorphIdleTimer = 0.f;
-		}
-	}
-	else if (!bShouldWalk && bMorphWalkPlaying)
-	{
-		Fighter->StopMeshAnimation();
+		bMorphJumpPlaying = true;
 		bMorphWalkPlaying = false;
+		bMorphRunPlaying = false;
 		MorphIdleTimer = 0.f;
+	}
 
-		// Play a random idle montage when stopping.
-		if (Fighter->IdleMontages.Num() > 0)
+	const bool bAirborne = Move->IsFalling() || !Move->IsMovingOnGround();
+	if (bAirborne)
+	{
+		// Hold jump clip if we started one; otherwise keep whatever idle/walk was already on.
+		return;
+	}
+
+	if (bMorphJumpPlaying || MorphTarget->IsMorphJumpAnimActive())
+	{
+		MorphTarget->ClearMorphJumpAnim();
+		bMorphJumpPlaying = false;
+		bMorphWalkPlaying = false;
+		bMorphRunPlaying = false;
+	}
+
+	bool bSprint = false;
+	if (APlayerController* PC = Cast<APlayerController>(MorphTarget->GetController()))
+	{
+		if (const UWorld* World = GetWorld())
 		{
-			const int32 Index = FMath::RandRange(0, Fighter->IdleMontages.Num() - 1);
-			if (UAnimMontage* Idle = Fighter->IdleMontages[Index].LoadSynchronous())
+			if (const UGameInstance* GI = World->GetGameInstance())
 			{
-				Fighter->PlayMeshAnimation(Idle, false);
+				if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+				{
+					bSprint = InputSettings->IsKeyDown(PC, ESlimeInputAction::Sprint);
+				}
 			}
 		}
+		if (!bSprint)
+		{
+			bSprint = PC->IsInputKeyDown(EKeys::LeftShift);
+		}
 	}
-	else if (!bShouldWalk && !bMorphWalkPlaying)
+
+	const float Speed = Move->Velocity.Size2D();
+	const bool bMoving = Speed > 10.f;
+	const bool bShouldRun = bMoving && bSprint && !Fighter->RunMontage.IsNull();
+
+	if (bShouldRun)
 	{
-		// After a while standing, play another random idle.
+		if (!bMorphRunPlaying)
+		{
+			if (UAnimMontage* Run = Fighter->RunMontage.LoadSynchronous())
+			{
+				Fighter->PlayMeshAnimation(Run, true);
+				bMorphRunPlaying = true;
+				bMorphWalkPlaying = false;
+				MorphIdleTimer = 0.f;
+			}
+		}
+		return;
+	}
+
+	if (bMoving)
+	{
+		if (!bMorphWalkPlaying || bMorphRunPlaying)
+		{
+			if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
+			{
+				Fighter->PlayMeshAnimation(Walk, true);
+				bMorphWalkPlaying = true;
+				bMorphRunPlaying = false;
+				MorphIdleTimer = 0.f;
+			}
+		}
+		return;
+	}
+
+	// Stopped on ground — standing idle (loop), never jump/lie.
+	if (bMorphWalkPlaying || bMorphRunPlaying)
+	{
+		bMorphWalkPlaying = false;
+		bMorphRunPlaying = false;
+		MorphIdleTimer = 0.f;
+		if (Fighter->IdleMontages.Num() > 0)
+		{
+			if (UAnimMontage* Idle = Fighter->IdleMontages[0].LoadSynchronous())
+			{
+				Fighter->PlayMeshAnimation(Idle, true);
+			}
+		}
+		else
+		{
+			Fighter->StopMeshAnimation();
+		}
+	}
+	else
+	{
 		MorphIdleTimer += Dt;
-		if (MorphIdleTimer > 4.f && Fighter->IdleMontages.Num() > 0)
+		if (MorphIdleTimer > 4.f && Fighter->IdleMontages.Num() > 1)
 		{
 			MorphIdleTimer = 0.f;
 			const int32 Index = FMath::RandRange(0, Fighter->IdleMontages.Num() - 1);
 			if (UAnimMontage* Idle = Fighter->IdleMontages[Index].LoadSynchronous())
 			{
-				Fighter->PlayMeshAnimation(Idle, false);
+				Fighter->PlayMeshAnimation(Idle, true);
 			}
 		}
 	}

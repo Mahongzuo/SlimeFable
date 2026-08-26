@@ -7,6 +7,8 @@
 #include "SlimeDodgeAfterimage.generated.h"
 
 class UProceduralMeshComponent;
+class UPoseableMeshComponent;
+class USkeletalMeshComponent;
 class USlimeBodyComponent;
 class UMaterialInterface;
 
@@ -21,9 +23,15 @@ public:
 	/** Snapshot the slime surface; tint matches the live body, slightly faded. */
 	void CaptureFromSlime(USlimeBodyComponent* Body, float LifeSeconds);
 
+	/** Freeze current skeletal pose (morph / enemy dodge). Uses CopyPoseFromSkeletalComponent. */
+	void CaptureFromSkeletalMesh(USkeletalMeshComponent* Source, float LifeSeconds);
+
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Dodge")
 	TObjectPtr<UProceduralMeshComponent> Mesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Dodge")
+	TObjectPtr<UPoseableMeshComponent> PoseableMesh;
 
 	/** Fallback if the live surface has no material assigned. */
 	UPROPERTY(EditAnywhere, Category = "Dodge")
@@ -42,4 +50,6 @@ protected:
 	/** Multiplier on live emissive intensity. */
 	UPROPERTY(EditAnywhere, Category = "Dodge", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float GhostEmissiveScale = 0.45f;
+
+	void ApplyGhostOpacityToComponent(UMeshComponent* TargetMesh) const;
 };

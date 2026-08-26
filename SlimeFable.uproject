@@ -183,6 +183,14 @@
 		{
 			"Name": "PixelStreaming2",
 			"Enabled": true
+		},
+		{
+			"Name": "PCGBiomeSample",
+			"Enabled": true
+		},
+		{
+			"Name": "PCGBiomeCore",
+			"Enabled": true
 		}
 	]
 }

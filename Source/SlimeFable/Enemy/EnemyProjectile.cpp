@@ -12,6 +12,8 @@
 #include "NiagaraSystem.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
+#include "SlimeCharacter.h"
+#include "GameFramework/Pawn.h"
 
 AEnemyProjectile::AEnemyProjectile()
 {
@@ -223,11 +225,16 @@ void AEnemyProjectile::Tick(float DeltaSeconds)
 		{
 			AlreadyHit.Reset();
 			FSlimeSkillDef Impact = EnemyCombat::ToSlimeHitSkill(Skill);
-			Impact.Exec = ESlimeSkillExec::AoE;
+			Impact.Exec = ESlimeSkillExec::Projectile;
 			Impact.Hit.Shape = ESlimeHitShape::Sphere;
 			Impact.Hit.Radius = FMath::Max(Skill.Hit.Radius * 2.f, 60.f);
 			Impact.Hit.Range = 0.f;
 			Impact.Hit.OriginForwardOffset = 0.f;
+			// BP-overridden LaunchZ still lifts short slime; keep missile knockback horizontal vs player.
+			if (Cast<ASlimeCharacter>(Target) || (Cast<APawn>(Target) && Cast<APawn>(Target)->IsPlayerControlled()))
+			{
+				Impact.LaunchZ = 0.f;
+			}
 			USlimeHitProbe::PerformHit(Source.Get(), Impact, Hit.ImpactPoint, Velocity.GetSafeNormal(), AlreadyHit);
 			bExplode = true;
 			bHitEnemy = true;

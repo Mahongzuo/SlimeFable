@@ -16,6 +16,7 @@
 #include "NiagaraSystem.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeStatusComponent.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -311,9 +312,22 @@ void AEnemyTower::StartFiring()
 	if (!GetWorld()->GetTimerManager().IsTimerActive(FireTimerHandle))
 	{
 		FireAtTarget();
+		const float IntervalMul = Status ? Status->GetAttackIntervalMul() : 1.f;
 		GetWorld()->GetTimerManager().SetTimer(
-			FireTimerHandle, this, &AEnemyTower::FireAtTarget, FireInterval, true);
+			FireTimerHandle, this, &AEnemyTower::FireAtTarget, FMath::Max(FireInterval * IntervalMul, 0.1f), true);
 	}
+}
+
+void AEnemyTower::RefreshFireCadence()
+{
+	UWorld* World = GetWorld();
+	if (!World || !World->GetTimerManager().IsTimerActive(FireTimerHandle))
+	{
+		return;
+	}
+	const float IntervalMul = Status ? Status->GetAttackIntervalMul() : 1.f;
+	World->GetTimerManager().SetTimer(
+		FireTimerHandle, this, &AEnemyTower::FireAtTarget, FMath::Max(FireInterval * IntervalMul, 0.1f), true);
 }
 
 void AEnemyTower::StopFiring()
@@ -515,7 +529,9 @@ void AEnemyTower::FireBeam(AActor* Target)
 		BeamEnd = EndAim;
 		if (!bHarmless)
 		{
-			const FVector Impulse = (EndAim - Start).GetSafeNormal() * 180.f;
+			// Horizontal knock only — vertical impulse made short slime jump/squash on hit.
+			FVector Impulse = (EndAim - Start).GetSafeNormal() * 180.f;
+			Impulse.Z = 0.f;
 			if (ICombatDamageable* Damageable = Cast<ICombatDamageable>(Target))
 			{
 				Damageable->ApplyDamage(BeamDamage, this, BeamEnd, Impulse);

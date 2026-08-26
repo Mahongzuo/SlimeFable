@@ -28,6 +28,9 @@ public:
 	virtual void OnRestoredToSpawn() override;
 	virtual void ApplyDifficultyToCombat(float DamageMul, float IntervalMul) override;
 
+	/** Restart the fire timer using current FireInterval * 潮湿 attack-interval mul. */
+	void RefreshFireCadence();
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Tower", meta = (ClampMin = "100.0", Units = "cm"))
 	float AttackRange = 1000.f;
 

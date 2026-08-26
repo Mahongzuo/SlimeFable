@@ -50,7 +50,7 @@ FEnemySkillDef EnemyCombat::MakeDefaultMissileSkill()
 	Skill.Recovery = 0.2f;
 	Skill.Damage = 16.f;
 	Skill.Knockback = 200.f;
-	Skill.LaunchZ = 40.f;
+	Skill.LaunchZ = 0.f;
 	Skill.ProjectileSpeed = 1800.f;
 	Skill.ProjectileLife = 2.2f;
 	Skill.HomingRange = 1600.f;
@@ -77,12 +77,12 @@ void EnemyCombat::FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 18.f;
 		Move.Skill.Knockback = 380.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 80.f;
-		Move.Skill.Hit.Range = 130.f;
+		Move.Skill.Hit.Radius = 70.f;
+		Move.Skill.Hit.Range = 120.f;
 		Move.Skill.Hit.OriginForwardOffset = 40.f;
 		Move.Skill.Hit.OriginZOffset = -55.f;
 		Move.MinRange = 0.f;
-		Move.MaxRange = 220.f;
+		Move.MaxRange = 200.f;
 		Move.Weight = 1.4f;
 		Move.TelegraphTime = 0.2f;
 		Move.Cooldown = 0.8f;
@@ -120,7 +120,7 @@ void EnemyCombat::FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill = MakeDefaultMissileSkill();
 		Move.Skill.DisplayName = FText::FromString(TEXT("Bolt"));
 		Move.Skill.Damage = 14.f;
-		Move.MinRange = 300.f;
+		Move.MinRange = 200.f;
 		Move.MaxRange = 1400.f;
 		Move.Weight = 1.1f;
 		Move.TelegraphTime = 0.35f;
@@ -142,11 +142,11 @@ void EnemyCombat::FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Knockback = 500.f;
 		Move.Skill.LaunchZ = 220.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 280.f;
+		Move.Skill.Hit.Radius = 160.f;
 		Move.Skill.Hit.Range = 0.f;
 		Move.Skill.Hit.OriginForwardOffset = 0.f;
 		Move.MinRange = 0.f;
-		Move.MaxRange = 320.f;
+		Move.MaxRange = 200.f;
 		Move.Weight = 0.7f;
 		Move.TelegraphTime = 0.55f;
 		Move.Cooldown = 4.f;
@@ -175,7 +175,7 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Hit.OriginForwardOffset = 45.f;
 		Move.Skill.Hit.OriginZOffset = -55.f;
 		Move.MinRange = 0.f;
-		Move.MaxRange = 240.f;
+		Move.MaxRange = 200.f;
 		Move.Weight = 1.5f;
 		Move.TelegraphTime = 0.12f;
 		Move.Cooldown = 0.7f;
@@ -199,7 +199,7 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Hit.OriginForwardOffset = 50.f;
 		Move.Skill.Hit.OriginZOffset = -55.f;
 		Move.MinRange = 0.f;
-		Move.MaxRange = 260.f;
+		Move.MaxRange = 200.f;
 		Move.Weight = 1.1f;
 		Move.TelegraphTime = 0.16f;
 		Move.Cooldown = 1.1f;

@@ -10,6 +10,7 @@ class AEnemyCharacter;
 class USlimeBodyComponent;
 class USlimeElementComponent;
 class USlimeDevourComponent;
+class USlimeDodgeComponent;
 class USlimePhantomWheelWidget;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
@@ -148,6 +149,8 @@ private:
 	void UpdateSlimeOpacity(float Alpha);
 	void PossessEnemy();
 	void PossessSlime();
+	void EnsureMorphDodge();
+	void ClearMorphDodge();
 	void SetSlimeMovementEnabled(bool bEnabled);
 	void SetMorphTargetGameplayEnabled(bool bEnabled);
 	void CacheUnmorphPoseAndFreezeTarget();
@@ -187,6 +190,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AEnemyCharacter> MorphTarget;
 
+	/** Dodge component created on MorphTarget while player-possessed. */
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeDodgeComponent> MorphDodge;
+
 	/** Original materials saved before swapping to M_SlimeMorph, restored on cleanup. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInterface>> SavedEnemyMaterials;
@@ -222,6 +229,8 @@ private:
 
 	// Locomotion state for single-node-anim enemies.
 	bool bMorphWalkPlaying = false;
+	bool bMorphRunPlaying = false;
+	bool bMorphJumpPlaying = false;
 	float MorphIdleTimer = 0.f;
 
 	// Morph wheel state.

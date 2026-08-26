@@ -3,15 +3,18 @@
 #include "SlimeLockOnComponent.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Engine/OverlapResult.h"
+#include "EnemyCharacter.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "SlimeCharacter.h"
 #include "SlimeFableCharacter.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockTarget.h"
@@ -53,7 +56,6 @@ void USlimeLockOnComponent::BindInput(UEnhancedInputComponent* EnhancedInput)
 	{
 		EnhancedInput->BindAction(LockOnAction, ETriggerEvent::Started, this, &USlimeLockOnComponent::ToggleLockOn);
 		bLockOnActionBound = true;
-		// Enhanced Input already owns the press edge — polling the same MiddleMouse would double-toggle.
 		bPollLockOnKey = false;
 	}
 }
@@ -105,7 +107,6 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 				bDown = PC->IsInputKeyDown(EKeys::MiddleMouseButton);
 			}
 
-			// Rising edge only — WasInputKeyJustPressed can fire two frames on MMB.
 			if (bDown && !bPollLockDown)
 			{
 				ToggleLockOn();
@@ -141,6 +142,20 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 
 	ApplyLockCamera(DeltaTime);
+}
+
+void USlimeLockOnComponent::BeginLockCameraFraming()
+{
+	if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner()))
+	{
+		if (!bHaveSavedArmLength)
+		{
+			SavedDesiredArmLength = Slime->GetDesiredCameraArmLength();
+			bHaveSavedArmLength = true;
+		}
+		Slime->SetLockOnFramingActive(true);
+		Slime->SetLockOnFramingArm(Slime->CameraArmLengthMin, LockOnArmLengthMax);
+	}
 }
 
 void USlimeLockOnComponent::ToggleLockOn()
@@ -181,6 +196,7 @@ void USlimeLockOnComponent::ToggleLockOn()
 	{
 		LockedTarget = Target;
 		LockedHealth = Target->FindComponentByClass<USlimeHealthComponent>();
+		BeginLockCameraFraming();
 		if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 		{
 			if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
@@ -221,18 +237,29 @@ void USlimeLockOnComponent::ClearLockOn()
 
 void USlimeLockOnComponent::RestoreCameraBoom()
 {
-	if (!bHaveSavedBoom)
+	AppliedFramingFloorArm = 0.f;
+	FramingFloorArm = 120.f;
+	if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner()))
 	{
-		return;
-	}
-	if (ASlimeFableCharacter* Character = Cast<ASlimeFableCharacter>(GetOwner()))
-	{
-		if (USpringArmComponent* Boom = Character->GetCameraBoom())
+		Slime->SetLockOnFramingActive(false);
+		if (bHaveSavedArmLength)
 		{
-			Boom->SocketOffset = SavedBoomSocketOffset;
+			Slime->SetDesiredCameraArmLengthClamped(SavedDesiredArmLength);
+			bHaveSavedArmLength = false;
 		}
 	}
-	bHaveSavedBoom = false;
+
+	if (bHaveSavedBoom)
+	{
+		if (ASlimeFableCharacter* Character = Cast<ASlimeFableCharacter>(GetOwner()))
+		{
+			if (USpringArmComponent* Boom = Character->GetCameraBoom())
+			{
+				Boom->SocketOffset = SavedBoomSocketOffset;
+			}
+		}
+		bHaveSavedBoom = false;
+	}
 }
 
 void USlimeLockOnComponent::RestoreMovement()
@@ -248,6 +275,7 @@ void USlimeLockOnComponent::RestoreMovement()
 			Movement->bOrientRotationToMovement = bSavedOrientToMovement;
 		}
 	}
+	bHaveSavedMovement = false;
 }
 
 AActor* USlimeLockOnComponent::FindBestTarget() const
@@ -319,6 +347,74 @@ AActor* USlimeLockOnComponent::FindBestTarget() const
 	return Best;
 }
 
+void USlimeLockOnComponent::GetActorVerticalSpan(const AActor* Actor, float& OutMinZ, float& OutMaxZ) const
+{
+	OutMinZ = Actor ? Actor->GetActorLocation().Z : 0.f;
+	OutMaxZ = OutMinZ + 100.f;
+	if (!Actor)
+	{
+		return;
+	}
+
+	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Actor))
+	{
+		FBox Box;
+		if (Enemy->GetStableMeshBounds(Box))
+		{
+			OutMinZ = Box.Min.Z;
+			OutMaxZ = Box.Max.Z;
+			return;
+		}
+	}
+
+	if (const ACharacter* Character = Cast<ACharacter>(Actor))
+	{
+		if (const UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+		{
+			const FVector Loc = Capsule->GetComponentLocation();
+			const float Half = Capsule->GetScaledCapsuleHalfHeight();
+			OutMinZ = Loc.Z - Half;
+			OutMaxZ = Loc.Z + Half;
+			return;
+		}
+	}
+
+	FVector Origin;
+	FVector Extent;
+	Actor->GetActorBounds(true, Origin, Extent);
+	OutMinZ = Origin.Z - Extent.Z;
+	OutMaxZ = Origin.Z + Extent.Z;
+}
+
+float USlimeLockOnComponent::ComputeFramingArmLength(
+	float FrameHeight,
+	float HorizontalSep,
+	const UCameraComponent* Cam) const
+{
+	float HalfVFovRad = FMath::DegreesToRadians(35.f);
+	if (Cam)
+	{
+		float Aspect = 16.f / 9.f;
+		if (const APlayerController* PC = GetPlayerController())
+		{
+			int32 SizeX = 0;
+			int32 SizeY = 0;
+			PC->GetViewportSize(SizeX, SizeY);
+			if (SizeX > 0 && SizeY > 0)
+			{
+				Aspect = static_cast<float>(SizeX) / static_cast<float>(SizeY);
+			}
+		}
+		const float HalfHFovRad = FMath::DegreesToRadians(Cam->FieldOfView * 0.5f);
+		HalfVFovRad = FMath::Atan(FMath::Tan(HalfHFovRad) / FMath::Max(Aspect, 0.1f));
+	}
+
+	const float TanHalf = FMath::Max(FMath::Tan(HalfVFovRad), 0.05f);
+	float Needed = (FrameHeight * 0.5f) / TanHalf * FramingSlack;
+	Needed += HorizontalSep * 0.2f;
+	return FMath::Min(Needed, LockOnArmLengthMax);
+}
+
 void USlimeLockOnComponent::ApplyLockCamera(float DeltaTime)
 {
 	ACharacter* Character = Cast<ACharacter>(GetOwner());
@@ -329,31 +425,78 @@ void USlimeLockOnComponent::ApplyLockCamera(float DeltaTime)
 		return;
 	}
 
-	if (ASlimeFableCharacter* Slime = Cast<ASlimeFableCharacter>(Character))
+	USpringArmComponent* Boom = nullptr;
+	if (ASlimeFableCharacter* SlimeBase = Cast<ASlimeFableCharacter>(Character))
 	{
-		if (USpringArmComponent* Boom = Slime->GetCameraBoom())
+		Boom = SlimeBase->GetCameraBoom();
+		if (Boom)
 		{
 			if (!bHaveSavedBoom)
 			{
 				SavedBoomSocketOffset = Boom->SocketOffset;
 				bHaveSavedBoom = true;
 			}
-			Boom->SocketOffset = SavedBoomSocketOffset;
+			FVector Offset = SavedBoomSocketOffset;
+			Offset.Z = FMath::Max(Offset.Z, LockSocketLiftZ);
+			Boom->SocketOffset = Offset;
 		}
 	}
 
+	float SelfMinZ = 0.f;
+	float SelfMaxZ = 0.f;
+	float TargetMinZ = 0.f;
+	float TargetMaxZ = 0.f;
+	GetActorVerticalSpan(Character, SelfMinZ, SelfMaxZ);
+	GetActorVerticalSpan(Target, TargetMinZ, TargetMaxZ);
+
+	const float FrameMinZ = FMath::Min(SelfMinZ, TargetMinZ) - FramingPadding;
+	const float FrameMaxZ = FMath::Max(SelfMaxZ, TargetMaxZ) + FramingPadding;
+	const float FrameHeight = FMath::Max(FrameMaxZ - FrameMinZ, 80.f);
+
+	const FVector SelfLoc = Character->GetActorLocation();
+	FVector TargetFocusXY = Target->GetActorLocation();
+	if (const ISlimeLockTarget* LockTarget = Cast<ISlimeLockTarget>(Target))
+	{
+		TargetFocusXY = LockTarget->GetLockOnLocation();
+	}
+	const float W = FMath::Clamp(FocusEnemyWeight, 0.f, 1.f);
+	FVector Focus;
+	Focus.X = FMath::Lerp(SelfLoc.X, TargetFocusXY.X, W);
+	Focus.Y = FMath::Lerp(SelfLoc.Y, TargetFocusXY.Y, W);
+	Focus.Z = (FrameMinZ + FrameMaxZ) * 0.5f;
+
+	const FVector From = Boom
+		? Boom->GetComponentLocation()
+		: (SelfLoc + FVector(0.f, 0.f, 40.f));
+
 	UCameraComponent* Cam = Character->FindComponentByClass<UCameraComponent>();
-	const FVector From = Cam
-		? Cam->GetComponentLocation()
-		: Character->GetActorLocation() + FVector(0.f, 0.f, 40.f);
-	const FVector Focus = (Character->GetActorLocation() + Target->GetActorLocation()) * 0.5f + FVector(0.f, 0.f, 40.f);
+	const float HorizontalSep = FVector::Dist2D(SelfLoc, Target->GetActorLocation());
+	const float NewFloor = ComputeFramingArmLength(FrameHeight, HorizontalSep, Cam);
+	if (AppliedFramingFloorArm <= KINDA_SMALL_NUMBER
+		|| NewFloor > AppliedFramingFloorArm + KINDA_SMALL_NUMBER
+		|| FMath::Abs(NewFloor - AppliedFramingFloorArm) >= FramingArmHysteresis)
+	{
+		AppliedFramingFloorArm = NewFloor;
+	}
+	FramingFloorArm = AppliedFramingFloorArm;
+
+	if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(Character))
+	{
+		Slime->SetLockOnFramingActive(true);
+		Slime->SetLockOnFramingArm(FramingFloorArm, LockOnArmLengthMax);
+		if (Slime->GetDesiredCameraArmLength() < FramingFloorArm)
+		{
+			Slime->SetDesiredCameraArmLengthClamped(FramingFloorArm);
+		}
+	}
+
 	FRotator Desired = (Focus - From).Rotation();
-	Desired.Pitch = FMath::Clamp(Desired.Pitch, -8.f, 10.f);
+	Desired.Pitch = FMath::Clamp(Desired.Pitch, LockPitchMin, LockPitchMax);
 	Desired.Roll = 0.f;
 
 	FRotator Current = PC->GetControlRotation();
 	Current = FMath::RInterpTo(Current, Desired, DeltaTime, 8.f);
-	Current.Pitch = FMath::Clamp(Current.Pitch, -8.f, 10.f);
+	Current.Pitch = FMath::Clamp(Current.Pitch, LockPitchMin, LockPitchMax);
 	Current.Roll = 0.f;
 	PC->SetControlRotation(Current);
 

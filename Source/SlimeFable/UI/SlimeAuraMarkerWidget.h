@@ -4,10 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "SlimeElementTypes.h"
 #include "SlimeAuraMarkerWidget.generated.h"
 
 class UTextBlock;
-enum class ESlimeElement : uint8;
 
 /** Tiny screen-space label above enemies showing applied element aura. */
 UCLASS()
@@ -17,8 +17,9 @@ class SLIMEFABLE_API USlimeAuraMarkerWidget : public UUserWidget
 
 public:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
-	void SetAura(ESlimeElement Element, bool bVisible);
+	void SetAura(ESlimeElement Element, float RemainingSec, bool bVisible);
 	void SetReactionResidue(const FText& ReactionName, const FLinearColor& Color);
 
 protected:
@@ -26,4 +27,7 @@ protected:
 	TObjectPtr<UTextBlock> LabelText;
 
 	bool bBuiltInCode = false;
+	bool bAuraVisible = false;
+	ESlimeElement DisplayedElement = ESlimeElement::Water;
+	float DisplayedRemaining = 0.f;
 };

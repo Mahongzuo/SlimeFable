@@ -206,6 +206,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;
 
+	/** Hold Sprint while player-morphed: MaxWalkSpeed multiplier. Default 1.5. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Move", meta = (ClampMin = "1.0", ClampMax = "3.0",
+		ToolTip = "幻形玩家按住冲刺键时 MaxWalkSpeed 倍率。默认 1.5。"))
+	float SprintSpeedMul = 1.5f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat",
 		meta = (ToolTip = "敌人在遭遇中的职责：看门狗追击、武士决斗、机枪手压制、天皇指挥。"))
 	EEnemyCombatRole CombatRole = EEnemyCombatRole::Duelist;
@@ -387,6 +392,10 @@ public:
 	void PlayMeshAnimation(UAnimationAsset* Asset, bool bLoop);
 	void StopMeshAnimation();
 
+	/** Morph locomotion: true after MorphJump until landed. */
+	bool IsMorphJumpAnimActive() const { return bMorphJumpAnimActive; }
+	void ClearMorphJumpAnim() { bMorphJumpAnimActive = false; }
+
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	virtual bool IsInCombat() const;
 
@@ -396,7 +405,10 @@ protected:
 	/** Enhanced Input handlers for morph body movement / look. */
 	void MorphMove(const FInputActionValue& Value);
 	void MorphLook(const FInputActionValue& Value);
+	/** Play jump montage immediately (single-node), then Character::Jump. */
+	void MorphJump();
 	void UpdateMorphSafeTransform();
+	void UpdateMorphSprintSpeed();
 
 	virtual void OnRestoredToSpawn();
 	void TickOutOfCombatReset(float DeltaSeconds);
@@ -513,6 +525,8 @@ protected:
 	TObjectPtr<UInputAction> MorphMouseLookAction;
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> MorphJumpAction;
+	/** Set in MorphJump; cleared by morph locomotion on land. */
+	bool bMorphJumpAnimActive = false;
 	bool bDifficultyBasesCaptured = false;
 	float DifficultyBaseMaxHP = 200.f;
 	float DeathDissolveElapsed = 0.f;

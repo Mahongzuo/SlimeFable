@@ -71,7 +71,26 @@ protected:
 	void FacePlayer();
 	void RequestMoveToPreferred(float Dist);
 	void ResetChaseFallback();
+	bool TryMoveToNavLocation(const FVector& Dest);
+	/** Sample points toward focus (fwd / fwd-side / side); MoveTo first navigable. */
+	bool RequestNavDetourTowardFocus();
+	void PlayChaseLocomotionIfMoving();
 	void ClearTelegraphFx();
+	bool IsMeleeEngageMove(const FEnemyMoveDef& Move) const;
+	bool IsRangedProjectileMove(const FEnemyMoveDef& Move) const;
+	bool IsGapCloserDashMove(const FEnemyMoveDef& Move) const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "水平距离 ≤ 此值才可选近战/近距 AoE；更远仅远程（CD 好），否则只追击。默认 200。"))
+	float MeleeEngageDistance = 200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "卡住时朝玩家方向绕障采样距离。默认 160。"))
+	float SideStepOffset = 160.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI", meta = (ClampMin = "0.1", Units = "s",
+		ToolTip = "Nav 全失败后短直推最长秒数，超时改再采 Nav。默认 0.75。"))
+	float DirectChaseMaxSeconds = 0.75f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AEnemyFighter> Fighter;
@@ -94,6 +113,8 @@ protected:
 	float ChaseStalledSeconds = 0.f;
 	FVector ChaseLastPos = FVector::ZeroVector;
 	bool bDirectChaseFallback = false;
+	float DirectChaseActiveSeconds = 0.f;
+	int32 DetourSampleIndex = 0;
 	TArray<float> MoveCooldowns;
 	TWeakObjectPtr<UNiagaraComponent> TelegraphFx;
 	TWeakObjectPtr<UAnimMontage> PlayingIdleMontage;

@@ -2,6 +2,7 @@
 
 #include "SlimeDodgeComponent.h"
 
+#include "Components/SkeletalMeshComponent.h"
 #include "EnemyCharacter.h"
 #include "EnemyFighter.h"
 #include "EnemyTower.h"
@@ -317,18 +318,50 @@ void USlimeDodgeComponent::SpawnAfterimage()
 		return;
 	}
 
-	USlimeBodyComponent* Body = Owner->FindComponentByClass<USlimeBodyComponent>();
-	if (!Body)
+	FActorSpawnParameters Params;
+	Params.Owner = Owner;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ASlimeDodgeAfterimage* Ghost = World->SpawnActor<ASlimeDodgeAfterimage>(
+		ASlimeDodgeAfterimage::StaticClass(), FTransform::Identity, Params);
+	if (!Ghost)
 	{
 		return;
 	}
 
-	FActorSpawnParameters Params;
-	Params.Owner = Owner;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	if (ASlimeDodgeAfterimage* Ghost = World->SpawnActor<ASlimeDodgeAfterimage>(
-			ASlimeDodgeAfterimage::StaticClass(), FTransform::Identity, Params))
+	if (USlimeBodyComponent* Body = Owner->FindComponentByClass<USlimeBodyComponent>())
 	{
 		Ghost->CaptureFromSlime(Body, AfterimageLife);
+		return;
 	}
+
+	USkeletalMeshComponent* Source = nullptr;
+	if (const ACharacter* Character = Cast<ACharacter>(Owner))
+	{
+		Source = Character->GetMesh();
+	}
+	if (!Source || !Source->GetSkeletalMeshAsset())
+	{
+		if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+		{
+			for (USceneComponent* Part : Enemy->GetGeneratedParts())
+			{
+				if (USkeletalMeshComponent* PartSkel = Cast<USkeletalMeshComponent>(Part))
+				{
+					if (PartSkel->GetSkeletalMeshAsset())
+					{
+						Source = PartSkel;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (Source && Source->GetSkeletalMeshAsset())
+	{
+		Ghost->CaptureFromSkeletalMesh(Source, AfterimageLife);
+		return;
+	}
+
+	Ghost->Destroy();
 }

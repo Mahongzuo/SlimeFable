@@ -23,14 +23,19 @@
 #include "Components/WidgetComponent.h"
 #include "EnemyCombatComponent.h"
 #include "EnemyPresenceSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "InputCoreTypes.h"
+#include "Settings/SlimeInputSettings.h"
+#include "Settings/SlimeInputTypes.h"
 #include "SlimeFableCharacter.h"
 #include "Slime/SlimeMorphComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -59,6 +64,10 @@ AEnemyCharacter::AEnemyCharacter()
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.f);
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->CanCharacterStepUpOn = ECB_No;
+	}
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 
 	if (USkeletalMeshComponent* CharMesh = GetMesh())
@@ -120,6 +129,7 @@ AEnemyCharacter::AEnemyCharacter()
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
 		Move->MaxWalkSpeed = 420.f;
+		Move->MaxStepHeight = 60.f;
 		Move->bOrientRotationToMovement = true;
 		Move->RotationRate = FRotator(0.f, 480.f, 0.f);
 	}
@@ -280,10 +290,56 @@ void AEnemyCharacter::Tick(float DeltaSeconds)
 	if (bMorphTarget)
 	{
 		UpdateMorphSafeTransform();
+		if (IsPlayerControlled())
+		{
+			UpdateMorphSprintSpeed();
+		}
 		return;
 	}
 	TickOutOfCombatReset(DeltaSeconds);
 	TickPoiseRegen(DeltaSeconds);
+}
+
+void AEnemyCharacter::UpdateMorphSprintSpeed()
+{
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!Move || !PC)
+	{
+		return;
+	}
+	if (!Combat || !Combat->IsPlayerMorphed())
+	{
+		return;
+	}
+
+	bool bSprint = false;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UGameInstance* GI = World->GetGameInstance())
+		{
+			if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+			{
+				bSprint = InputSettings->IsKeyDown(PC, ESlimeInputAction::Sprint);
+			}
+		}
+	}
+	if (!bSprint)
+	{
+		bSprint = PC->IsInputKeyDown(EKeys::LeftShift);
+	}
+
+	float Base = Move->MaxWalkSpeed;
+	if (const AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
+	{
+		Base = Fighter->WalkSpeed;
+	}
+	float StatusMul = 1.f;
+	if (Status)
+	{
+		StatusMul = Status->GetMoveSpeedMul();
+	}
+	Move->MaxWalkSpeed = Base * StatusMul * (bSprint ? SprintSpeedMul : 1.f);
 }
 
 void AEnemyCharacter::UpdateMorphSafeTransform()
@@ -1281,9 +1337,13 @@ void AEnemyCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVec
 	}
 
 	float FinalDamage = Damage;
+	if (Status)
+	{
+		FinalDamage *= Status->GetIncomingDamageMul();
+	}
 	if (Damage > 0.f && HasCombatStateTag(SlimeEnemyTags::State_Guarding))
 	{
-		FinalDamage = Damage * FMath::Clamp(1.f - GuardDamageReduction, 0.f, 1.f);
+		FinalDamage = FinalDamage * FMath::Clamp(1.f - GuardDamageReduction, 0.f, 1.f);
 		const float NewGuard = EnemyAttributes->GetGuard() - Damage;
 		EnemyAttributes->SetGuard(FMath::Max(NewGuard, 0.f));
 		if (NewGuard <= 0.f)
@@ -1309,11 +1369,34 @@ void AEnemyCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVec
 		{
 			Health->ApplyDamage(FinalDamage, DamageCauser, DamageLocation, DamageImpulse);
 		}
+		if (Status && FinalDamage > 0.f && DamageCauser && DamageCauser != this)
+		{
+			const float Steal = Status->GetAnnihilateLifestealFraction();
+			if (Steal > 0.f)
+			{
+				if (USlimeHealthComponent* CauserHealth = DamageCauser->FindComponentByClass<USlimeHealthComponent>())
+				{
+					CauserHealth->ApplyHealing(FinalDamage * Steal);
+				}
+			}
+		}
 		return;
 	}
 	Spec.Data->SetSetByCallerMagnitude(SlimeEnemyTags::Data_Damage, FinalDamage);
 	Spec.Data->SetSetByCallerMagnitude(SlimeEnemyTags::Data_PoiseDamage, PoiseDamage);
 	AbilitySystem->ApplyGameplayEffectSpecToSelf(*Spec.Data);
+
+	if (Status && FinalDamage > 0.f && DamageCauser && DamageCauser != this)
+	{
+		const float Steal = Status->GetAnnihilateLifestealFraction();
+		if (Steal > 0.f)
+		{
+			if (USlimeHealthComponent* CauserHealth = DamageCauser->FindComponentByClass<USlimeHealthComponent>())
+			{
+				CauserHealth->ApplyHealing(FinalDamage * Steal);
+			}
+		}
+	}
 }
 
 void AEnemyCharacter::OnGasDamageApplied(float Damage, AActor* DamageInstigator)
@@ -2051,6 +2134,7 @@ void AEnemyCharacter::InitAsMorphTarget(AActor* Master)
 	bMorphTarget = true;
 	bDevourable = false;
 	MorphMaster = Master;
+	bMorphJumpAnimActive = false;
 
 	// No AI — the player will possess this pawn.
 	AutoPossessAI = EAutoPossessAI::Disabled;
@@ -2103,8 +2187,7 @@ void AEnemyCharacter::InitAsMorphTarget(AActor* Master)
 	MorphFollowCamera->bUsePawnControlRotation = false;
 	MorphFollowCamera->RegisterComponent();
 
-	// Play an initial idle animation so single-node-anim enemies (e.g. watchdog) don't
-	// stand in T-pose or stuck in a prone pose when the morph body first appears.
+	// Standing idle only — loop so morph spawn never freezes on a mid jump/lie frame.
 	if (UsesSingleNodeAnims())
 	{
 		if (const AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
@@ -2113,12 +2196,11 @@ void AEnemyCharacter::InitAsMorphTarget(AActor* Master)
 			{
 				if (UAnimMontage* Idle = Fighter->IdleMontages[0].LoadSynchronous())
 				{
-					PlayMeshAnimation(Idle, false);
+					PlayMeshAnimation(Idle, true);
 				}
 			}
 			else if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
 			{
-				// No idle montages — fall back to a looping walk so at least the model is posed standing.
 				PlayMeshAnimation(Walk, true);
 			}
 		}
@@ -2138,7 +2220,7 @@ void AEnemyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 	{
 		if (MorphJumpAction)
 		{
-			EnhancedInput->BindAction(MorphJumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+			EnhancedInput->BindAction(MorphJumpAction, ETriggerEvent::Started, this, &AEnemyCharacter::MorphJump);
 			EnhancedInput->BindAction(MorphJumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 		}
 		if (MorphMoveAction)
@@ -2154,6 +2236,23 @@ void AEnemyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 			EnhancedInput->BindAction(MorphLookAction, ETriggerEvent::Triggered, this, &AEnemyCharacter::MorphLook);
 		}
 	}
+}
+
+void AEnemyCharacter::MorphJump()
+{
+	// Play takeoff immediately on press — waiting for IsFalling() always lags one physics step.
+	if (UsesSingleNodeAnims() && CanJump())
+	{
+		if (const AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
+		{
+			if (UAnimMontage* JumpAnim = Fighter->JumpMontage.LoadSynchronous())
+			{
+				PlayMeshAnimation(JumpAnim, false);
+				bMorphJumpAnimActive = true;
+			}
+		}
+	}
+	Jump();
 }
 
 void AEnemyCharacter::MorphMove(const FInputActionValue& Value)

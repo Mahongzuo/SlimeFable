@@ -20,11 +20,13 @@ class USlimeStatusComponent;
 class USlimeTrailComponent;
 class USlimePlacementComponent;
 class USlimeInteractComponent;
+class USlimeCheatComponent;
 class USlimeDodgeComponent;
 class USlimeVehicleComponent;
 class USlimeDevourComponent;
 class USlimeMorphComponent;
 class USlimePathSwordComponent;
+class USlimeFluidNinjaContactComponent;
 class UStaticMeshComponent;
 class USoundBase;
 class UAudioComponent;
@@ -71,6 +73,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "50.0"))
 	float CameraArmLengthMin = 120.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera",
+		meta = (ClampMin = "-89.0", ClampMax = "0.0", ToolTip = "自由视角俯视下限。默认 -32。"))
+	float ViewPitchMin = -32.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera",
+		meta = (ClampMin = "0.0", ClampMax = "89.0", ToolTip = "自由视角仰视上限。默认 10。"))
+	float ViewPitchMax = 10.f;
+
 	/** Farthest zoom (longest arm), in cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "100.0"))
 	float CameraArmLengthMax = 520.f;
@@ -82,6 +92,16 @@ public:
 	/** How quickly the boom eases toward the desired length (higher = snappier). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "1.0", ClampMax = "30.0"))
 	float CameraZoomInterpSpeed = 8.f;
+
+	/** Hold Sprint key multiplier on MaxWalkSpeed. Default 1.5. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Move", meta = (ClampMin = "1.0", ClampMax = "3.0",
+		ToolTip = "按住冲刺键时 MaxWalkSpeed 倍率。默认 1.5。"))
+	float SprintSpeedMul = 1.5f;
+
+	/** Base walk speed before sprint / status multipliers. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Move", meta = (ClampMin = "50.0", Units = "cm/s",
+		ToolTip = "基础走路速度（冲刺前）。默认 420。"))
+	float BaseWalkSpeed = 420.f;
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeBodyComponent* GetSlimeBody() const { return SlimeBody; }
@@ -180,6 +200,12 @@ public:
 	float AdjustCameraZoom(int32 WheelSteps);
 	float GetDesiredCameraArmLength() const { return DesiredCameraArmLength; }
 
+	/** Lock-on framing drives DesiredCameraArmLength; skips free-look socket lerp while active. */
+	void SetLockOnFramingActive(bool bActive);
+	bool IsLockOnFramingActive() const { return bLockOnFramingActive; }
+	void SetLockOnFramingArm(float FramingFloorArm, float FramingMaxArm);
+	void SetDesiredCameraArmLengthClamped(float Length);
+
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse) override;
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -195,9 +221,11 @@ protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	void UpdateCameraZoom(float DeltaSeconds);
+	void ApplyCameraViewLimits();
 
 	/** When move/jump keys are customized, drive CMC from SlimeInputSettings. */
 	void PollCustomMoveKeys(float DeltaSeconds);
+	void UpdateSprintSpeed();
 
 	void TickFootsteps(float DeltaSeconds);
 	void PlayJumpSound();
@@ -255,6 +283,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	TObjectPtr<USlimeInteractComponent> SlimeInteract;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Cheat")
+	TObjectPtr<USlimeCheatComponent> SlimeCheat;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<USlimeDodgeComponent> SlimeDodge;
 
@@ -274,11 +305,19 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<USlimePathSwordComponent> PathSword;
 
+	/** FluidNinja LIVE footprint / body contact proxies (WorldDynamic overlap spheres). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|FluidNinja")
+	TObjectPtr<USlimeFluidNinjaContactComponent> SlimeFluidNinjaContact;
+
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;
 
 	/** Desired spring-arm length the boom smoothly follows. */
 	float DesiredCameraArmLength = 260.f;
+
+	bool bLockOnFramingActive = false;
+	float LockOnFramingFloorArm = 120.f;
+	float LockOnFramingMaxArm = 420.f;
 
 	/** Accumulator for ground footstep cadence. */
 	float FootstepTimer = 0.f;

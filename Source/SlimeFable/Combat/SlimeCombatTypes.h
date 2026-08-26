@@ -83,6 +83,7 @@ enum class ESlimeReactionKind : uint8
 	LightningSwirl,
 	VoidShock,
 	MurkTide,
+	DarkSwirl,
 	BreakPoise
 };
 
@@ -312,4 +313,6 @@ namespace SlimeCombat
 	SLIMEFABLE_API void FillDefaultReactions(TArray<FSlimeReactionRow>& OutRows);
 	SLIMEFABLE_API FLinearColor GetElementVfxColor(ESlimeElement Element);
 	SLIMEFABLE_API FText GetReactionDisplayName(ESlimeReactionKind Kind);
+	/** Enemy-overhead aura name (风蚀/磁暴/潮湿/灼烧/虚弱/湮灭). Wheel still uses element names. */
+	SLIMEFABLE_API FText GetAuraStatusDisplayName(ESlimeElement Element);
 }

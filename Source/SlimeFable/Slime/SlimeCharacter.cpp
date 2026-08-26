@@ -3,6 +3,7 @@
 #include "SlimeCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EnhancedInputComponent.h"
@@ -22,12 +23,15 @@
 #include "SlimeDodgeComponent.h"
 #include "SlimeDevourComponent.h"
 #include "SlimePathSwordComponent.h"
+#include "SlimeFluidNinjaContactComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeMorphComponent.h"
+#include "SlimeSpringArmComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
 #include "Inventory/SlimeInteractComponent.h"
+#include "Settings/SlimeCheatComponent.h"
 #include "SlimeVehicleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -63,8 +67,9 @@ namespace SlimeMoveAudio
 }
 
 ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer.SetDefaultSubobjectClass<USlimeCharacterMovementComponent>(
-		ACharacter::CharacterMovementComponentName))
+	: Super(ObjectInitializer
+		.SetDefaultSubobjectClass<USlimeCharacterMovementComponent>(ACharacter::CharacterMovementComponentName)
+		.SetDefaultSubobjectClass<USlimeSpringArmComponent>(TEXT("CameraBoom")))
 {
 	PrimaryActorTick.bCanEverTick = true;
 	FootstepSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultFootstep));
@@ -90,13 +95,16 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	{
 		Boom->TargetArmLength = CameraArmLengthDefault;
 		Boom->SocketOffset = FVector(0.f, 0.f, 12.f);
-		Boom->ProbeSize = 8.f;
 		Boom->bEnableCameraLag = true;
 		Boom->CameraLagSpeed = 12.f;
 	}
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		// Needed for FluidNinja Live Activation (PawnInsideActivationBounds).
+		Capsule->SetGenerateOverlapEvents(true);
+		// Enemies must not treat the short slime capsule as a step-up ledge.
+		Capsule->CanCharacterStepUpOn = ECB_No;
 	}
 	DesiredCameraArmLength = CameraArmLengthDefault;
 
@@ -188,11 +196,13 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SlimeCling = CreateDefaultSubobject<USlimeClingComponent>(TEXT("SlimeCling"));
 	SlimePlacement = CreateDefaultSubobject<USlimePlacementComponent>(TEXT("SlimePlacement"));
 	SlimeInteract = CreateDefaultSubobject<USlimeInteractComponent>(TEXT("SlimeInteract"));
+	SlimeCheat = CreateDefaultSubobject<USlimeCheatComponent>(TEXT("SlimeCheat"));
 	SlimeDodge = CreateDefaultSubobject<USlimeDodgeComponent>(TEXT("SlimeDodge"));
 	SlimeDevour = CreateDefaultSubobject<USlimeDevourComponent>(TEXT("SlimeDevour"));
 	SlimeVehicle = CreateDefaultSubobject<USlimeVehicleComponent>(TEXT("SlimeVehicle"));
 	SlimeMorph = CreateDefaultSubobject<USlimeMorphComponent>(TEXT("SlimeMorph"));
 	PathSword = CreateDefaultSubobject<USlimePathSwordComponent>(TEXT("PathSword"));
+	SlimeFluidNinjaContact = CreateDefaultSubobject<USlimeFluidNinjaContactComponent>(TEXT("SlimeFluidNinjaContact"));
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(RootComponent);
@@ -255,6 +265,7 @@ void ASlimeCharacter::BeginPlay()
 	PrimaryActorTick.bCanEverTick = true;
 	SpawnTransform = GetActorTransform();
 	bPlayerDead = false;
+	ApplyCameraViewLimits();
 	if (SlimeHealth)
 	{
 		SlimeHealth->OnDied.AddDynamic(this, &ASlimeCharacter::HandleDeath);
@@ -272,6 +283,7 @@ void ASlimeCharacter::BeginPlay()
 void ASlimeCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
+	ApplyCameraViewLimits();
 	if (Cast<APlayerController>(NewController) && SlimeElement)
 	{
 		if (USlimeElementProgressSubsystem* Progress = USlimeElementProgressSubsystem::Get(this))
@@ -281,12 +293,27 @@ void ASlimeCharacter::PossessedBy(AController* NewController)
 	}
 }
 
+void ASlimeCharacter::ApplyCameraViewLimits()
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+	if (APlayerCameraManager* CamMgr = PC->PlayerCameraManager)
+	{
+		CamMgr->ViewPitchMin = ViewPitchMin;
+		CamMgr->ViewPitchMax = ViewPitchMax;
+	}
+}
+
 void ASlimeCharacter::Tick(float DeltaSeconds)
 {
 	LastVelocity = GetVelocity();
 	if (IsPlayerControlled())
 	{
 		PollCustomMoveKeys(DeltaSeconds);
+		UpdateSprintSpeed();
 	}
 	if (SlimeCling)
 	{
@@ -415,6 +442,11 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 		DeltaSeconds,
 		CameraZoomInterpSpeed);
 
+	if (bLockOnFramingActive)
+	{
+		return;
+	}
+
 	// Lower socket when zoomed in so the short slime stays framed (capsule ~40cm tall).
 	const float ArmAlpha = FMath::GetMappedRangeValueClamped(
 		FVector2D(CameraArmLengthMin, CameraArmLengthMax),
@@ -430,11 +462,35 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 
 float ASlimeCharacter::AdjustCameraZoom(int32 WheelSteps)
 {
+	const float MinArm = bLockOnFramingActive
+		? FMath::Max(CameraArmLengthMin, LockOnFramingFloorArm)
+		: CameraArmLengthMin;
+	const float MaxArm = bLockOnFramingActive ? LockOnFramingMaxArm : CameraArmLengthMax;
 	DesiredCameraArmLength = FMath::Clamp(
 		DesiredCameraArmLength + CameraZoomStep * WheelSteps,
-		CameraArmLengthMin,
-		CameraArmLengthMax);
+		MinArm,
+		MaxArm);
 	return DesiredCameraArmLength;
+}
+
+void ASlimeCharacter::SetLockOnFramingActive(bool bActive)
+{
+	bLockOnFramingActive = bActive;
+}
+
+void ASlimeCharacter::SetLockOnFramingArm(float FramingFloorArm, float FramingMaxArm)
+{
+	LockOnFramingFloorArm = FMath::Max(FramingFloorArm, CameraArmLengthMin);
+	LockOnFramingMaxArm = FMath::Max(FramingMaxArm, LockOnFramingFloorArm);
+}
+
+void ASlimeCharacter::SetDesiredCameraArmLengthClamped(float Length)
+{
+	const float MinArm = bLockOnFramingActive
+		? FMath::Max(CameraArmLengthMin, LockOnFramingFloorArm)
+		: CameraArmLengthMin;
+	const float MaxArm = bLockOnFramingActive ? LockOnFramingMaxArm : CameraArmLengthMax;
+	DesiredCameraArmLength = FMath::Clamp(Length, MinArm, MaxArm);
 }
 
 void ASlimeCharacter::NotifyControllerChanged()
@@ -501,6 +557,40 @@ void ASlimeCharacter::PollCustomMoveKeys(float DeltaSeconds)
 	{
 		StopJumping();
 	}
+}
+
+void ASlimeCharacter::UpdateSprintSpeed()
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!Movement || !PC)
+	{
+		return;
+	}
+
+	bool bSprint = false;
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
+			{
+				bSprint = InputSettings->IsKeyDown(PC, ESlimeInputAction::Sprint);
+			}
+		}
+	}
+	if (!bSprint)
+	{
+		bSprint = PC->IsInputKeyDown(EKeys::LeftShift);
+	}
+
+	float StatusMul = 1.f;
+	if (SlimeStatus)
+	{
+		StatusMul = SlimeStatus->GetMoveSpeedMul();
+	}
+	const float SprintMul = bSprint ? SprintSpeedMul : 1.f;
+	Movement->MaxWalkSpeed = BaseWalkSpeed * StatusMul * SprintMul;
 }
 
 void ASlimeCharacter::DoMove(float Right, float Forward)

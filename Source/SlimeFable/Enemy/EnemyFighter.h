@@ -112,8 +112,12 @@ public:
 	TSoftObjectPtr<UAnimMontage> WalkMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
-		meta = (ToolTip = "追逐时循环播（bABPDrivenLocomotion 勾上生效）。看门狗绑跑步（Run_F_IP）。空则回退 WalkMontage 加速。"))
+		meta = (ToolTip = "追逐时循环播（bABPDrivenLocomotion / 幻形冲刺）。看门狗绑跑步（Run_F_IP）。空则回退 WalkMontage 加速。"))
 	TSoftObjectPtr<UAnimMontage> RunMontage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
+		meta = (ToolTip = "玩家幻形起跳时单次播。看门狗绑 Jump_IP。空则跳跃无动作。"))
+	TSoftObjectPtr<UAnimMontage> JumpMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
 		meta = (ToolTip = "勾选后按 MaxWalkSpeed/WalkSpeed 匹配 Walk 蒙太奇 PlayRate（高速加速=跑），并在追逐时把 MaxWalkSpeed 提到 ChaseSpeed。看门狗勾上。"))

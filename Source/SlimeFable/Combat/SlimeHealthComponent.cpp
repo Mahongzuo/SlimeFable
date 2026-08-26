@@ -13,6 +13,9 @@
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
 #include "EnemyCharacter.h"
+#include "SlimeCharacter.h"
+#include "Settings/SlimeCheatSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "SlimeFable.h"
 #include "TimerManager.h"
 
@@ -68,7 +71,31 @@ bool USlimeHealthComponent::IsInvulnerable() const
 
 float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, const FVector& DamageLocation, const FVector& DamageImpulse)
 {
-	if (!IsAlive() || Damage <= 0.f || bDissolving || IsInvulnerable())
+	if (!IsAlive() || bDissolving || IsInvulnerable())
+	{
+		return 0.f;
+	}
+
+	bool bCheatGod = false;
+	if (Cast<ASlimeCharacter>(GetOwner()))
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (const UGameInstance* GI = World->GetGameInstance())
+			{
+				if (const USlimeCheatSubsystem* Cheats = GI->GetSubsystem<USlimeCheatSubsystem>())
+				{
+					bCheatGod = Cheats->IsGodMode();
+				}
+			}
+		}
+	}
+
+	if (bCheatGod)
+	{
+		Damage = 0.f;
+	}
+	else if (Damage <= 0.f)
 	{
 		return 0.f;
 	}
@@ -90,9 +117,13 @@ float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, con
 		{
 			Body->ApplyHitJolt();
 		}
-		if (USlimeCombatComponent* Combat = Owner->FindComponentByClass<USlimeCombatComponent>())
+		// God mode: still get hit (flash/knockback) but do not cancel player combos.
+		if (!bCheatGod)
 		{
-			Combat->InterruptCombat();
+			if (USlimeCombatComponent* Combat = Owner->FindComponentByClass<USlimeCombatComponent>())
+			{
+				Combat->InterruptCombat();
+			}
 		}
 		if (ACharacter* Character = Cast<ACharacter>(Owner))
 		{

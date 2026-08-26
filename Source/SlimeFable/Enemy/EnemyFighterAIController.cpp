@@ -11,12 +11,15 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "NavigationSystem.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
+#include "SlimeStatusComponent.h"
+#include "SlimeFable.h"
 #include "Components/StateTreeComponent.h"
 #include "StateTree.h"
 
@@ -127,6 +130,9 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	const float Dist = Player
 		? FVector::Dist(Fighter->GetActorLocation(), Player->GetActorLocation())
 		: TNumericLimits<float>::Max();
+	const float Dist2D = Player
+		? FVector::Dist2D(Fighter->GetActorLocation(), Player->GetActorLocation())
+		: TNumericLimits<float>::Max();
 
 	if (State == EEnemyFighterState::Idle)
 	{
@@ -165,7 +171,7 @@ void AEnemyFighterAIController::Tick(float DeltaSeconds)
 	{
 	case EEnemyFighterState::Combat:
 	case EEnemyFighterState::Choose:
-		TickCombat(DeltaSeconds, Dist);
+		TickCombat(DeltaSeconds, Dist2D);
 		break;
 	case EEnemyFighterState::Telegraph:
 		TickTelegraph(DeltaSeconds);
@@ -364,7 +370,8 @@ void AEnemyFighterAIController::ApplyLocomotionMaxSpeed(bool bChasing)
 	}
 	if (UCharacterMovementComponent* Move = Fighter->GetCharacterMovement())
 	{
-		Move->MaxWalkSpeed = bChasing ? Fighter->ChaseSpeed : Fighter->WalkSpeed;
+		Move->MaxWalkSpeed = (bChasing ? Fighter->ChaseSpeed : Fighter->WalkSpeed)
+			* (Fighter->GetEnemyStatus() ? Fighter->GetEnemyStatus()->GetMoveSpeedMul() : 1.f);
 	}
 	// 追逐时切 Run 蒙太奇，闲逛时切 Walk 蒙太奇。
 	if (bChasing)
@@ -578,8 +585,17 @@ void AEnemyFighterAIController::TickCombat(float DeltaSeconds, float Dist)
 			const int32 Next = FindMoveIndexById(Prev.NextMoveId);
 			if (Next != INDEX_NONE && MoveCooldowns.IsValidIndex(Next) && MoveCooldowns[Next] <= 0.f)
 			{
-				EnterTelegraph(Next);
-				return;
+				const FEnemyMoveDef& NextMove = Fighter->GetMoves()[Next];
+				const bool bNextOk = IsRangedProjectileMove(NextMove)
+					|| (IsMeleeEngageMove(NextMove) && Dist <= MeleeEngageDistance
+						&& Dist >= NextMove.MinRange && Dist <= NextMove.MaxRange)
+					|| (IsGapCloserDashMove(NextMove) && Dist > MeleeEngageDistance && Dist <= 350.f
+						&& Dist >= NextMove.MinRange && Dist <= NextMove.MaxRange);
+				if (bNextOk)
+				{
+					EnterTelegraph(Next);
+					return;
+				}
 			}
 		}
 		ActiveMoveIndex = INDEX_NONE;
@@ -646,6 +662,34 @@ void AEnemyFighterAIController::BeginExecute()
 		return;
 	}
 	const FEnemyMoveDef& Move = Fighter->GetMoves()[ActiveMoveIndex];
+	APawn* Focus = FindCombatFocus();
+	if (!Focus)
+	{
+		State = EEnemyFighterState::Combat;
+		ActiveMoveIndex = INDEX_NONE;
+		return;
+	}
+
+	const float Dist2D = FVector::Dist2D(Fighter->GetActorLocation(), Focus->GetActorLocation());
+	if (IsMeleeEngageMove(Move))
+	{
+		const float Cap = FMath::Min(MeleeEngageDistance, Move.MaxRange);
+		if (Dist2D > Cap)
+		{
+			ActiveMoveIndex = INDEX_NONE;
+			State = EEnemyFighterState::Combat;
+			RequestMoveToPreferred(Dist2D);
+			return;
+		}
+	}
+	else if (IsGapCloserDashMove(Move) && Dist2D > 350.f)
+	{
+		ActiveMoveIndex = INDEX_NONE;
+		State = EEnemyFighterState::Combat;
+		RequestMoveToPreferred(Dist2D);
+		return;
+	}
+
 	FacePlayer();
 	bPlayingWalk = false;
 	bPlayingRun = false;
@@ -653,7 +697,7 @@ void AEnemyFighterAIController::BeginExecute()
 	{
 		State = EEnemyFighterState::Combat;
 		ActiveMoveIndex = INDEX_NONE;
-		RequestMoveToPreferred(FVector::Dist(Fighter->GetActorLocation(), FindCombatFocus()->GetActorLocation()) + 1.f);
+		RequestMoveToPreferred(Dist2D);
 		return;
 	}
 	if (!Combat->TryExecute(Move.Skill))
@@ -664,7 +708,8 @@ void AEnemyFighterAIController::BeginExecute()
 	}
 	if (MoveCooldowns.IsValidIndex(ActiveMoveIndex))
 	{
-		MoveCooldowns[ActiveMoveIndex] = Move.Cooldown;
+		const float IntervalMul = Fighter->GetEnemyStatus() ? Fighter->GetEnemyStatus()->GetAttackIntervalMul() : 1.f;
+		MoveCooldowns[ActiveMoveIndex] = Move.Cooldown * IntervalMul;
 	}
 	USlimeDodgeComponent::NotifyPlayerIncomingAttack(this, Fighter);
 	State = EEnemyFighterState::Execute;
@@ -690,9 +735,9 @@ void AEnemyFighterAIController::TickRecover(float DeltaSeconds)
 	{
 		TryPlayRandomIdleMontage();
 	}
-	const float RecoverTime = Fighter->GetMoves().IsValidIndex(ActiveMoveIndex)
+	const float RecoverTime = (Fighter->GetMoves().IsValidIndex(ActiveMoveIndex)
 		? Fighter->GetMoves()[ActiveMoveIndex].Skill.Recovery * 0.35f
-		: 0.15f;
+		: 0.15f) * (Fighter->GetEnemyStatus() ? Fighter->GetEnemyStatus()->GetAttackIntervalMul() : 1.f);
 	if (StateTime >= RecoverTime)
 	{
 		State = EEnemyFighterState::Choose;
@@ -703,30 +748,55 @@ void AEnemyFighterAIController::TickRecover(float DeltaSeconds)
 int32 AEnemyFighterAIController::SelectMove(float Dist) const
 {
 	const TArray<FEnemyMoveDef>& Moves = Fighter->GetMoves();
-	float TotalWeight = 0.f;
 	TArray<int32> Candidates;
 	Candidates.Reserve(Moves.Num());
+	float TotalWeight = 0.f;
 
-	const bool bNeedGapClose = Dist > Fighter->PreferredDistance * 1.6f;
-
-	for (int32 Index = 0; Index < Moves.Num(); ++Index)
+	const auto TryAdd = [&](int32 Index)
 	{
 		const FEnemyMoveDef& Move = Moves[Index];
 		if (MoveCooldowns.IsValidIndex(Index) && MoveCooldowns[Index] > 0.f)
 		{
-			continue;
+			return;
 		}
 		if (Dist < Move.MinRange || Dist > Move.MaxRange)
 		{
-			continue;
+			return;
 		}
-		float W = FMath::Max(Move.Weight, 0.01f);
-		if (bNeedGapClose && Move.bGapCloser)
-		{
-			W *= 2.5f;
-		}
-		TotalWeight += W;
+		TotalWeight += FMath::Max(Move.Weight, 0.01f);
 		Candidates.Add(Index);
+	};
+
+	if (Dist <= MeleeEngageDistance)
+	{
+		for (int32 Index = 0; Index < Moves.Num(); ++Index)
+		{
+			if (IsMeleeEngageMove(Moves[Index]))
+			{
+				TryAdd(Index);
+			}
+		}
+	}
+	else
+	{
+		for (int32 Index = 0; Index < Moves.Num(); ++Index)
+		{
+			if (IsRangedProjectileMove(Moves[Index]))
+			{
+				TryAdd(Index);
+			}
+		}
+		// Dash only as short gap-closer near melee gate — never a far slash substitute.
+		if (Candidates.Num() == 0 && Dist <= 350.f)
+		{
+			for (int32 Index = 0; Index < Moves.Num(); ++Index)
+			{
+				if (IsGapCloserDashMove(Moves[Index]))
+				{
+					TryAdd(Index);
+				}
+			}
+		}
 	}
 
 	if (Candidates.Num() == 0 || TotalWeight <= 0.f)
@@ -737,18 +807,28 @@ int32 AEnemyFighterAIController::SelectMove(float Dist) const
 	float Roll = FMath::FRandRange(0.f, TotalWeight);
 	for (int32 Index : Candidates)
 	{
-		float W = FMath::Max(Moves[Index].Weight, 0.01f);
-		if (bNeedGapClose && Moves[Index].bGapCloser)
-		{
-			W *= 2.5f;
-		}
-		Roll -= W;
+		Roll -= FMath::Max(Moves[Index].Weight, 0.01f);
 		if (Roll <= 0.f)
 		{
 			return Index;
 		}
 	}
 	return Candidates.Last();
+}
+
+bool AEnemyFighterAIController::IsMeleeEngageMove(const FEnemyMoveDef& Move) const
+{
+	return Move.Skill.Exec == EEnemySkillExec::Melee || Move.Skill.Exec == EEnemySkillExec::AoE;
+}
+
+bool AEnemyFighterAIController::IsRangedProjectileMove(const FEnemyMoveDef& Move) const
+{
+	return Move.Skill.Exec == EEnemySkillExec::Projectile;
+}
+
+bool AEnemyFighterAIController::IsGapCloserDashMove(const FEnemyMoveDef& Move) const
+{
+	return Move.bGapCloser && Move.Skill.Exec == EEnemySkillExec::Dash;
 }
 
 int32 AEnemyFighterAIController::FindMoveIndexById(FName MoveId) const
@@ -784,6 +864,30 @@ void AEnemyFighterAIController::FacePlayer()
 	}
 }
 
+void AEnemyFighterAIController::PlayChaseLocomotionIfMoving()
+{
+	if (!Fighter)
+	{
+		return;
+	}
+	const UCharacterMovementComponent* Move = Fighter->GetCharacterMovement();
+	const float Speed2D = Move ? Move->Velocity.Size2D() : 0.f;
+	// Avoid in-place run: need actual motion or active short direct-push.
+	if (Speed2D < 20.f && !bDirectChaseFallback)
+	{
+		StopLocomotionAnim();
+		return;
+	}
+	if (Fighter->bABPDrivenLocomotion)
+	{
+		PlayRunAnim();
+	}
+	else
+	{
+		PlayWalkAnim();
+	}
+}
+
 void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 {
 	APawn* Player = FindCombatFocus();
@@ -792,7 +896,8 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 		return;
 	}
 
-	PathRefreshRemaining -= GetWorld()->GetDeltaSeconds();
+	const float DeltaSec = GetWorld()->GetDeltaSeconds();
+	PathRefreshRemaining -= DeltaSec;
 	const float Preferred = Fighter->PreferredDistance;
 	const bool bTooFar = Dist > Preferred * 1.1f;
 	const bool bTooClose = Dist < Preferred * 0.55f;
@@ -804,7 +909,6 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 		{
 			StopMovement();
 		}
-		// 在合适距离停下：停 locomotion 动画，播 idle。
 		StopLocomotionAnim();
 		if (!PlayingIdleMontage.IsValid())
 		{
@@ -817,19 +921,59 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 	{
 		ResetChaseFallback();
 	}
-	else if (!bDirectChaseFallback)
+	else
 	{
 		const FVector CurrentLocation = Fighter->GetActorLocation();
-		if (FVector::DistSquared2D(CurrentLocation, ChaseLastPos) < FMath::Square(1.f))
+		if (FVector::DistSquared2D(CurrentLocation, ChaseLastPos) < FMath::Square(20.f))
 		{
-			ChaseStalledSeconds += GetWorld()->GetDeltaSeconds();
+			ChaseStalledSeconds += DeltaSec;
 		}
 		else
 		{
 			ChaseStalledSeconds = 0.f;
 		}
 		ChaseLastPos = CurrentLocation;
-		bDirectChaseFallback = ChaseStalledSeconds >= 0.5f;
+
+		if (bDirectChaseFallback)
+		{
+			DirectChaseActiveSeconds += DeltaSec;
+			if (DirectChaseActiveSeconds >= DirectChaseMaxSeconds || ChaseStalledSeconds >= 0.5f)
+			{
+				ResetChaseFallback();
+				if (!RequestNavDetourTowardFocus())
+				{
+					bDirectChaseFallback = true;
+					DirectChaseActiveSeconds = 0.f;
+				}
+				PathRefreshRemaining = PathRefreshInterval;
+				PlayChaseLocomotionIfMoving();
+				return;
+			}
+			StopMovement();
+			FVector ToPlayer = Player->GetActorLocation() - Fighter->GetActorLocation();
+			ToPlayer.Z = 0.f;
+			if (!ToPlayer.IsNearlyZero())
+			{
+				Fighter->AddMovementInput(ToPlayer.GetSafeNormal(), 1.f);
+			}
+			PlayChaseLocomotionIfMoving();
+			return;
+		}
+
+		if ((GetMoveStatus() == EPathFollowingStatus::Moving && ChaseStalledSeconds >= 0.5f)
+			|| ChaseStalledSeconds >= 0.75f)
+		{
+			StopMovement();
+			if (!RequestNavDetourTowardFocus())
+			{
+				bDirectChaseFallback = true;
+				DirectChaseActiveSeconds = 0.f;
+			}
+			ChaseStalledSeconds = 0.f;
+			PathRefreshRemaining = PathRefreshInterval;
+			PlayChaseLocomotionIfMoving();
+			return;
+		}
 	}
 
 	if (!bDirectChaseFallback
@@ -842,46 +986,113 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 
 	if (bTooFar)
 	{
-		if (!bDirectChaseFallback)
+		const EPathFollowingRequestResult::Type Result = MoveToActor(Player, Preferred * 0.85f);
+		const bool bNavFailed = Result == EPathFollowingRequestResult::Failed
+			|| (Result == EPathFollowingRequestResult::AlreadyAtGoal && Dist > Preferred);
+		if (bNavFailed)
 		{
-			const EPathFollowingRequestResult::Type Result = MoveToActor(Player, Preferred * 0.85f);
-			bDirectChaseFallback = Result != EPathFollowingRequestResult::RequestSuccessful;
+			if (!RequestNavDetourTowardFocus())
+			{
+				bDirectChaseFallback = true;
+				DirectChaseActiveSeconds = 0.f;
+				StopMovement();
+				FVector ToPlayer = Player->GetActorLocation() - Fighter->GetActorLocation();
+				ToPlayer.Z = 0.f;
+				if (!ToPlayer.IsNearlyZero())
+				{
+					Fighter->AddMovementInput(ToPlayer.GetSafeNormal(), 1.f);
+				}
+			}
 		}
-		if (bDirectChaseFallback)
-		{
-			StopMovement();
-			FVector ToPlayer = Player->GetActorLocation() - Fighter->GetActorLocation();
-			ToPlayer.Z = 0.f;
-			Fighter->AddMovementInput(ToPlayer.GetSafeNormal(), 1.f);
-		}
-		// 追逐时播 Run（ABP 驱动）或 Walk+PlayRate（旧模式）。
-		if (Fighter->bABPDrivenLocomotion)
-		{
-			PlayRunAnim();
-		}
-		else
-		{
-			PlayWalkAnim();
-		}
+		PlayChaseLocomotionIfMoving();
 	}
 	else
 	{
 		const FVector Away = (Fighter->GetActorLocation() - Player->GetActorLocation()).GetSafeNormal2D();
 		const FVector Dest = Player->GetActorLocation() + Away * Preferred;
-		const EPathFollowingRequestResult::Type Result = MoveToLocation(Dest);
-		if (Result != EPathFollowingRequestResult::RequestSuccessful)
+		if (!TryMoveToNavLocation(Dest))
 		{
-			Fighter->AddMovementInput(Away, 1.f);
+			RequestNavDetourTowardFocus();
 		}
-		// 后退也播 Walk（不算追逐跑）。
 		PlayWalkAnim();
 	}
+}
+
+bool AEnemyFighterAIController::TryMoveToNavLocation(const FVector& Dest)
+{
+	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	FVector Target = Dest;
+	if (NavSys)
+	{
+		FNavLocation Projected;
+		if (NavSys->ProjectPointToNavigation(Dest, Projected))
+		{
+			Target = Projected.Location;
+		}
+		else
+		{
+			UE_LOG(LogSlimeFable, Verbose, TEXT("EnemyFighterAI: no nav projection near %s"), *Dest.ToCompactString());
+			return false;
+		}
+	}
+	// Reject projections that barely leave current spot (AlreadyAtGoal / stuck-in-place).
+	if (Fighter && FVector::DistSquared2D(Target, Fighter->GetActorLocation()) < FMath::Square(40.f))
+	{
+		return false;
+	}
+	const EPathFollowingRequestResult::Type Result = MoveToLocation(Target);
+	return Result == EPathFollowingRequestResult::RequestSuccessful;
+}
+
+bool AEnemyFighterAIController::RequestNavDetourTowardFocus()
+{
+	APawn* Player = FindCombatFocus();
+	if (!Player || !Fighter)
+	{
+		return false;
+	}
+
+	const FVector Self = Fighter->GetActorLocation();
+	const FVector ToPlayer = (Player->GetActorLocation() - Self).GetSafeNormal2D();
+	if (ToPlayer.IsNearlyZero())
+	{
+		StopMovement();
+		return false;
+	}
+
+	const FVector Right = FVector::CrossProduct(ToPlayer, FVector::UpVector).GetSafeNormal();
+	const float Near = SideStepOffset;
+	const float Far = SideStepOffset * 2.f;
+	// Prefer forward / forward-side toward player, then pure side — not orbiting self.
+	const FVector Offsets[6] = {
+		ToPlayer * Far,
+		(ToPlayer + Right).GetSafeNormal() * Far,
+		(ToPlayer - Right).GetSafeNormal() * Far,
+		(ToPlayer + Right * 0.5f).GetSafeNormal() * Near,
+		(ToPlayer - Right * 0.5f).GetSafeNormal() * Near,
+		Right * Near,
+	};
+
+	for (int32 Step = 0; Step < 6; ++Step)
+	{
+		const int32 Idx = (DetourSampleIndex + Step) % 6;
+		if (TryMoveToNavLocation(Self + Offsets[Idx]))
+		{
+			DetourSampleIndex = (Idx + 1) % 6;
+			return true;
+		}
+	}
+
+	DetourSampleIndex = (DetourSampleIndex + 1) % 6;
+	StopMovement();
+	return false;
 }
 
 void AEnemyFighterAIController::ResetChaseFallback()
 {
 	ChaseStalledSeconds = 0.f;
 	bDirectChaseFallback = false;
+	DirectChaseActiveSeconds = 0.f;
 	ChaseLastPos = Fighter ? Fighter->GetActorLocation() : FVector::ZeroVector;
 }
 

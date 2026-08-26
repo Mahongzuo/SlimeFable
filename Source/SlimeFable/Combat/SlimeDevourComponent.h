@@ -19,6 +19,7 @@ class UMaterialInterface;
 class USkeletalMesh;
 class UStaticMesh;
 class USkeletalMeshComponent;
+class USoundBase;
 
 UENUM(BlueprintType)
 enum class ESlimeDevourPhase : uint8
@@ -268,6 +269,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour", meta = (ClampMin = "0.05", ClampMax = "1.0"))
 	float WheelTimeDilation = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Audio",
+		meta = (ToolTip = "敌人被吞入体内瞬间。空则 /Game/Audio/SFX/Combat/sfx_swallow_01。"))
+	TSoftObjectPtr<USoundBase> SwallowSound;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour")
 	TObjectPtr<UMaterialInterface> DigestDissolveMaterial;

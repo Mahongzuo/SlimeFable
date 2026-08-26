@@ -65,6 +65,20 @@ void AEnemyFighter::EnsureMoveKit()
 	{
 		EnemyCombat::FillDefaultFighterMoves(Moves);
 	}
+	// Clamp BP-serialized oversized melee/AoE so far slash cannot reach beyond ~2m.
+	for (FEnemyMoveDef& Move : Moves)
+	{
+		if (Move.Skill.Exec == EEnemySkillExec::Melee || Move.Skill.Exec == EEnemySkillExec::AoE)
+		{
+			Move.MaxRange = FMath::Min(Move.MaxRange, 200.f);
+			Move.Skill.Hit.Range = FMath::Min(Move.Skill.Hit.Range, 120.f);
+			Move.Skill.Hit.Radius = FMath::Min(Move.Skill.Hit.Radius, 80.f);
+		}
+		if (Move.MoveId == FName(TEXT("Bolt")) || Move.Skill.Exec == EEnemySkillExec::Projectile)
+		{
+			Move.MinRange = FMath::Min(Move.MinRange, 200.f);
+		}
+	}
 }
 
 void AEnemyFighter::OnConstruction(const FTransform& Transform)
@@ -94,7 +108,7 @@ void AEnemyFighter::BeginPlay()
 		{
 			if (FMath::IsNearlyEqual(EnemyCombatComp->GlobalHitDelay, 0.5f, 0.05f))
 			{
-				EnemyCombatComp->GlobalHitDelay = 0.1f;
+				EnemyCombatComp->GlobalHitDelay = -0.1f;
 			}
 		}
 	}

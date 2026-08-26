@@ -41,9 +41,14 @@ public:
 	float AttackPower = 12.f;
 
 	/** Extra seconds after Windup+HitStart before damage fires (aligns hit with montage contact). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.0", Units = "s",
-		ToolTip = "命中相对招表 Windup+HitStart 再推迟多少秒，用来对齐攻击动画出手帧。默认 0.8。"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "-1.0", Units = "s",
+		ToolTip = "命中相对招表 Windup+HitStart 的偏移秒数（可为负提前）。武士默认约 -0.1。"))
 	float GlobalHitDelay = 0.5f;
+
+	/** Melee/AoE will not ApplyDamage if horizontal distance to player exceeds this (safety vs far slash). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "近战/AoE 对玩家水平距离超过此值则不结算伤害。默认 200。"))
+	float MaxMeleeHitDistance = 200.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat")
 	FName MuzzleSocket = NAME_None;
@@ -61,6 +66,7 @@ protected:
 	FVector GetAimForward() const;
 	FVector GetMuzzleLocation() const;
 	float ResolveDamage(const FEnemySkillDef& Skill) const;
+	float GetAuraAttackIntervalMul() const;
 
 	/** Player combat key polling while morphed (mirrors USlimeCombatComponent::PollCombatKeys). */
 	void PollPlayerCombatKeys(float DeltaTime);
@@ -75,4 +81,5 @@ protected:
 	TSet<TWeakObjectPtr<AActor>> AlreadyHit;
 	FEnemySkillDef PendingGasDef;
 	TWeakObjectPtr<UEnemySkillAbility> ActiveGasAbility;
+	float AttackLockRemaining = 0.f;
 };

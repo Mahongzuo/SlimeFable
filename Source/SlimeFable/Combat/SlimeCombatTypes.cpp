@@ -35,7 +35,7 @@ namespace
 		Def.HitStart = HitStart;
 		Def.HitEnd = HitEnd;
 		Def.Recovery = Recovery;
-		Def.bAppliesElementAura = Element != ESlimeElement::Physical;
+		Def.bAppliesElementAura = true;
 		if (NiagaraPath && NiagaraPath[0] != 0)
 		{
 			Def.NiagaraSystem = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(NiagaraPath));
@@ -355,14 +355,11 @@ FSlimeElementKitData SlimeCombat::MakeDefaultKit(ESlimeElement Element)
 		Kit.Skill1 = MakeSkill(TEXT("锤击"), Element, ESlimeSkillSlot::Skill1, ESlimeSkillExec::Melee, ESlimeCombatPose::PunchStretch, ESlimeHitShape::Sphere, 120.f, 50.f, 22.f, 0.12f, 0.14f, 0.24f, 0.3f, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Skill1.NS_Slime_Physical_Skill1"));
 		Kit.Skill1.Cooldown = 7.f;
 		Kit.Skill1.Knockback = 450.f;
-		Kit.Skill1.bAppliesElementAura = false;
 		Kit.Skill2 = MakeSkill(TEXT("剑气劈"), Element, ESlimeSkillSlot::Skill2, ESlimeSkillExec::Melee, ESlimeCombatPose::WhipSnap, ESlimeHitShape::Capsule, 200.f, 34.f, 28.f, 0.14f, 0.16f, 0.3f, 0.34f, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Skill2.NS_Slime_Physical_Skill2"));
 		Kit.Skill2.Cooldown = 10.f;
-		Kit.Skill2.bAppliesElementAura = false;
 		Kit.Skill3 = MakeSkill(TEXT("巨锤砸"), Element, ESlimeSkillSlot::Skill3, ESlimeSkillExec::Melee, ESlimeCombatPose::SlamFlatten, ESlimeHitShape::Sphere, 220.f, 80.f, 50.f, 0.2f, 0.24f, 0.4f, 0.5f, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Skill3.NS_Slime_Physical_Skill3"));
 		Kit.Skill3.Cooldown = 18.f;
 		Kit.Skill3.Knockback = 700.f;
-		Kit.Skill3.bAppliesElementAura = false;
 		break;
 	}
 
@@ -401,6 +398,7 @@ void SlimeCombat::FillDefaultReactions(TArray<FSlimeReactionRow>& OutRows)
 	Add(ESlimeElement::Lightning, ESlimeElement::Wind, ESlimeReactionKind::LightningSwirl, 16.f, 200.f, 0.f, true, true, TEXT("/Game/Characters/Slime/FX/Skills/Lightning/NS_Slime_Lightning_Impact.NS_Slime_Lightning_Impact"));
 	Add(ESlimeElement::Lightning, ESlimeElement::Dark, ESlimeReactionKind::VoidShock, 12.f, 0.f, 0.6f, true, true, TEXT("/Game/Characters/Slime/FX/Skills/Dark/NS_Slime_Dark_Impact.NS_Slime_Dark_Impact"));
 	Add(ESlimeElement::Dark, ESlimeElement::Water, ESlimeReactionKind::MurkTide, 8.f, 160.f, 2.5f, true, true, TEXT("/Game/Characters/Slime/FX/Skills/Dark/NS_Slime_Dark_Impact.NS_Slime_Dark_Impact"));
+	Add(ESlimeElement::Dark, ESlimeElement::Wind, ESlimeReactionKind::DarkSwirl, 15.f, 180.f, 0.f, true, true, TEXT("/Game/Characters/Slime/FX/Skills/Dark/NS_Slime_Dark_Impact.NS_Slime_Dark_Impact"));
 	Add(ESlimeElement::Physical, ESlimeElement::Water, ESlimeReactionKind::BreakPoise, 8.f, 0.f, 0.f, false, false, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Impact.NS_Slime_Physical_Impact"));
 	Add(ESlimeElement::Physical, ESlimeElement::Fire, ESlimeReactionKind::BreakPoise, 8.f, 0.f, 0.f, false, false, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Impact.NS_Slime_Physical_Impact"));
 	Add(ESlimeElement::Physical, ESlimeElement::Lightning, ESlimeReactionKind::BreakPoise, 8.f, 0.f, 0.f, false, false, TEXT("/Game/Characters/Slime/FX/Skills/Physical/NS_Slime_Physical_Impact.NS_Slime_Physical_Impact"));
@@ -426,8 +424,23 @@ FText SlimeCombat::GetReactionDisplayName(ESlimeReactionKind Kind)
 	case ESlimeReactionKind::LightningSwirl: return FText::FromString(TEXT("雷涡"));
 	case ESlimeReactionKind::VoidShock: return FText::FromString(TEXT("虚空震"));
 	case ESlimeReactionKind::MurkTide: return FText::FromString(TEXT("浑潮"));
+	case ESlimeReactionKind::DarkSwirl: return FText::FromString(TEXT("暗涡"));
 	case ESlimeReactionKind::BreakPoise: return FText::FromString(TEXT("破势"));
 	default: return FText::FromString(TEXT("反应"));
+	}
+}
+
+FText SlimeCombat::GetAuraStatusDisplayName(ESlimeElement Element)
+{
+	switch (Element)
+	{
+	case ESlimeElement::Wind: return FText::FromString(TEXT("风蚀"));
+	case ESlimeElement::Lightning: return FText::FromString(TEXT("磁暴"));
+	case ESlimeElement::Water: return FText::FromString(TEXT("潮湿"));
+	case ESlimeElement::Fire: return FText::FromString(TEXT("灼烧"));
+	case ESlimeElement::Physical: return FText::FromString(TEXT("虚弱"));
+	case ESlimeElement::Dark: return FText::FromString(TEXT("湮灭"));
+	default: return FText::FromString(TEXT("状态"));
 	}
 }
 

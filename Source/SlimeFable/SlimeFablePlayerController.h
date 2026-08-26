@@ -21,7 +21,8 @@ enum class ESlimeUIInputReason : uint8
 	LoadingGate,
 	AltCursor,
 	ElementFormation,
-	HotbarConfirm
+	HotbarConfirm,
+	CheatConsole
 };
 
 struct FSlimeUIInputEntry
@@ -44,6 +45,9 @@ public:
 	void PopUIInput(ESlimeUIInputReason Reason);
 	bool HasUIInput(ESlimeUIInputReason Reason) const;
 	bool HasModalUI() const;
+
+	/** Force GameOnly + hide cursor + clear keyboard focus when UI stack is empty. */
+	void RestoreGameplayInput();
 
 	/** Retarget keyboard/mouse UI focus while keeping the current pause/modal stack. */
 	void RetargetUIFocus(UUserWidget* FocusWidget);

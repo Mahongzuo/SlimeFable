@@ -18,6 +18,12 @@
 - 构造 / Construction 用 `SetRelativeScale3D`，禁止 `SetWorldScale3D`（会和编辑器变换抢、缩放像锁死）。
 - 敌人网格与 AnimBP **不要**写死在 C++ 默认值；建该日 BP 时用 Python 绑到 CDO（`PrimarySkeletalMesh` / `PrimaryAnimClass` / 攻击与死亡 Montage）。只建空壳会永远显示占位立方体。细则见 `slimefable-day-levels` 的 `placeable-actors.md`。
 
+## 相机与导航（镜头 / AI）
+
+- **Camera 通道**：墙体/地板 Block Camera；装饰物、可交互道具、Pawn 对 Camera 设 **Ignore**（玩家仍 Block 道具）。SpringArm `ProbeChannel=Camera`，墙过滤另用 WorldStatic 竖直面。
+- **日关卡 / 大厅**：需有 **Nav Mesh Bounds Volume** 覆盖可走区域；改家具/台阶后 **Rebuild** Recast。敌人 `MaxStepHeight≈60`，NavMesh `AgentMaxStepHeight` 宜 ≥ 60。
+- **跳跃跨断层**：一期不做；二期用 Smart `NavLinkProxy`，勿靠永久 `AddMovementInput` 直推。
+
 ## Details 分类
 
 关卡里会摆的玩法 Actor / 组件，设计师可改字段统一进 **`0_Config`**，避免埋在 Transform / Mesh / Camera 下面翻找。

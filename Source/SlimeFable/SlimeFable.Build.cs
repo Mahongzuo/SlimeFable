@@ -15,6 +15,7 @@ public class SlimeFable : ModuleRules
 			"InputCore",
 			"EnhancedInput",
 			"AIModule",
+			"NavigationSystem",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"GameplayTags",
@@ -34,12 +35,14 @@ public class SlimeFable : ModuleRules
 			"RHI",
 			"RenderCore",
 			"PixelStreaming2",
-			"DLSSBlueprint"
+			"DLSSBlueprint",
+			"Landscape"
 		});
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SlimeFable",
 			"SlimeFable/DayLevel",
+			"SlimeFable/PCG",
 			"SlimeFable/Quest",
 			"SlimeFable/Slime",
 			"SlimeFable/Combat",
