@@ -14,6 +14,7 @@ class UChooserTable;
 class UPoseSearchDatabase;
 class UPoseSearchSchema;
 class USkeleton;
+class USkeletalMesh;
 
 /** Editor/Python helpers to populate Pose Search assets that reflection cannot write. */
 UCLASS()
@@ -109,4 +110,11 @@ public:
 		UBlendSpace* BlendSpace,
 		const TArray<UAnimSequence*>& Sequences,
 		const TArray<FVector>& Positions);
+
+	/**
+	 * Editor: set LOD section bCastShadow for slots whose name contains SlotContains
+	 * (case-insensitive). Returns how many sections were written.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Phoebe|Mesh")
+	static int32 SetSectionCastShadowBySlot(USkeletalMesh* Mesh, const FString& SlotContains, bool bCastShadow);
 };

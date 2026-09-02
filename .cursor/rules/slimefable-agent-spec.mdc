@@ -24,6 +24,7 @@ alwaysApply: true
 - MCP 使用 `http://127.0.0.1:8010/mcp`；Tool 串行调用，禁止并行叠 MCP。
 - 批量日关卡用 `Content/Python/create_day_levels.py`，禁止 MCP 逐关创建 366 张图。
 - UI 遵循 `slimefable-ui`：土色 NPR 底、墨迹按钮、Marker+KuaiLe 字体，禁用 Halftone 霓虹默认皮。
+- **视觉验证归用户**：描边 / 材质 / 光照 / UI 观感由用户亲自看视口确认。做完实现就停；禁止凭截图或自己判断改线宽、裁剪、颜色、曝光。用户已说不错的视觉点不要再「优化」。
 - 与用户用中文沟通；勿改 `~/.cursor/skills-cursor/`。
 
 需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`。

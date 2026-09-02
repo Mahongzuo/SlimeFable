@@ -30,6 +30,10 @@ struct FSlimeMorphMeshVisual
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInterface>> SavedMaterials;
 
+	/** Overlay on this mesh at morph capture (e.g. Phoebe outline). Restored when Morphed. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> SavedOverlay = nullptr;
+
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> MorphMIDs;
 

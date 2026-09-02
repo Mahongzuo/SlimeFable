@@ -15,6 +15,7 @@
 #include "EnumColumn.h"
 #include "ObjectChooser_Asset.h"
 #include "PhoebeAnimInstance.h"
+#include "Engine/SkeletalMesh.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 #include "PoseSearch/PoseSearchFeatureChannel_Pose.h"
 #include "PoseSearch/PoseSearchFeatureChannel_Trajectory.h"
@@ -59,6 +60,8 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/Kismet2NameValidators.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Rendering/SkeletalMeshLODModel.h"
+#include "Rendering/SkeletalMeshModel.h"
 #endif
 
 namespace PhoebeAnimSetupPrivate
@@ -1886,6 +1889,73 @@ int32 UPhoebeAnimSetupLibrary::ReplaceBlendSpaceSamples(
 	BlendSpace->PostEditChange();
 	BlendSpace->MarkPackageDirty();
 	return Added;
+#else
+	return 0;
+#endif
+}
+
+int32 UPhoebeAnimSetupLibrary::SetSectionCastShadowBySlot(USkeletalMesh* Mesh, const FString& SlotContains, bool bCastShadow)
+{
+#if WITH_EDITOR
+	if (!Mesh || SlotContains.IsEmpty())
+	{
+		return 0;
+	}
+
+	FSkeletalMeshModel* ImportedModel = Mesh->GetImportedModel();
+	if (!ImportedModel)
+	{
+		return 0;
+	}
+
+	TSet<int32> MatchIndices;
+	const TArray<FSkeletalMaterial>& Materials = Mesh->GetMaterials();
+	for (int32 Index = 0; Index < Materials.Num(); ++Index)
+	{
+		if (Materials[Index].MaterialSlotName.ToString().Contains(SlotContains, ESearchCase::IgnoreCase))
+		{
+			MatchIndices.Add(Index);
+		}
+	}
+	if (MatchIndices.Num() == 0)
+	{
+		return 0;
+	}
+
+	Mesh->Modify();
+	int32 Changed = 0;
+	for (int32 LodIndex = 0; LodIndex < ImportedModel->LODModels.Num(); ++LodIndex)
+	{
+		FSkeletalMeshLODModel& LodModel = ImportedModel->LODModels[LodIndex];
+		for (FSkelMeshSection& Section : LodModel.Sections)
+		{
+			if (!MatchIndices.Contains(Section.MaterialIndex))
+			{
+				continue;
+			}
+			if (Section.bCastShadow != bCastShadow)
+			{
+				Section.bCastShadow = bCastShadow;
+				++Changed;
+			}
+			FSkelMeshSourceSectionUserData& UserData =
+				FSkelMeshSourceSectionUserData::GetSourceSectionUserData(LodModel.UserSectionsData, Section);
+			if (UserData.bCastShadow != bCastShadow)
+			{
+				UserData.bCastShadow = bCastShadow;
+				++Changed;
+			}
+		}
+		LodModel.SyncronizeUserSectionsDataArray();
+	}
+
+	if (Changed > 0)
+	{
+		ImportedModel->SyncronizeLODUserSectionsData();
+		Mesh->PostEditChange();
+		Mesh->MarkPackageDirty();
+	}
+	return Changed;
 #else
 	return 0;
 #endif

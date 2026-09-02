@@ -280,8 +280,18 @@ void USlimeMorphComponent::TickMorphedKeyInput(float DeltaTime)
 		Slime->AdjustCameraZoom(1);
 	}
 
-	const float DesiredArm = Slime->GetDesiredCameraArmLength()
-		* FMath::Clamp(FMath::Sqrt(FMath::Max(MorphCameraHeightScale, 1.f)), 1.f, 2.2f);
+	const float ArmMul = FMath::Clamp(FMath::Sqrt(FMath::Max(MorphCameraHeightScale, 1.f)), 1.f, 2.2f);
+	float DesiredArm = Slime->GetDesiredCameraArmLength() * ArmMul;
+	if (const AEnemyCharacter* MorphEnemy = Cast<AEnemyCharacter>(MorphTarget))
+	{
+		if (MorphEnemy->MorphCameraArmLengthMin > 0.f)
+		{
+			DesiredArm = FMath::GetMappedRangeValueClamped(
+				FVector2D(Slime->CameraArmLengthMin, Slime->CameraArmLengthMax),
+				FVector2D(MorphEnemy->MorphCameraArmLengthMin, Slime->CameraArmLengthMax * ArmMul),
+				Slime->GetDesiredCameraArmLength());
+		}
+	}
 	if (bCameraBlendActive)
 	{
 		// Keep the blend target in sync with wheel zoom; TickCameraBlend owns the boom values.
@@ -706,6 +716,7 @@ void USlimeMorphComponent::SpawnMorphTarget()
 		{
 			Entry.SavedMaterials.Add(MeshComp->GetMaterial(Idx));
 		}
+		Entry.SavedOverlay = MeshComp->GetOverlayMaterial();
 
 		UE_LOG(LogSlimeFable, Log,
 			TEXT("SlimeMorphComponent: capture %s (%s) extra=%d slots=%d"),
@@ -831,6 +842,7 @@ void USlimeMorphComponent::ApplyOriginalMaterials()
 				MeshComp->SetMaterial(Idx, Entry.SavedMaterials[Idx]);
 			}
 		}
+		MeshComp->SetOverlayMaterial(Entry.SavedOverlay);
 	}
 	bOriginalMaterialsActive = true;
 }

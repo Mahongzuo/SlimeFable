@@ -792,6 +792,7 @@ void AEnemyCharacter::RebuildMeshParts()
 			GetMesh()->SetAnimInstanceClass(AnimClass);
 		}
 		ApplySingleNodeAnimModeIfNeeded();
+		ApplyDefaultOverlay(GetMesh());
 	}
 	else
 	{
@@ -1151,8 +1152,27 @@ void AEnemyCharacter::RefreshHealthBarAnchor()
 	ApplyHealthBarOffset();
 }
 
+UMaterialInterface* AEnemyCharacter::ResolveDefaultOverlay() const
+{
+	return DefaultOverlayMaterial.LoadSynchronous();
+}
+
+void AEnemyCharacter::ApplyDefaultOverlay(UMeshComponent* MeshComp)
+{
+	if (!MeshComp)
+	{
+		return;
+	}
+	MeshComp->SetOverlayMaterial(ResolveDefaultOverlay());
+	MeshComp->SetOverlayMaterialMaxDrawDistance(DefaultOverlayMaxDrawDistance);
+}
+
 void AEnemyCharacter::ClearHitFlashFromMeshes()
 {
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		ApplyDefaultOverlay(Skel);
+	}
 	auto ClearMesh = [](UMeshComponent* MeshComp)
 	{
 		if (MeshComp)
@@ -1160,7 +1180,6 @@ void AEnemyCharacter::ClearHitFlashFromMeshes()
 			MeshComp->SetOverlayMaterial(nullptr);
 		}
 	};
-	ClearMesh(GetMesh());
 	for (USceneComponent* Part : GeneratedParts)
 	{
 		ClearMesh(Cast<UMeshComponent>(Part));

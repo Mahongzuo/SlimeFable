@@ -28,6 +28,7 @@ public:
 	/** RMB dodge only while an enemy attack is incoming; otherwise RMB is sprint/climb-dash. */
 	bool WantsCombatDodge() const;
 
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void EnterStagger(float Duration, AActor* StaggerInstigator) override;
 	virtual void InitAsMorphTarget(AActor* Master) override;
 	virtual void Landed(const FHitResult& Hit) override;
@@ -43,6 +44,7 @@ protected:
 	virtual void UpdateMorphSprintSpeed() override;
 
 	void ApplyThirdPersonLocomotionDefaults();
+	void UpdateFaceHeadForward();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components")
 	TObjectPtr<UPhoebeClimbComponent> Climb;

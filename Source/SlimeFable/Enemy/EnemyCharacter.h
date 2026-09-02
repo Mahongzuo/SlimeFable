@@ -213,6 +213,20 @@ public:
 		meta = (ToolTip = "勾选后按主骨骼参考姿势包围盒重算胶囊半径/半高，并把 Mesh 的 Z 偏移设为 -半高。网格和默认 192cm 胶囊对不上时用来消悬空/陷地。默认开。"))
 	bool bAutoFitCapsuleToMesh = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Visual",
+		meta = (ToolTip = "常驻描边/外壳 Overlay。RebuildMeshParts 时套上主网格，受击闪红结束后自动恢复。空则不加。"))
+	TSoftObjectPtr<UMaterialInterface> DefaultOverlayMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Visual",
+		meta = (ClampMin = "0.0", Units = "cm",
+			ToolTip = "默认 Overlay 最远绘制距离（厘米）。默认 4000。0 = 不限制。走 SetOverlayMaterialMaxDrawDistance。"))
+	float DefaultOverlayMaxDrawDistance = 4000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Camera",
+		meta = (ClampMin = "0.0", Units = "cm",
+			ToolTip = "幻形后滚轮最近 SpringArm 臂长（厘米）。>0 时覆盖「史莱姆最小臂长×身高倍率」。0 = 沿用自动缩放。菲比默认 90，才能拉近看脸。"))
+	float MorphCameraArmLengthMin = 0.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Stats", meta = (ClampMin = "1.0"))
 	float MaxHP = 200.f;
 
@@ -434,6 +448,8 @@ protected:
 	void RefreshWorldHealthBarVisibility();
 	void UpdateHudAnchorCache() const;
 	void RebuildMeshParts();
+	void ApplyDefaultOverlay(UMeshComponent* MeshComp);
+	UMaterialInterface* ResolveDefaultOverlay() const;
 	void FitCapsuleToMesh();
 	void ApplySingleNodeAnimModeIfNeeded();
 	void ClearGeneratedParts();

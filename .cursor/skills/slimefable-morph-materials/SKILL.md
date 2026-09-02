@@ -15,11 +15,12 @@ description: >-
 
 1. **同一 `UMeshComponent` 过渡期非 Hair 槽必须同一着色家族。** 禁止 DefaultLit `M_SlimeMorph` 和 Substrate Toon 原皮混在一张网上（Face/Up 会变成 WorldGrid）。
 2. **过渡期（Growing / Blending / Unblending / Shrinking）** 非 Hair 槽穿 `/Game/Characters/Slime/Materials/M_SlimeMorph_Substrate`。**Hair VF 槽（`MSM_HAIR` 或槽名含 Hair）穿** `/Game/Characters/Slime/Materials/M_SlimeMorph_Hair`（Masked MSM_HAIR）。主网格 + BP 附加网格 + Groom + `GeneratedParts`，跳过占位立方体。Growing/Shrinking 可隐藏 extra parts，一旦显示必须已是史莱姆皮。收集用 Actor 上全部 `UMeshComponent`，不要只扫 `GeneratedParts`。
-3. **Morphed 才 `ApplyOriginalMaterials()`。** 不要在 Blending 入口还原原发/原脸再靠 Overlay。套皮时清掉 `OverlayMaterial`（受击闪盖不住 Hair VF）。
+3. **Morphed 才 `ApplyOriginalMaterials()`。** 不要在 Blending 入口还原原发/原脸再靠 Overlay。套皮时清掉 `OverlayMaterial`（受击闪盖不住 Hair VF）。**Morphed 时连同 `SavedOverlay` 一起还原**（菲比描边等常驻 Overlay）。
 4. 非 Hair 史莱姆皮是 **Masked Substrate Toon**（`BLEND_MASKED` + Toon BSDF + object-space `GrowProgress` → OpacityMask，可用 `TP_PhoebeSkin`）。**禁止**再把幻形底皮改成半透 Substrate Slab / Colored Transmittance / Simple Volume（会编成灰泥）。生长遮罩走 **OpacityMask**，过渡期不要把 `ShellOpacity` 淡到 0（Masked 会镂空成灰片）。Hair 槽生长同样走 OpacityMask。参数名对齐 C++：`GrowProgress` / `EdgeSoftness` / `ShellOpacity` / `BaseColor` / `EmissiveColor` / `MorphBrightness`。
 5. 不要按角色名写死 Phoebe / Samurai / 0815；按「多槽 + extra parts + Groom + Hair VF」处理。
 6. 不要为了幻形去改角色原 Toon/Hair 资产。禁止「只退回 Masked Toon 而漏掉头发」。**仅 Hair 槽**套皮失败才 `HideMaterialSection`；禁止用指针比较藏 Face/Up。
 7. **禁止**把 `/Game/FluidNinjaLive/UseCases/016_Caustics/MI_Water_SingleLayer_CausticsDemo` 当角色皮。本体 `M_SlimeBody` 保持原项目 Fresnel 果冻，不要加 PNO / 焦散 / Custom 法线。
+8. **视觉验证归用户。** 描边、套皮、面部阴影等观感由用户在视口 / PIE 亲自确认。实现做完就停；禁止凭截图或自己判断去改线宽 / TwoSidedSign / 颜色 / 曝光。用户已说效果不错后，只改用户点名的问题，不要顺手「优化」同一视觉点。
 
 ## 资产
 

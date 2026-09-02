@@ -4,6 +4,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Materials/MaterialInterface.h"
 #include "CharacterTrajectoryComponent.h"
 #include "Combat/SlimeDodgeComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -42,6 +43,53 @@ APhoebeEnemy::APhoebeEnemy()
 		FSoftObjectPath(TEXT("/Game/Models/Phoebe/Animations/Montages/AM_Phoebe_Behit_S_L.AM_Phoebe_Behit_S_L")));
 
 	ApplyThirdPersonLocomotionDefaults();
+
+	DefaultOverlayMaterial = TSoftObjectPtr<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Models/Phoebe/Materials/MI_PhoebeOutline_Overlay.MI_PhoebeOutline_Overlay")));
+
+	MorphCameraArmLengthMin = 90.f;
+}
+
+void APhoebeEnemy::Tick(float DeltaSeconds)
+{
+	UpdateFaceHeadForward();
+	Super::Tick(DeltaSeconds);
+}
+
+void APhoebeEnemy::UpdateFaceHeadForward()
+{
+	USkeletalMeshComponent* Skel = GetMesh();
+	if (!Skel)
+	{
+		return;
+	}
+
+	static const FName SocketCandidates[] = {
+		FName(TEXT("Head")),
+		FName(TEXT("head")),
+		FName(TEXT("C_Head")),
+		FName(TEXT("Bip001-Head")),
+		FName(TEXT("Bip001_Head")),
+		FName(TEXT("Neck")),
+		FName(TEXT("neck")),
+		FName(TEXT("neck_01")),
+	};
+
+	FVector Fwd = GetActorForwardVector();
+	for (const FName& SocketName : SocketCandidates)
+	{
+		if (Skel->DoesSocketExist(SocketName))
+		{
+			Fwd = Skel->GetSocketQuaternion(SocketName).GetForwardVector();
+			break;
+		}
+	}
+
+	if (!Fwd.Normalize())
+	{
+		Fwd = GetActorForwardVector();
+	}
+	Skel->SetCustomPrimitiveDataVector3(0, Fwd);
 }
 
 void APhoebeEnemy::ApplyThirdPersonLocomotionDefaults()
