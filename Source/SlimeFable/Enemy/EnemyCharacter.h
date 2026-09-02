@@ -10,6 +10,7 @@
 #include "EnemyEncounterSubsystem.h"
 #include "Slime/SlimeElementTypes.h"
 #include "SlimeLockTarget.h"
+#include "Slime/FoliageInteractVolume.h"
 #include "EnemyCharacter.generated.h"
 
 class UEnemyCombatComponent;
@@ -36,15 +37,20 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
 class USlimeLockOnComponent;
+class USlimeFoliageInteractComponent;
 struct FInputActionValue;
 
 UCLASS(meta = (PrioritizeCategories = "0_Config"))
-class SLIMEFABLE_API AEnemyCharacter : public ACharacter, public ISlimeLockTarget, public ICombatDamageable
+class SLIMEFABLE_API AEnemyCharacter : public ACharacter, public ISlimeLockTarget, public ICombatDamageable,
+	public IFoliageInteractVolume
 {
 	GENERATED_BODY()
 
 public:
 	AEnemyCharacter();
+
+	virtual bool GetFoliageInteractVolume(FVector& OutLocation, float& OutRadius) const override;
+	virtual bool ShouldSuppressFoliageInteract() const override;
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -491,6 +497,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
 	TObjectPtr<UQuestObjectiveComponent> Objective;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", AdvancedDisplay)
+	TObjectPtr<USlimeFoliageInteractComponent> FoliageInteract;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<USceneComponent>> GeneratedParts;

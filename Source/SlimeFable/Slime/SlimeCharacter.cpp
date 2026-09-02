@@ -24,6 +24,7 @@
 #include "SlimeDevourComponent.h"
 #include "SlimePathSwordComponent.h"
 #include "SlimeFluidNinjaContactComponent.h"
+#include "SlimeFoliageInteractComponent.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeMorphComponent.h"
 #include "SlimeSpringArmComponent.h"
@@ -203,6 +204,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SlimeMorph = CreateDefaultSubobject<USlimeMorphComponent>(TEXT("SlimeMorph"));
 	PathSword = CreateDefaultSubobject<USlimePathSwordComponent>(TEXT("PathSword"));
 	SlimeFluidNinjaContact = CreateDefaultSubobject<USlimeFluidNinjaContactComponent>(TEXT("SlimeFluidNinjaContact"));
+	SlimeFoliageInteract = CreateDefaultSubobject<USlimeFoliageInteractComponent>(TEXT("SlimeFoliageInteract"));
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(RootComponent);
@@ -817,4 +819,20 @@ void ASlimeCharacter::ApplyHealing(float Healing, AActor* Healer)
 
 void ASlimeCharacter::NotifyDanger(const FVector& DangerLocation, AActor* DangerSource)
 {
+}
+
+bool ASlimeCharacter::GetFoliageInteractVolume(FVector& OutLocation, float& OutRadius) const
+{
+	if (const USlimeBodyComponent* Body = GetSlimeBody())
+	{
+		OutLocation = Body->GetVisualBlobCenter();
+		OutRadius = Body->SolverParams.RestRadius * Body->GetAppliedBodyScale();
+		return true;
+	}
+	return false;
+}
+
+bool ASlimeCharacter::ShouldSuppressFoliageInteract() const
+{
+	return false;
 }

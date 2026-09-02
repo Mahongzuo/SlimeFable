@@ -12,6 +12,7 @@
    - 菜单 / HUD / UI 视觉 → [`.cursor/skills/slimefable-ui/SKILL.md`](.cursor/skills/slimefable-ui/SKILL.md)
    - 音乐 / 音效 / ComfyUI 音频 → [`.cursor/skills/slimefable-audio/SKILL.md`](.cursor/skills/slimefable-audio/SKILL.md)
    - 幻形 / 多槽材质 / 吞噬变身外观 → [`.cursor/skills/slimefable-morph-materials/SKILL.md`](.cursor/skills/slimefable-morph-materials/SKILL.md)
+   - 拨草 / 草 WPO / 移植到其他工程 → [`.cursor/skills/slimefable-foliage-interact/SKILL.md`](.cursor/skills/slimefable-foliage-interact/SKILL.md)
 
 Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefable-agent-spec.mdc)（`alwaysApply`）会要求遵守上述流程。
 
@@ -34,5 +35,5 @@ Cursor 规则 [`.cursor/rules/slimefable-agent-spec.mdc`](.cursor/rules/slimefab
 ## Cursor 用法
 
 - 打开本仓库后，Customize → Skills 应可见 `slimefable-*` skill。
-- 聊天中可 `/slimefable-spec`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials` 等手动调用。
+- 聊天中可 `/slimefable-spec`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact` 等手动调用。
 - 细节文档在各 skill 的 `references/` 下，按需再读。

@@ -29,9 +29,10 @@ description: >-
 | 主菜单 / 选关 / HUD / 字体与 UI 视觉 | 读并遵循 `slimefable-ui` |
 | 音乐 / 音效 / BGM / SFX / ComfyUI 音频生成 | 读并遵循 `slimefable-audio` |
 | 幻形 / 吞噬变身 / 多槽材质丢失 / WorldGrid Face·Up·头发 | 读并遵循 `slimefable-morph-materials` |
+| 拨草 / 草 WPO 交互 / 接别的草 Master / 移植到其他工程 | 读并遵循 `slimefable-foliage-interact` |
 | 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
-手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`。
+手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`。
 
 ## 项目硬事实
 

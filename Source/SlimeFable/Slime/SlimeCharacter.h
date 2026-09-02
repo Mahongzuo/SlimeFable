@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "CombatDamageable.h"
+#include "FoliageInteractVolume.h"
 #include "SlimeFableCharacter.h"
 #include "SlimeCombatTypes.h"
 #include "SlimeCharacter.generated.h"
@@ -27,6 +28,7 @@ class USlimeDevourComponent;
 class USlimeMorphComponent;
 class USlimePathSwordComponent;
 class USlimeFluidNinjaContactComponent;
+class USlimeFoliageInteractComponent;
 class UStaticMeshComponent;
 class USoundBase;
 class UAudioComponent;
@@ -39,12 +41,16 @@ class UAudioComponent;
  *  by dropping in more components rather than editing this class.
  */
 UCLASS()
-class SLIMEFABLE_API ASlimeCharacter : public ASlimeFableCharacter, public ICombatDamageable
+class SLIMEFABLE_API ASlimeCharacter : public ASlimeFableCharacter, public ICombatDamageable,
+	public IFoliageInteractVolume
 {
 	GENERATED_BODY()
 
 public:
 	ASlimeCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+	virtual bool GetFoliageInteractVolume(FVector& OutLocation, float& OutRadius) const override;
+	virtual bool ShouldSuppressFoliageInteract() const override;
 
 	virtual void BeginPlay() override;
 	virtual void PossessedBy(AController* NewController) override;
@@ -308,6 +314,10 @@ protected:
 	/** FluidNinja LIVE footprint / body contact proxies (WorldDynamic overlap spheres). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|FluidNinja")
 	TObjectPtr<USlimeFluidNinjaContactComponent> SlimeFluidNinjaContact;
+
+	/** Writes position/velocity into MPC_SlimeFoliage for interactive grass WPO. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Foliage")
+	TObjectPtr<USlimeFoliageInteractComponent> SlimeFoliageInteract;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

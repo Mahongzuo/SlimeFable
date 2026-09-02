@@ -24,6 +24,7 @@
 #include "Components/WidgetComponent.h"
 #include "EnemyCombatComponent.h"
 #include "EnemyPresenceSubsystem.h"
+#include "SlimeFoliageInteractComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
@@ -116,6 +117,7 @@ AEnemyCharacter::AEnemyCharacter()
 
 	Combat = CreateDefaultSubobject<UEnemyCombatComponent>(TEXT("Combat"));
 	Objective = CreateDefaultSubobject<UQuestObjectiveComponent>(TEXT("Objective"));
+	FoliageInteract = CreateDefaultSubobject<USlimeFoliageInteractComponent>(TEXT("FoliageInteract"));
 
 	HealthBar = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBar"));
 	HealthBar->SetupAttachment(RootComponent);
@@ -2427,4 +2429,21 @@ void AEnemyCharacter::ApplyPhantomVisuals()
 	{
 		Ghost(Cast<UMeshComponent>(Part));
 	}
+}
+
+bool AEnemyCharacter::GetFoliageInteractVolume(FVector& OutLocation, float& OutRadius) const
+{
+	if (const USkeletalMeshComponent* SkelMesh = GetMesh())
+	{
+		const FBoxSphereBounds Bounds = SkelMesh->Bounds;
+		OutLocation = Bounds.Origin;
+		OutRadius = Bounds.SphereRadius;
+		return true;
+	}
+	return false;
+}
+
+bool AEnemyCharacter::ShouldSuppressFoliageInteract() const
+{
+	return IsInDeathSequence() || IsDevouredDeath();
 }
