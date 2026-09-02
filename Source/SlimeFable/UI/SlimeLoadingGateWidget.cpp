@@ -19,7 +19,6 @@
 #include "Engine/GameInstance.h"
 #include "UObject/UObjectGlobals.h"
 #include "Styling/SlateTypes.h"
-#include "TimerManager.h"
 #include "Misc/App.h"
 #include "SlimeSkillVfxSubsystem.h"
 
@@ -38,26 +37,19 @@ void USlimeLoadingGateWidget::NativeConstruct()
 	bFinishing = false;
 	bFinished = false;
 	LastPollTimeSeconds = FApp::GetCurrentTime();
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(
-			PollTimerHandle,
-			this,
-			&USlimeLoadingGateWidget::PollGate,
-			0.05f,
-			true);
-	}
 }
 
 void USlimeLoadingGateWidget::NativeDestruct()
 {
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(PollTimerHandle);
-	}
 	GAreScreenMessagesEnabled = bPrevScreenMessagesEnabled;
 	Super::NativeDestruct();
+}
+
+void USlimeLoadingGateWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	// Poll with wall-clock delta so progress still advances while the world is paused.
+	PollGate();
 }
 
 TSharedRef<SWidget> USlimeLoadingGateWidget::RebuildWidget()
@@ -297,11 +289,6 @@ void USlimeLoadingGateWidget::FinishGate()
 		return;
 	}
 	bFinished = true;
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(PollTimerHandle);
-	}
 
 	GAreScreenMessagesEnabled = bPrevScreenMessagesEnabled;
 	OnGateFinished.Broadcast();

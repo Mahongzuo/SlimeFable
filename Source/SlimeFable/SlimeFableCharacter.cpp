@@ -46,6 +46,10 @@ ASlimeFableCharacter::ASlimeFableCharacter(const FObjectInitializer& ObjectIniti
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+#if WITH_EDITORONLY_DATA
+	FollowCamera->bDrawFrustumAllowed = false;
+	FollowCamera->bCameraMeshHiddenInGame = true;
+#endif
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)

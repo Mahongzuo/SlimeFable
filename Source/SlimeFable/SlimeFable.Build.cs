@@ -28,7 +28,14 @@ public class SlimeFable : ModuleRules
 			"Niagara",
 			"MoviePlayer",
 			"MediaAssets",
-			"AssetRegistry"
+			"AssetRegistry",
+			"AnimGraphRuntime",
+			"PoseSearch",
+			"Chooser",
+			"AnimationLocomotionLibraryRuntime",
+			"AnimationWarpingRuntime",
+			"MotionWarping",
+			"MotionTrajectory"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
@@ -38,6 +45,18 @@ public class SlimeFable : ModuleRules
 			"DLSSBlueprint",
 			"Landscape"
 		});
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] {
+				"UnrealEd",
+				"AnimGraph",
+				"BlueprintGraph",
+				"PoseSearchEditor",
+				"AnimationWarpingEditor",
+				"Kismet"
+			});
+		}
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SlimeFable",

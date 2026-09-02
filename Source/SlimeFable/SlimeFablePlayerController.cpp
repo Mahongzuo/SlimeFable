@@ -37,7 +37,8 @@ namespace
 			|| Reason == ESlimeUIInputReason::Inventory
 			|| Reason == ESlimeUIInputReason::Souvenir
 			|| Reason == ESlimeUIInputReason::ElementFormation
-			|| Reason == ESlimeUIInputReason::HotbarConfirm;
+			|| Reason == ESlimeUIInputReason::HotbarConfirm
+			|| Reason == ESlimeUIInputReason::LoadingGate;
 	}
 
 	bool ShouldShowCursor(ESlimeUIInputReason Reason)

@@ -1178,6 +1178,16 @@ void USlimeDevourComponent::BeginRetract(AEnemyCharacter* Enemy)
 		return;
 	}
 
+	if (USoundBase* Sfx = SwallowSound.LoadSynchronous())
+	{
+		SlimeAudioPlay::PlaySfxAt(GetOwner(), Sfx, GetBlobCenter());
+	}
+	else if (USoundBase* Fallback = LoadObject<USoundBase>(
+		nullptr, TEXT("/Game/Audio/SFX/Combat/sfx_swallow_01.sfx_swallow_01")))
+	{
+		SlimeAudioPlay::PlaySfxAt(GetOwner(), Fallback, GetBlobCenter());
+	}
+
 	RetractStartWrapCenter = GetWrapCenter(Enemy);
 	RetractStartLocation = Enemy->GetActorLocation();
 	const FVector Home = GetBlobCenter();
@@ -1242,16 +1252,6 @@ void USlimeDevourComponent::SwallowTarget()
 	{
 		AbortDevour(true);
 		return;
-	}
-
-	if (USoundBase* Sfx = SwallowSound.LoadSynchronous())
-	{
-		SlimeAudioPlay::PlaySfxAt(GetOwner(), Sfx, GetBlobCenter());
-	}
-	else if (USoundBase* Fallback = LoadObject<USoundBase>(
-		nullptr, TEXT("/Game/Audio/SFX/Combat/sfx_swallow_01.sfx_swallow_01")))
-	{
-		SlimeAudioPlay::PlaySfxAt(GetOwner(), Fallback, GetBlobCenter());
 	}
 
 	CaptureEnemy(Target, ActiveCapture);

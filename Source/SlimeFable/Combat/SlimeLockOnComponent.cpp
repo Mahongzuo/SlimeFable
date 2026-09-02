@@ -251,9 +251,18 @@ void USlimeLockOnComponent::RestoreCameraBoom()
 
 	if (bHaveSavedBoom)
 	{
-		if (ASlimeFableCharacter* Character = Cast<ASlimeFableCharacter>(GetOwner()))
+		if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 		{
-			if (USpringArmComponent* Boom = Character->GetCameraBoom())
+			USpringArmComponent* Boom = nullptr;
+			if (ASlimeFableCharacter* SlimeBase = Cast<ASlimeFableCharacter>(Character))
+			{
+				Boom = SlimeBase->GetCameraBoom();
+			}
+			if (!Boom)
+			{
+				Boom = Character->FindComponentByClass<USpringArmComponent>();
+			}
+			if (Boom)
 			{
 				Boom->SocketOffset = SavedBoomSocketOffset;
 			}
@@ -425,21 +434,24 @@ void USlimeLockOnComponent::ApplyLockCamera(float DeltaTime)
 		return;
 	}
 
-	USpringArmComponent* Boom = nullptr;
+	USpringArmComponent* Boom = Character->FindComponentByClass<USpringArmComponent>();
 	if (ASlimeFableCharacter* SlimeBase = Cast<ASlimeFableCharacter>(Character))
 	{
-		Boom = SlimeBase->GetCameraBoom();
-		if (Boom)
+		if (USpringArmComponent* SlimeBoom = SlimeBase->GetCameraBoom())
 		{
-			if (!bHaveSavedBoom)
-			{
-				SavedBoomSocketOffset = Boom->SocketOffset;
-				bHaveSavedBoom = true;
-			}
-			FVector Offset = SavedBoomSocketOffset;
-			Offset.Z = FMath::Max(Offset.Z, LockSocketLiftZ);
-			Boom->SocketOffset = Offset;
+			Boom = SlimeBoom;
 		}
+	}
+	if (Boom)
+	{
+		if (!bHaveSavedBoom)
+		{
+			SavedBoomSocketOffset = Boom->SocketOffset;
+			bHaveSavedBoom = true;
+		}
+		FVector Offset = SavedBoomSocketOffset;
+		Offset.Z = FMath::Max(Offset.Z, LockSocketLiftZ);
+		Boom->SocketOffset = Offset;
 	}
 
 	float SelfMinZ = 0.f;

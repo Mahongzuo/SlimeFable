@@ -373,6 +373,10 @@ void AEnemyFighterAIController::ApplyLocomotionMaxSpeed(bool bChasing)
 		Move->MaxWalkSpeed = (bChasing ? Fighter->ChaseSpeed : Fighter->WalkSpeed)
 			* (Fighter->GetEnemyStatus() ? Fighter->GetEnemyStatus()->GetMoveSpeedMul() : 1.f);
 	}
+	if (Fighter->bABPDrivenLocomotion)
+	{
+		return;
+	}
 	// 追逐时切 Run 蒙太奇，闲逛时切 Walk 蒙太奇。
 	if (bChasing)
 	{
@@ -387,12 +391,12 @@ void AEnemyFighterAIController::ApplyLocomotionMaxSpeed(bool bChasing)
 
 void AEnemyFighterAIController::UpdateWalkPlayRate()
 {
-	if (!Fighter)
+	if (!Fighter || Fighter->bABPDrivenLocomotion)
 	{
 		return;
 	}
 	USkeletalMeshComponent* Skel = Fighter->GetMesh();
-	if (!Skel || !Fighter->bABPDrivenLocomotion)
+	if (!Skel)
 	{
 		return;
 	}
@@ -406,24 +410,8 @@ void AEnemyFighterAIController::UpdateWalkPlayRate()
 
 void AEnemyFighterAIController::PlayWalkAnim()
 {
-	if (!Fighter)
+	if (!Fighter || Fighter->bABPDrivenLocomotion)
 	{
-		return;
-	}
-	// ABP 驱动模式：闲逛播 Walk，追逐播 Run（由 ApplyLocomotionMaxSpeed 切换）。
-	if (Fighter->bABPDrivenLocomotion)
-	{
-		if (bPlayingWalk && !bPlayingRun)
-		{
-			return; // 已在播 Walk，不重复播放
-		}
-		if (UAnimMontage* Walk = Fighter->WalkMontage.LoadSynchronous())
-		{
-			Fighter->PlayMeshAnimation(Walk, true);
-			bPlayingWalk = true;
-			bPlayingRun = false;
-			PlayingIdleMontage.Reset();
-		}
 		return;
 	}
 	if (bPlayingWalk)
@@ -441,35 +429,13 @@ void AEnemyFighterAIController::PlayWalkAnim()
 
 void AEnemyFighterAIController::PlayRunAnim()
 {
-	if (!Fighter)
+	if (!Fighter || Fighter->bABPDrivenLocomotion)
 	{
 		return;
 	}
-	// 非 ABP 驱动模式不切 Run（走旧 PlayRate 加速路径）。
-	if (!Fighter->bABPDrivenLocomotion)
+	if (bPlayingWalk)
 	{
-		if (bPlayingWalk)
-		{
-			UpdateWalkPlayRate();
-		}
-		else
-		{
-			PlayWalkAnim();
-			UpdateWalkPlayRate();
-		}
-		return;
-	}
-	// ABP 驱动模式：有 Run 蒙太奇就播 Run，没有就回退 Walk+PlayRate。
-	if (UAnimMontage* Run = Fighter->RunMontage.LoadSynchronous())
-	{
-		if (bPlayingWalk && bPlayingRun)
-		{
-			return; // 已在播 Run，不重复播放
-		}
-		Fighter->PlayMeshAnimation(Run, true);
-		bPlayingWalk = true;
-		bPlayingRun = true;
-		PlayingIdleMontage.Reset();
+		UpdateWalkPlayRate();
 	}
 	else
 	{
@@ -880,12 +846,9 @@ void AEnemyFighterAIController::PlayChaseLocomotionIfMoving()
 	}
 	if (Fighter->bABPDrivenLocomotion)
 	{
-		PlayRunAnim();
+		return;
 	}
-	else
-	{
-		PlayWalkAnim();
-	}
+	PlayWalkAnim();
 }
 
 void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)

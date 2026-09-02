@@ -3,6 +3,8 @@
 #include "SlimeDodgeComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
+#include "PhoebeClimbComponent.h"
+#include "PhoebeEnemy.h"
 #include "EnemyCharacter.h"
 #include "EnemyFighter.h"
 #include "EnemyTower.h"
@@ -232,6 +234,16 @@ void USlimeDodgeComponent::TryHandleRightClick()
 			return;
 		}
 	}
+
+	// Morphed Phoebe: RMB is sprint/climb-dash unless an attack is actually incoming.
+	if (APhoebeEnemy* Phoebe = Cast<APhoebeEnemy>(GetOwner()))
+	{
+		if (!Phoebe->WantsCombatDodge())
+		{
+			return;
+		}
+	}
+
 	if (!IsInEnemyThreatRange())
 	{
 		SlimeDodgeAudio::PlayAtOwner(this, BlinkDashSound, SlimeDodgeAudio::DefaultBlink);

@@ -18,6 +18,7 @@
 #include "BrainComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/MeshComponent.h"
+#include "Templates/Function.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -255,7 +256,7 @@ void AEnemyCharacter::RefreshWorldHealthBarVisibility(const APawn* Player, const
 
 	ApplyHealthBarOffset();
 
-	if (bDevourLocked || bDevouredDeath || bDeathSequence)
+	if (bMorphTarget || IsPlayerControlled() || bDevourLocked || bDevouredDeath || bDeathSequence)
 	{
 		HealthBar->SetHiddenInGame(true);
 		HealthBar->SetVisibility(false);
@@ -332,12 +333,19 @@ void AEnemyCharacter::UpdateMorphSprintSpeed()
 	float Base = Move->MaxWalkSpeed;
 	if (const AEnemyFighter* Fighter = Cast<AEnemyFighter>(this))
 	{
-		Base = Fighter->WalkSpeed;
+		// Morph default locomotion is run (ChaseSpeed); WalkSpeed is the slow-walk band only.
+		Base = Fighter->ChaseSpeed > 1.f ? Fighter->ChaseSpeed : Fighter->WalkSpeed;
 	}
 	float StatusMul = 1.f;
 	if (Status)
 	{
 		StatusMul = Status->GetMoveSpeedMul();
+	}
+	// Don't fight attack movement lock.
+	if (Combat && Combat->IsMovementLocked())
+	{
+		Move->MaxWalkSpeed = 0.f;
+		return;
 	}
 	Move->MaxWalkSpeed = Base * StatusMul * (bSprint ? SprintSpeedMul : 1.f);
 }
@@ -845,7 +853,7 @@ void AEnemyCharacter::RebuildMeshParts()
 
 bool AEnemyCharacter::CanBeLockedOn() const
 {
-	if (bPhantomInstance || bDevourLocked)
+	if (bMorphTarget || IsPlayerControlled() || bPhantomInstance || bDevourLocked)
 	{
 		return false;
 	}
@@ -1112,6 +1120,33 @@ void AEnemyCharacter::ApplyHitFlashToAllMeshes()
 	{
 		ApplyHitFlashToMesh(PlaceholderMesh);
 	}
+}
+
+void AEnemyCharacter::ForEachVisualMesh(TFunctionRef<void(UMeshComponent*)> Fn) const
+{
+	TArray<UMeshComponent*> MeshComps;
+	GetComponents<UMeshComponent>(MeshComps);
+	for (UMeshComponent* MeshComp : MeshComps)
+	{
+		if (!MeshComp || MeshComp == PlaceholderMesh || MeshComp->IsA<UWidgetComponent>())
+		{
+			continue;
+		}
+		// Camera/spring-arm gizmos are UMeshComponent (MatineeCam_SM). Morph skin +
+		// SetExtraPartsHidden(false) would force that camera mesh visible in-game.
+		if (MeshComp->IsVisualizationComponent()
+			|| Cast<UCameraComponent>(MeshComp->GetAttachParent()))
+		{
+			continue;
+		}
+		Fn(MeshComp);
+	}
+}
+
+void AEnemyCharacter::RefreshHealthBarAnchor()
+{
+	bHudAnchorCached = false;
+	ApplyHealthBarOffset();
 }
 
 void AEnemyCharacter::ClearHitFlashFromMeshes()
@@ -2180,12 +2215,27 @@ void AEnemyCharacter::InitAsMorphTarget(AActor* Master)
 	MorphCameraBoom->SetupAttachment(RootComponent);
 	MorphCameraBoom->TargetArmLength = 300.f;
 	MorphCameraBoom->bUsePawnControlRotation = true;
+	MorphCameraBoom->bEnableCameraLag = true;
+	MorphCameraBoom->CameraLagSpeed = 12.f;
 	MorphCameraBoom->RegisterComponent();
 
 	MorphFollowCamera = NewObject<UCameraComponent>(this, TEXT("MorphFollowCamera"));
 	MorphFollowCamera->SetupAttachment(MorphCameraBoom, USpringArmComponent::SocketName);
 	MorphFollowCamera->bUsePawnControlRotation = false;
+#if WITH_EDITORONLY_DATA
+	MorphFollowCamera->bDrawFrustumAllowed = false;
+	MorphFollowCamera->bCameraMeshHiddenInGame = true;
+#endif
 	MorphFollowCamera->RegisterComponent();
+
+	if (!MorphLockOn)
+	{
+		MorphLockOn = NewObject<USlimeLockOnComponent>(this, TEXT("MorphLockOn"));
+		MorphLockOn->bPollLockOnKey = true;
+		MorphLockOn->RegisterComponent();
+	}
+
+	RefreshWorldHealthBarVisibility();
 
 	// Standing idle only — loop so morph spawn never freezes on a mid jump/lie frame.
 	if (UsesSingleNodeAnims())
@@ -2226,6 +2276,8 @@ void AEnemyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		if (MorphMoveAction)
 		{
 			EnhancedInput->BindAction(MorphMoveAction, ETriggerEvent::Triggered, this, &AEnemyCharacter::MorphMove);
+			EnhancedInput->BindAction(MorphMoveAction, ETriggerEvent::Completed, this, &AEnemyCharacter::MorphMoveStopped);
+			EnhancedInput->BindAction(MorphMoveAction, ETriggerEvent::Canceled, this, &AEnemyCharacter::MorphMoveStopped);
 		}
 		if (MorphMouseLookAction)
 		{
@@ -2257,7 +2309,21 @@ void AEnemyCharacter::MorphJump()
 
 void AEnemyCharacter::MorphMove(const FInputActionValue& Value)
 {
+	if (Combat && Combat->IsAirAttacking())
+	{
+		return;
+	}
+
 	const FVector2D MovementVector = Value.Get<FVector2D>();
+	if (Combat && !MovementVector.IsNearlyZero(0.05f) && ShouldInterruptCombatOnMove())
+	{
+		Combat->InterruptForMovement();
+	}
+	if (Combat && Combat->IsMovementLocked())
+	{
+		return;
+	}
+
 	if (GetController())
 	{
 		const FRotator Rotation = GetController()->GetControlRotation();
@@ -2267,6 +2333,12 @@ void AEnemyCharacter::MorphMove(const FInputActionValue& Value)
 		AddMovementInput(ForwardDirection, MovementVector.Y);
 		AddMovementInput(RightDirection, MovementVector.X);
 	}
+}
+
+void AEnemyCharacter::MorphMoveStopped(const FInputActionValue& Value)
+{
+	(void)Value;
+	MorphMove(FInputActionValue(FVector2D::ZeroVector));
 }
 
 void AEnemyCharacter::MorphLook(const FInputActionValue& Value)

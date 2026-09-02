@@ -16,6 +16,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSlimeLoadingGateFinished);
 /**
  * Game-thread fullscreen gate after map load: fake progress while shaders compile,
  * then release control when jobs stay at zero.
+ * Uses NativeTick (not World timers) so it still finishes while the game is paused.
  */
 UCLASS()
 class SLIMEFABLE_API USlimeLoadingGateWidget : public UUserWidget
@@ -25,6 +26,7 @@ class SLIMEFABLE_API USlimeLoadingGateWidget : public UUserWidget
 public:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 	UPROPERTY(BlueprintAssignable, Category = "Loading")
@@ -39,8 +41,6 @@ protected:
 	int32 GetSkillVfxJobsRemaining() const;
 	int32 GetPsoJobsRemaining() const;
 	bool IsRenderReady() const;
-
-	UFUNCTION()
 	void PollGate();
 
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -65,6 +65,5 @@ protected:
 	/** Restored when the gate closes. */
 	bool bPrevScreenMessagesEnabled = true;
 
-	FTimerHandle PollTimerHandle;
 	double LastPollTimeSeconds = 0.0;
 };

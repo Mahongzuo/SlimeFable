@@ -8,6 +8,7 @@
 #include "EnemyCombatComponent.generated.h"
 
 class UAnimInstance;
+class UAnimMontage;
 class UNiagaraSystem;
 class UEnemySkillAbility;
 
@@ -30,8 +31,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
 	void InterruptCombat();
 
+	/** Player movement cancels only the active attack/skill montage and action state. */
+	void InterruptForMovement();
+
+	/** Start Phoebe's airborne plunge; impact damage is deferred until landing. */
+	bool TryStartAirAttack(
+		const FEnemySkillDef& Def,
+		UAnimMontage* StartMontage,
+		UAnimMontage* LoopMontage,
+		UAnimMontage* EndMontage,
+		float GravityMultiplier,
+		float InitialDownSpeed);
+
+	/** Called by the owning character's Landed override. */
+	void NotifyOwnerLanded();
+
 	UFUNCTION(BlueprintPure, Category = "Enemy|Combat")
 	bool IsAttacking() const { return bAttacking; }
+
+	bool IsAirAttacking() const { return bAirAttacking; }
+
+	/** True while attack/skill should block walk input (incl. recovery lock). Dash travel excluded. */
+	UFUNCTION(BlueprintPure, Category = "Enemy|Combat")
+	bool IsMovementLocked() const;
 
 	/** When true, Tick polls player combat keys instead of waiting for AI. Set by the morph system. */
 	void SetPlayerMorphed(bool bIn) { bPlayerMorphed = bIn; }
@@ -57,6 +79,7 @@ protected:
 	bool CanStartAction() const;
 	bool StartAction(const FEnemySkillDef& Def);
 	void TickAction(float DeltaTime);
+	void TickAirAttack(float DeltaTime);
 	void FinishAction();
 	void FireHit();
 	float GetHitFireTime() const;
@@ -78,8 +101,29 @@ protected:
 	bool bHitFired = false;
 	bool bActionAnimationStarted = false;
 	bool bPlayerMorphed = false;
+	bool bLockedMovementForAttack = false;
+	float CachedMaxWalkSpeedBeforeAttack = 0.f;
+
+	void LockMovementForAttack();
+	void UnlockMovementAfterAttack();
+	void StopActiveActionMontage(float BlendOutTime);
+	void RestoreAirAttackMovement();
+	void ClearActionState(bool bClearAttackLock);
+	bool PlayTrackedMontage(UAnimMontage* Montage);
+	void ApplyPhoebeMoveLock(const FEnemySkillDef& Def);
+	void BeginPhoebeLandMoveLock();
 	TSet<TWeakObjectPtr<AActor>> AlreadyHit;
 	FEnemySkillDef PendingGasDef;
 	TWeakObjectPtr<UEnemySkillAbility> ActiveGasAbility;
 	float AttackLockRemaining = 0.f;
+	TWeakObjectPtr<UAnimMontage> ActiveActionMontage;
+	TWeakObjectPtr<UAnimMontage> AirAttackStartMontage;
+	TWeakObjectPtr<UAnimMontage> AirAttackLoopMontage;
+	TWeakObjectPtr<UAnimMontage> AirAttackEndMontage;
+	float AirAttackStartRemaining = 0.f;
+	float SavedAirAttackGravityScale = 1.f;
+	float SavedAirAttackAirControl = 0.35f;
+	bool bAirAttacking = false;
+	bool bAirAttackLoopStarted = false;
+	bool bPhoebeTimedMoveLock = false;
 };

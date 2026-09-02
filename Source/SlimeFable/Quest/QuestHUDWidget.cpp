@@ -1,8 +1,6 @@
 #include "Quest/QuestHUDWidget.h"
 #include "Quest/QuestSubsystem.h"
-#include "Combat/SlimeLockOnComponent.h"
-#include "Enemy/EnemyCharacter.h"
-#include "EngineUtils.h"
+#include "Combat/SlimeCombatDetect.h"
 #include "UI/MenuUIStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -325,31 +323,7 @@ FReply UQuestHUDWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, con
 
 bool UQuestHUDWidget::IsLocalCombatActive(APlayerController* PC) const
 {
-	if (!PC)
-	{
-		return false;
-	}
-	if (APawn* Pawn = PC->GetPawn())
-	{
-		if (const USlimeLockOnComponent* Lock = Pawn->FindComponentByClass<USlimeLockOnComponent>())
-		{
-			if (Lock->IsLockedOn())
-			{
-				return true;
-			}
-		}
-	}
-	if (UWorld* World = PC->GetWorld())
-	{
-		for (TActorIterator<AEnemyCharacter> It(World); It; ++It)
-		{
-			if (It->IsInCombat())
-			{
-				return true;
-			}
-		}
-	}
-	return false;
+	return SlimeCombatDetect::IsLocalCombatActive(PC);
 }
 
 void UQuestHUDWidget::UpdateWaypoint(UQuestSubsystem* Quests, APlayerController* PC)

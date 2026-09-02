@@ -35,6 +35,7 @@ class UQuestObjectiveComponent;
 class USpringArmComponent;
 class UCameraComponent;
 class UInputAction;
+class USlimeLockOnComponent;
 struct FInputActionValue;
 
 UCLASS(meta = (PrioritizeCategories = "0_Config"))
@@ -84,7 +85,7 @@ public:
 
 	/** Poise break / scripted stagger. Interrupts the current attack and opens a counter window. */
 	UFUNCTION(BlueprintCallable, Category = "Combat|AI")
-	void EnterStagger(float Duration, AActor* StaggerInstigator);
+	virtual void EnterStagger(float Duration, AActor* StaggerInstigator);
 
 	UFUNCTION(BlueprintPure, Category = "Combat|AI")
 	bool IsStaggered() const;
@@ -110,6 +111,9 @@ public:
 	UStaticMeshComponent* GetPlaceholderMesh() const { return PlaceholderMesh; }
 
 	const TArray<TObjectPtr<USceneComponent>>& GetGeneratedParts() const { return GeneratedParts; }
+
+	/** Every UMeshComponent on this actor except the placeholder cube (primary, GeneratedParts, BP extras, Groom). */
+	void ForEachVisualMesh(TFunctionRef<void(UMeshComponent*)> Fn) const;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	bool IsInDeathSequence() const { return bDeathSequence; }
@@ -147,7 +151,7 @@ public:
 	 *  Call after SpawnActorDeferred and before FinishSpawning.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
-	void InitAsMorphTarget(AActor* Master);
+	virtual void InitAsMorphTarget(AActor* Master);
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void BeginDevouredDeath(AActor* Devourer);
@@ -399,16 +403,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	virtual bool IsInCombat() const;
 
+	/** Recompute world health-bar Z from mesh bounds (call after morph possess / capsule fit). */
+	UFUNCTION(BlueprintCallable, Category = "Enemy|HUD")
+	void RefreshHealthBarAnchor();
+
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	/** Enhanced Input handlers for morph body movement / look. */
-	void MorphMove(const FInputActionValue& Value);
+	virtual void MorphMove(const FInputActionValue& Value);
+	/** When true, WASD cancels attack/skill montages. Phoebe returns false so attacks play out. */
+	virtual bool ShouldInterruptCombatOnMove() const { return true; }
+	/** Move action Released/Canceled — forces zero axis so climb input does not stick. */
+	void MorphMoveStopped(const FInputActionValue& Value);
 	void MorphLook(const FInputActionValue& Value);
 	/** Play jump montage immediately (single-node), then Character::Jump. */
-	void MorphJump();
+	virtual void MorphJump();
 	void UpdateMorphSafeTransform();
-	void UpdateMorphSprintSpeed();
+	virtual void UpdateMorphSprintSpeed();
 
 	virtual void OnRestoredToSpawn();
 	void TickOutOfCombatReset(float DeltaSeconds);
@@ -516,6 +528,8 @@ protected:
 	TObjectPtr<USpringArmComponent> MorphCameraBoom;
 	UPROPERTY(Transient)
 	TObjectPtr<UCameraComponent> MorphFollowCamera;
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeLockOnComponent> MorphLockOn;
 	/** Input action assets copied from the slime so Enhanced Input works on this pawn. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> MorphMoveAction;

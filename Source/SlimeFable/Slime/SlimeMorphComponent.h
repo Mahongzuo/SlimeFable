@@ -15,6 +15,39 @@ class USlimePhantomWheelWidget;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class USkeletalMeshComponent;
+class UMeshComponent;
+class USpringArmComponent;
+
+/** Per-mesh morph visual state (primary + GeneratedParts). */
+USTRUCT()
+struct FSlimeMorphMeshVisual
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMeshComponent> Mesh = nullptr;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> SavedMaterials;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> MorphMIDs;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> ShellMID = nullptr;
+
+	/** True if this is an extra part (not the character primary mesh). */
+	bool bExtraPart = false;
+
+	/**
+	 * Morph transition wears Substrate slime as base skin on every slot (no DefaultLit overlay).
+	 * OverlayMaterial cannot cover Hair / Substrate Toon / extra parts cleanly.
+	 */
+	bool bBaseSkinMorphPath = false;
+
+	/** Material slot indices whose sections were hidden after a failed slime-skin swap. */
+	TArray<int32> HiddenMaterialSlots;
+};
 
 UENUM(BlueprintType)
 enum class ESlimeMorphPhase : uint8
@@ -113,6 +146,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Morph|Timing", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float UnblendUnpossessAlpha = 0.5f;
 
+	/** Smooth spring-arm framing after slime↔morph possess (SocketZ / arm / TargetOffset). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Morph|Timing",
+		meta = (ClampMin = "0.05", Units = "s",
+			ToolTip = "幻形/解除幻形 Possess 后，机位从当前值平滑插到目标 framing 的时长。默认 0.45 秒。"))
+	float CameraBlendDuration = 0.45f;
+
 	/**
 	 *  Soft edge width at the grow front, as a fraction of the model's height (not cm) — the
 	 *  reveal mask lives in object space so it tracks the actor wherever it walks or jumps.
@@ -151,13 +190,16 @@ private:
 	void PossessSlime();
 	void EnsureMorphDodge();
 	void ClearMorphDodge();
+	/** Ease SocketOffset / TargetArmLength / TargetOffset after possess. */
+	void TickCameraBlend(float DeltaTime);
+	void BeginCameraBlend(USpringArmComponent* Boom, float TargetArm, float TargetSocketZ, const FVector& TargetOffset);
 	void SetSlimeMovementEnabled(bool bEnabled);
 	void SetMorphTargetGameplayEnabled(bool bEnabled);
 	void CacheUnmorphPoseAndFreezeTarget();
 	void ConsumeMorphedSlotIfRequested();
 	void SyncElementProfileToMorphMaterial();
 
-	/** Mesh slots -> M_SlimeMorph instances (the model itself looks like slime). */
+	/** Mesh slots -> slime-skin MIDs (Substrate Slab on every visual mesh). */
 	void ApplySlimeSkin();
 
 	/** Mesh slots → the enemy's own materials, so the final look is always correct. */
@@ -166,8 +208,28 @@ private:
 	/** Toggles the M_SlimeMorph overlay that renders the slime shell on top of the real materials. */
 	void SetShellActive(bool bActive);
 
-	/** Loads M_SlimeMorph material on demand and caches it. */
+	/** Loads M_SlimeMorph (translucent overlay) on demand and caches it. */
 	UMaterialInterface* LoadMorphMaterial();
+
+	/** Loads M_SlimeMorph_Grow (masked DefaultLit clip) on demand and caches it. */
+	UMaterialInterface* LoadMorphGrowMaterial();
+
+	/** Loads M_SlimeMorph_Substrate (Substrate Slab slime skin) on demand and caches it. */
+	UMaterialInterface* LoadMorphSubstrateMaterial();
+
+	/** Loads M_SlimeMorph_Hair (Masked MSM_HAIR slime skin) on demand and caches it. */
+	UMaterialInterface* LoadMorphHairMaterial();
+
+	/** True if any saved material is Substrate/Toon and should skip Overlay. */
+	static bool MaterialNeedsBaseSkinMorphPath(UMaterialInterface* Mat);
+
+	/** Hide / restore skeletal sections when a slot refused the slime MID. */
+	void HideFailedMorphSlots(FSlimeMorphMeshVisual& Entry);
+	void RestoreHiddenMorphSlots(FSlimeMorphMeshVisual& Entry);
+	void RestoreAllHiddenMorphSlots();
+
+	/** True if any morph visual uses the base-skin (no-overlay) path. */
+	bool UsesBaseSkinMorphPath() const;
 
 	/** Drives walk/idle montages on the morph target based on movement speed (for single-node-anim enemies). */
 	void TickMorphLocomotion(float Dt);
@@ -194,21 +256,28 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeDodgeComponent> MorphDodge;
 
-	/** Original materials saved before swapping to M_SlimeMorph, restored on cleanup. */
+	/** Original materials / morph MIDs / shells for every visual mesh. */
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UMaterialInterface>> SavedEnemyMaterials;
+	TArray<FSlimeMorphMeshVisual> MorphVisuals;
 
-	/** M_SlimeMorph instances bound to the mesh slots (used during Growing / Shrinking). */
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UMaterialInstanceDynamic>> MorphMIDs;
-
-	/** M_SlimeMorph instance used as the mesh's overlay shell (used during Blending / Unblending). */
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> ShellMID;
-
-	/** Cached M_SlimeMorph material. */
+	/** Cached M_SlimeMorph material (translucent overlay for DefaultLit). */
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> MorphMaterial;
+
+	/** Cached M_SlimeMorph_Grow (masked DefaultLit clip). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> MorphGrowMaterial;
+
+	/** Cached M_SlimeMorph_Substrate (Substrate Slab slime skin). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> MorphSubstrateMaterial;
+
+	/** Cached M_SlimeMorph_Hair (Masked MSM_HAIR slime skin). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> MorphHairMaterial;
+
+	/** Hides GeneratedParts while grow mask is incomplete (avoids hair floating on slime). */
+	void SetExtraPartsHidden(bool bHidden);
 
 	ESlimeMorphPhase Phase = ESlimeMorphPhase::Idle;
 	float PhaseElapsed = 0.f;
@@ -232,6 +301,21 @@ private:
 	bool bMorphRunPlaying = false;
 	bool bMorphJumpPlaying = false;
 	float MorphIdleTimer = 0.f;
+
+	/** Cached morph camera framing (tall bodies need higher SocketOffset / longer arm). */
+	float MorphCameraHeightScale = 1.f;
+	float MorphCameraSocketZ = 12.f;
+
+	/** Active spring-arm framing blend after possess. */
+	bool bCameraBlendActive = false;
+	float CameraBlendElapsed = 0.f;
+	TWeakObjectPtr<USpringArmComponent> CameraBlendBoom;
+	float CameraBlendStartArm = 0.f;
+	float CameraBlendTargetArm = 0.f;
+	float CameraBlendStartSocketZ = 0.f;
+	float CameraBlendTargetSocketZ = 0.f;
+	FVector CameraBlendStartOffset = FVector::ZeroVector;
+	FVector CameraBlendTargetOffset = FVector::ZeroVector;
 
 	// Morph wheel state.
 	bool bMorphWheelOpen = false;

@@ -9,8 +9,13 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Components/MeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/Material.h"
+#include "SceneTypes.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeCharacter.h"
 #include "SlimeDevourComponent.h"
@@ -18,6 +23,7 @@
 #include "SlimeElementComponent.h"
 #include "SlimeElementTypes.h"
 #include "SlimeFable.h"
+#include "SlimeLockOnComponent.h"
 #include "SlimeSpringArmComponent.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
@@ -29,6 +35,7 @@
 #endif
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
@@ -71,6 +78,59 @@ namespace SlimeMorphPolicies
 	bool IsSlotUsable(const TArray<FSlimeDevourCapture>& Slots, int32 SelectedSlot)
 	{
 		return Slots.IsValidIndex(SelectedSlot) && Slots[SelectedSlot].IsValidCapture();
+	}
+
+	bool IsMissingEngineMaterial(UMaterialInterface* Mat)
+	{
+		if (!Mat)
+		{
+			return true;
+		}
+		const FString Name = Mat->GetName();
+		const FString Path = Mat->GetPathName();
+		return Name.Contains(TEXT("WorldGrid"), ESearchCase::IgnoreCase)
+			|| Name.Contains(TEXT("DefaultMaterial"), ESearchCase::IgnoreCase)
+			|| Path.Contains(TEXT("Engine/EngineMaterials"), ESearchCase::IgnoreCase);
+	}
+
+	int32 CountVisualMaterialSlots(const UMeshComponent* MeshComp)
+	{
+		if (!MeshComp)
+		{
+			return 0;
+		}
+		int32 Num = MeshComp->GetNumMaterials();
+		if (const USkeletalMeshComponent* Skel = Cast<USkeletalMeshComponent>(MeshComp))
+		{
+			if (const USkeletalMesh* SK = Skel->GetSkeletalMeshAsset())
+			{
+				Num = FMath::Max(Num, SK->GetMaterials().Num());
+			}
+		}
+		return Num;
+	}
+
+	bool IsSlimeMorphMaterial(UMaterialInterface* Mat)
+	{
+		if (!Mat)
+		{
+			return false;
+		}
+		return Mat->GetPathName().Contains(TEXT("M_SlimeMorph"), ESearchCase::IgnoreCase);
+	}
+
+	bool SlotNeedsHairMorphSkin(UMaterialInterface* Saved, FName SlotName)
+	{
+		const FString Slot = SlotName.ToString();
+		if (Slot.Contains(TEXT("Hair"), ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		if (!Saved)
+		{
+			return false;
+		}
+		return Saved->GetShadingModels().HasShadingModel(MSM_Hair);
 	}
 
 	bool IsTargetGameplayEnabled(ESlimeMorphPhase Phase)
@@ -125,22 +185,6 @@ namespace
 			TargetCamera->SetFieldOfView(SourceCamera->FieldOfView);
 		}
 	}
-
-	void RefreshCameraRig(USpringArmComponent* CameraBoom)
-	{
-		if (!CameraBoom)
-		{
-			return;
-		}
-
-		const bool bLocationLagEnabled = CameraBoom->bEnableCameraLag;
-		const bool bRotationLagEnabled = CameraBoom->bEnableCameraRotationLag;
-		CameraBoom->bEnableCameraLag = false;
-		CameraBoom->bEnableCameraRotationLag = false;
-		CameraBoom->TickComponent(0.f, LEVELTICK_All, nullptr);
-		CameraBoom->bEnableCameraLag = bLocationLagEnabled;
-		CameraBoom->bEnableCameraRotationLag = bRotationLagEnabled;
-	}
 }
 
 USlimeMorphComponent::USlimeMorphComponent()
@@ -166,6 +210,7 @@ void USlimeMorphComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	{
 		TickPhase(DeltaTime);
 	}
+	TickCameraBlend(DeltaTime);
 }
 
 APlayerController* USlimeMorphComponent::GetActivePlayerController() const
@@ -235,15 +280,30 @@ void USlimeMorphComponent::TickMorphedKeyInput(float DeltaTime)
 		Slime->AdjustCameraZoom(1);
 	}
 
-	const float ArmLength = FMath::FInterpTo(
-		MorphCameraBoom->TargetArmLength,
-		Slime->GetDesiredCameraArmLength(),
-		DeltaTime,
-		Slime->CameraZoomInterpSpeed);
-	MorphCameraBoom->TargetArmLength = ArmLength;
+	const float DesiredArm = Slime->GetDesiredCameraArmLength()
+		* FMath::Clamp(FMath::Sqrt(FMath::Max(MorphCameraHeightScale, 1.f)), 1.f, 2.2f);
+	if (bCameraBlendActive)
+	{
+		// Keep the blend target in sync with wheel zoom; TickCameraBlend owns the boom values.
+		CameraBlendTargetArm = DesiredArm;
+		CameraBlendTargetSocketZ = MorphCameraSocketZ;
+	}
+	else
+	{
+		const float ArmLength = FMath::FInterpTo(
+			MorphCameraBoom->TargetArmLength,
+			DesiredArm,
+			DeltaTime,
+			Slime->CameraZoomInterpSpeed);
+		MorphCameraBoom->TargetArmLength = ArmLength;
+		MorphCameraBoom->SocketOffset = FVector(
+			MorphCameraBoom->SocketOffset.X,
+			MorphCameraBoom->SocketOffset.Y,
+			MorphCameraSocketZ);
+	}
 	if (USpringArmComponent* SlimeCameraBoom = Slime->GetCameraBoom())
 	{
-		SlimeCameraBoom->TargetArmLength = ArmLength;
+		SlimeCameraBoom->TargetArmLength = Slime->GetDesiredCameraArmLength();
 	}
 }
 
@@ -356,16 +416,23 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 	}
 	else if (Next == ESlimeMorphPhase::Blending)
 	{
-		// Hand the mesh back to the enemy's own materials and move the slime look into an
-		// overlay shell, so the final appearance can never depend on the morph material.
-		ApplyOriginalMaterials();
-		SetShellActive(true);
+		// Extra parts (hair) become visible already wearing slime skin from spawn.
+		SetExtraPartsHidden(false);
+		ApplySlimeSkin();
+		UpdateMorphMaterial(1.f, 1.f);
+		SetShellActive(false);
 	}
 	else if (Next == ESlimeMorphPhase::Morphed)
 	{
 		// No shell while morphed: the model renders purely with its own materials.
+		SetExtraPartsHidden(false);
 		SetShellActive(false);
-		// Seed the key state from reality 鈥?if Z is still held from the wheel commit, don't
+		if (!bOriginalMaterialsActive)
+		{
+			ApplyOriginalMaterials();
+		}
+		RestoreAllHiddenMorphSlots();
+		// Seed the key state from reality — if Z is still held from the wheel commit, don't
 		// let that same press immediately unmorph.
 		bMorphedKeyDown = true;
 		if (const APlayerController* PC = GetActivePlayerController())
@@ -385,11 +452,17 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 	}
 	else if (Next == ESlimeMorphPhase::Unblending)
 	{
-		SetShellActive(true);
+		// Put slime skin back on every slot (including hair extra parts). Keep ShellOpacity=1
+		// so Masked Toon does not clip to grey clay.
+		ApplySlimeSkin();
+		UpdateMorphMaterial(1.f, 1.f);
+		SetShellActive(false);
 	}
 	else if (Next == ESlimeMorphPhase::Shrinking)
 	{
 		// Back to a full slime body: drop the shell and put the slime skin on the mesh itself.
+		// Hide extra parts so hair doesn't float while the body shrinks to slime.
+		SetExtraPartsHidden(true);
 		SetShellActive(false);
 		ApplySlimeSkin();
 	}
@@ -409,9 +482,7 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 		}
 		SetSlimeMovementEnabled(true);
 		MorphTarget = nullptr;
-		MorphMIDs.Reset();
-		ShellMID = nullptr;
-		SavedEnemyMaterials.Reset();
+		MorphVisuals.Reset();
 		MorphedSlotIndex = INDEX_NONE;
 		bConsumeMorphedSlotOnExit = false;
 		bHasCachedSlimeReturnTransform = false;
@@ -449,7 +520,7 @@ void USlimeMorphComponent::TickPhase(float Dt)
 
 	case ESlimeMorphPhase::Growing:
 	{
-		// Mesh wears the slime skin; the reveal mask walks up the model.
+		// Mesh wears the slime skin; GrowProgress walks the reveal mask up the model.
 		const float Alpha = PhaseAlpha(GrowDuration);
 		UpdateMorphMaterial(Alpha, 1.f);
 		UpdateSlimeOpacity(1.f - Alpha);
@@ -462,9 +533,9 @@ void USlimeMorphComponent::TickPhase(float Dt)
 
 	case ESlimeMorphPhase::Blending:
 	{
-		// Mesh already shows the enemy's real materials; fade the slime shell off of it.
 		const float Alpha = PhaseAlpha(BlendDuration);
-		UpdateMorphMaterial(1.f, 1.f - Alpha);
+		// Keep full slime skin until Morphed. Fading ShellOpacity on Masked Toon clips to grey clay.
+		UpdateMorphMaterial(1.f, 1.f);
 		if (!bPossessDone && Alpha >= BlendPossessAlpha)
 		{
 			PossessEnemy();
@@ -484,9 +555,8 @@ void USlimeMorphComponent::TickPhase(float Dt)
 
 	case ESlimeMorphPhase::Unblending:
 	{
-		// Fade the slime shell back over the real materials.
 		const float Alpha = PhaseAlpha(UnblendDuration);
-		UpdateMorphMaterial(1.f, Alpha);
+		UpdateMorphMaterial(1.f, 1.f);
 		if (!bPossessDone && Alpha >= UnblendUnpossessAlpha)
 		{
 			PossessSlime();
@@ -597,48 +667,100 @@ void USlimeMorphComponent::SpawnMorphTarget()
 
 	MorphTarget = Enemy;
 
-	// Save original materials so Blending can hand the mesh straight back to them.
-	SavedEnemyMaterials.Reset();
-	MorphMIDs.Reset();
-	ShellMID = nullptr;
+	// Save original materials on every visual mesh (primary, BP extras, Groom — skip placeholder).
+	MorphVisuals.Reset();
 	bOriginalMaterialsActive = false;
 	bShellActive = false;
 
-	USkeletalMeshComponent* SkelMesh = Enemy->GetMesh();
-	if (!SkelMesh)
+	USkeletalMeshComponent* PrimaryMesh = Enemy->GetMesh();
+	UMaterialInterface* OverlayMat = LoadMorphMaterial();
+	UMaterialInterface* SubstrateMat = LoadMorphSubstrateMaterial();
+	UMaterialInterface* HairMat = LoadMorphHairMaterial();
+	UMaterialInterface* SkinParent = SubstrateMat ? SubstrateMat : OverlayMat;
+	if (!SubstrateMat)
 	{
-		return;
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: M_SlimeMorph_Substrate missing — falling back to M_SlimeMorph"));
+	}
+	if (!HairMat)
+	{
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: M_SlimeMorph_Hair missing — Hair VF slots may keep original hair"));
 	}
 
-	const int32 NumMats = SkelMesh->GetNumMaterials();
-	for (int32 Idx = 0; Idx < NumMats; ++Idx)
+	// Snapshot every visual mesh. Transition wears Substrate slime on non-hair slots.
+	// MSM_HAIR sheets keep a dedicated Masked hair slime skin (Substrate cannot cover Hair VF).
+	Enemy->ForEachVisualMesh([this, PrimaryMesh](UMeshComponent* MeshComp)
 	{
-		SavedEnemyMaterials.Add(SkelMesh->GetMaterial(Idx));
-	}
+		if (!MeshComp)
+		{
+			return;
+		}
+		FSlimeMorphMeshVisual Entry;
+		Entry.Mesh = MeshComp;
+		Entry.bExtraPart = (MeshComp != PrimaryMesh);
+		Entry.bBaseSkinMorphPath = true;
 
-	UMaterialInterface* MorphMat = LoadMorphMaterial();
-	if (MorphMat)
-	{
-		// One instance per slot for the Growing/Shrinking skin...
+		const int32 NumMats = SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp);
 		for (int32 Idx = 0; Idx < NumMats; ++Idx)
 		{
-			if (UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(MorphMat, this))
+			Entry.SavedMaterials.Add(MeshComp->GetMaterial(Idx));
+		}
+
+		UE_LOG(LogSlimeFable, Log,
+			TEXT("SlimeMorphComponent: capture %s (%s) extra=%d slots=%d"),
+			*MeshComp->GetName(), *MeshComp->GetClass()->GetName(),
+			Entry.bExtraPart ? 1 : 0, NumMats);
+
+		MorphVisuals.Add(MoveTemp(Entry));
+	});
+
+	bool bAnySkin = false;
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
+	{
+		UMeshComponent* MeshComp = Entry.Mesh.Get();
+		if (!MeshComp || !SkinParent)
+		{
+			continue;
+		}
+		bAnySkin = true;
+		const int32 NumMats = SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp);
+		const TArray<FName> SlotNames = MeshComp->GetMaterialSlotNames();
+		for (int32 Idx = 0; Idx < NumMats; ++Idx)
+		{
+			UMaterialInterface* Parent = SkinParent;
+			UMaterialInterface* Saved = Entry.SavedMaterials.IsValidIndex(Idx)
+				? Entry.SavedMaterials[Idx].Get()
+				: nullptr;
+			const FName SlotName = SlotNames.IsValidIndex(Idx) ? SlotNames[Idx] : NAME_None;
+			if (HairMat && SlimeMorphPolicies::SlotNeedsHairMorphSkin(Saved, SlotName))
 			{
-				MorphMIDs.Add(MID);
+				Parent = HairMat;
+			}
+			if (Parent)
+			{
+				if (UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Parent, this))
+				{
+					Entry.MorphMIDs.Add(MID);
+				}
 			}
 		}
-		// ...and one more for the Blending/Unblending overlay shell.
-		ShellMID = UMaterialInstanceDynamic::Create(MorphMat, this);
+	}
 
+	if (bAnySkin)
+	{
 		ApplySlimeSkin();
 		SyncElementProfileToMorphMaterial();
 	}
 
-	// The reveal mask is object-space, so the model can be visible from the start.
-	Enemy->SetActorHiddenInGame(false);
-	SkelMesh->SetVisibility(true);
+	// Extra parts (e.g. samurai hair) stay hidden until grow finishes.
+	SetExtraPartsHidden(true);
 
-	// GrowProgress = 0 鈫?nothing revealed yet.
+	Enemy->SetActorHiddenInGame(false);
+	if (PrimaryMesh)
+	{
+		PrimaryMesh->SetVisibility(true);
+	}
 	UpdateMorphMaterial(0.f, 1.f);
 }
 
@@ -648,17 +770,42 @@ void USlimeMorphComponent::ApplySlimeSkin()
 	{
 		return;
 	}
-	USkeletalMeshComponent* SkelMesh = MorphTarget->GetMesh();
-	if (!SkelMesh)
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
 	{
-		return;
-	}
-	for (int32 Idx = 0; Idx < MorphMIDs.Num() && Idx < SkelMesh->GetNumMaterials(); ++Idx)
-	{
-		if (MorphMIDs[Idx])
+		UMeshComponent* MeshComp = Entry.Mesh.Get();
+		if (!MeshComp)
 		{
-			SkelMesh->SetMaterial(Idx, MorphMIDs[Idx]);
+			continue;
 		}
+		RestoreHiddenMorphSlots(Entry);
+		MeshComp->SetOverlayMaterial(nullptr);
+		const TArray<FName> SlotNames = MeshComp->GetMaterialSlotNames();
+		const int32 NumSlots = SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp);
+		for (int32 Idx = 0; Idx < Entry.MorphMIDs.Num() && Idx < NumSlots; ++Idx)
+		{
+			UMaterialInstanceDynamic* MID = Entry.MorphMIDs[Idx];
+			if (!MID)
+			{
+				continue;
+			}
+			MeshComp->SetMaterial(Idx, MID);
+			UMaterialInterface* Applied = MeshComp->GetMaterial(Idx);
+			if (SlimeMorphPolicies::IsMissingEngineMaterial(Applied)
+				|| !SlimeMorphPolicies::IsSlimeMorphMaterial(Applied))
+			{
+				const FString SlotName = SlotNames.IsValidIndex(Idx)
+					? SlotNames[Idx].ToString()
+					: FString::FromInt(Idx);
+				UE_LOG(LogSlimeFable, Warning,
+					TEXT("SlimeMorphComponent: %s slot %d (%s) still %s after slime skin, retrying"),
+					*MeshComp->GetName(), Idx, *SlotName,
+					Applied ? *Applied->GetName() : TEXT("null"));
+				MeshComp->SetMaterial(Idx, MID);
+			}
+		}
+		HideFailedMorphSlots(Entry);
+		// Hair VF slots that still refused slime skin are hidden; Face/Up are never
+		// hidden via pointer compare (Substrate slots can report a different interface).
 	}
 	bOriginalMaterialsActive = false;
 }
@@ -669,16 +816,20 @@ void USlimeMorphComponent::ApplyOriginalMaterials()
 	{
 		return;
 	}
-	USkeletalMeshComponent* SkelMesh = MorphTarget->GetMesh();
-	if (!SkelMesh)
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
 	{
-		return;
-	}
-	for (int32 Idx = 0; Idx < SavedEnemyMaterials.Num() && Idx < SkelMesh->GetNumMaterials(); ++Idx)
-	{
-		if (SavedEnemyMaterials[Idx])
+		UMeshComponent* MeshComp = Entry.Mesh.Get();
+		if (!MeshComp)
 		{
-			SkelMesh->SetMaterial(Idx, SavedEnemyMaterials[Idx]);
+			continue;
+		}
+		RestoreHiddenMorphSlots(Entry);
+		for (int32 Idx = 0; Idx < Entry.SavedMaterials.Num() && Idx < SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp); ++Idx)
+		{
+			if (Entry.SavedMaterials[Idx])
+			{
+				MeshComp->SetMaterial(Idx, Entry.SavedMaterials[Idx]);
+			}
 		}
 	}
 	bOriginalMaterialsActive = true;
@@ -690,13 +841,39 @@ void USlimeMorphComponent::SetShellActive(bool bActive)
 	{
 		return;
 	}
-	USkeletalMeshComponent* SkelMesh = MorphTarget->GetMesh();
-	if (!SkelMesh)
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
 	{
-		return;
+		if (Entry.bBaseSkinMorphPath)
+		{
+			continue;
+		}
+		if (UMeshComponent* MeshComp = Entry.Mesh.Get())
+		{
+			MeshComp->SetOverlayMaterial(bActive ? Entry.ShellMID.Get() : nullptr);
+		}
 	}
-	SkelMesh->SetOverlayMaterial(bActive ? ShellMID.Get() : nullptr);
 	bShellActive = bActive;
+}
+
+void USlimeMorphComponent::SetExtraPartsHidden(bool bHidden)
+{
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
+	{
+		if (!Entry.bExtraPart)
+		{
+			continue;
+		}
+		if (UMeshComponent* MeshComp = Entry.Mesh.Get())
+		{
+			if (MeshComp->IsVisualizationComponent()
+				|| Cast<UCameraComponent>(MeshComp->GetAttachParent()))
+			{
+				continue;
+			}
+			MeshComp->SetHiddenInGame(bHidden);
+			MeshComp->SetVisibility(!bHidden);
+		}
+	}
 }
 
 void USlimeMorphComponent::DestroyMorphTarget()
@@ -707,6 +884,7 @@ void USlimeMorphComponent::DestroyMorphTarget()
 
 		// Drop the shell and restore the real materials so the enemy can dissolve properly.
 		SetShellActive(false);
+		RestoreAllHiddenMorphSlots();
 		ApplyOriginalMaterials();
 
 		if (UEnemyCombatComponent* EnemyCombat = MorphTarget->GetEnemyCombat())
@@ -717,9 +895,7 @@ void USlimeMorphComponent::DestroyMorphTarget()
 		MorphTarget->Destroy();
 		MorphTarget = nullptr;
 	}
-	MorphMIDs.Reset();
-	ShellMID = nullptr;
-	SavedEnemyMaterials.Reset();
+	MorphVisuals.Reset();
 	bOriginalMaterialsActive = false;
 	bShellActive = false;
 	bMorphWalkPlaying = false;
@@ -744,6 +920,162 @@ UMaterialInterface* USlimeMorphComponent::LoadMorphMaterial()
 	return MorphMaterial;
 }
 
+UMaterialInterface* USlimeMorphComponent::LoadMorphGrowMaterial()
+{
+	if (MorphGrowMaterial)
+	{
+		return MorphGrowMaterial;
+	}
+
+	static const FSoftObjectPath GrowPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeMorph_Grow.M_SlimeMorph_Grow"));
+	MorphGrowMaterial = Cast<UMaterialInterface>(GrowPath.TryLoad());
+	if (!MorphGrowMaterial)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeMorphComponent: M_SlimeMorph_Grow not found at %s — falling back to translucent morph"), *GrowPath.ToString());
+	}
+	return MorphGrowMaterial;
+}
+
+UMaterialInterface* USlimeMorphComponent::LoadMorphSubstrateMaterial()
+{
+	if (MorphSubstrateMaterial)
+	{
+		return MorphSubstrateMaterial;
+	}
+
+	static const FSoftObjectPath SubstratePath(
+		TEXT("/Game/Characters/Slime/Materials/M_SlimeMorph_Substrate.M_SlimeMorph_Substrate"));
+	MorphSubstrateMaterial = Cast<UMaterialInterface>(SubstratePath.TryLoad());
+	if (!MorphSubstrateMaterial)
+	{
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: M_SlimeMorph_Substrate not found at %s"), *SubstratePath.ToString());
+	}
+	return MorphSubstrateMaterial;
+}
+
+UMaterialInterface* USlimeMorphComponent::LoadMorphHairMaterial()
+{
+	if (MorphHairMaterial)
+	{
+		return MorphHairMaterial;
+	}
+
+	static const FSoftObjectPath HairPath(
+		TEXT("/Game/Characters/Slime/Materials/M_SlimeMorph_Hair.M_SlimeMorph_Hair"));
+	MorphHairMaterial = Cast<UMaterialInterface>(HairPath.TryLoad());
+	if (!MorphHairMaterial)
+	{
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: M_SlimeMorph_Hair not found at %s"), *HairPath.ToString());
+	}
+	return MorphHairMaterial;
+}
+
+bool USlimeMorphComponent::MaterialNeedsBaseSkinMorphPath(UMaterialInterface* Mat)
+{
+	if (!Mat)
+	{
+		return false;
+	}
+
+	const UMaterial* Base = Mat->GetMaterial();
+	const FString Path = Base ? Base->GetPathName() : Mat->GetPathName();
+	const FString Name = Base ? Base->GetName() : Mat->GetName();
+
+	// Phoebe / other Substrate Toon masters in this project. OverlayMaterial cannot cover them.
+	if (Path.Contains(TEXT("PhoebeToon"), ESearchCase::IgnoreCase)
+		|| Name.Contains(TEXT("PhoebeToon"), ESearchCase::IgnoreCase)
+		|| Name.Contains(TEXT("Substrate"), ESearchCase::IgnoreCase))
+	{
+		return true;
+	}
+
+	// MI_Phoebe* parents are Toon masters — catch by path even if parent rename fails.
+	if (Path.Contains(TEXT("/Models/Phoebe/"), ESearchCase::IgnoreCase)
+		|| Name.StartsWith(TEXT("MI_Phoebe"), ESearchCase::IgnoreCase)
+		|| Name.StartsWith(TEXT("M_Phoebe"), ESearchCase::IgnoreCase))
+	{
+		return true;
+	}
+
+	return false;
+}
+
+bool USlimeMorphComponent::UsesBaseSkinMorphPath() const
+{
+	for (const FSlimeMorphMeshVisual& Entry : MorphVisuals)
+	{
+		if (Entry.bBaseSkinMorphPath)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void USlimeMorphComponent::HideFailedMorphSlots(FSlimeMorphMeshVisual& Entry)
+{
+	Entry.HiddenMaterialSlots.Reset();
+	USkeletalMeshComponent* Skel = Cast<USkeletalMeshComponent>(Entry.Mesh.Get());
+	if (!Skel)
+	{
+		return;
+	}
+
+	const TArray<FName> SlotNames = Skel->GetMaterialSlotNames();
+	const int32 NumSlots = SlimeMorphPolicies::CountVisualMaterialSlots(Skel);
+	for (int32 Idx = 0; Idx < NumSlots; ++Idx)
+	{
+		UMaterialInterface* Saved = Entry.SavedMaterials.IsValidIndex(Idx)
+			? Entry.SavedMaterials[Idx].Get()
+			: nullptr;
+		const FName SlotName = SlotNames.IsValidIndex(Idx) ? SlotNames[Idx] : NAME_None;
+		if (!SlimeMorphPolicies::SlotNeedsHairMorphSkin(Saved, SlotName))
+		{
+			continue;
+		}
+
+		UMaterialInterface* Applied = Skel->GetMaterial(Idx);
+		if (SlimeMorphPolicies::IsSlimeMorphMaterial(Applied)
+			&& !SlimeMorphPolicies::IsMissingEngineMaterial(Applied))
+		{
+			continue;
+		}
+
+		Skel->ShowMaterialSection(Idx, 0, false, INDEX_NONE);
+		Entry.HiddenMaterialSlots.Add(Idx);
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: hiding hair slot %d (%s) still %s after slime skin"),
+			Idx, *SlotName.ToString(),
+			Applied ? *Applied->GetName() : TEXT("null"));
+	}
+}
+
+void USlimeMorphComponent::RestoreHiddenMorphSlots(FSlimeMorphMeshVisual& Entry)
+{
+	USkeletalMeshComponent* Skel = Cast<USkeletalMeshComponent>(Entry.Mesh.Get());
+	if (!Skel)
+	{
+		Entry.HiddenMaterialSlots.Reset();
+		return;
+	}
+
+	for (const int32 Idx : Entry.HiddenMaterialSlots)
+	{
+		Skel->ShowMaterialSection(Idx, 0, true, INDEX_NONE);
+	}
+	Entry.HiddenMaterialSlots.Reset();
+}
+
+void USlimeMorphComponent::RestoreAllHiddenMorphSlots()
+{
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
+	{
+		RestoreHiddenMorphSlots(Entry);
+	}
+}
+
 void USlimeMorphComponent::UpdateMorphMaterial(float GrowProgress, float ShellOpacity)
 {
 	auto Push = [this, GrowProgress, ShellOpacity](UMaterialInstanceDynamic* MID)
@@ -757,11 +1089,14 @@ void USlimeMorphComponent::UpdateMorphMaterial(float GrowProgress, float ShellOp
 		MID->SetScalarParameterValue(SlimeMorphParams::ShellOpacity, ShellOpacity);
 	};
 
-	for (UMaterialInstanceDynamic* MID : MorphMIDs)
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
 	{
-		Push(MID);
+		for (UMaterialInstanceDynamic* MID : Entry.MorphMIDs)
+		{
+			Push(MID);
+		}
+		Push(Entry.ShellMID);
 	}
-	Push(ShellMID);
 
 	SyncElementProfileToMorphMaterial();
 }
@@ -797,7 +1132,35 @@ void USlimeMorphComponent::PossessEnemy()
 	const FRotator PreservedViewRotation = PC->GetControlRotation();
 	USpringArmComponent* MorphCameraBoom = MorphTarget->FindComponentByClass<USpringArmComponent>();
 	UCameraComponent* MorphCamera = MorphTarget->FindComponentByClass<UCameraComponent>();
+	// Match slime world framing first (TargetOffset compensates boom origin). Height framing
+	// eases in via TickCameraBlend — avoid RefreshCameraRig snap.
 	CopyCameraRig(Slime->GetCameraBoom(), MorphCameraBoom, Slime->GetFollowCamera(), MorphCamera);
+
+	float TargetArm = MorphCameraBoom ? MorphCameraBoom->TargetArmLength : 260.f;
+	float TargetSocketZ = MorphCameraBoom ? MorphCameraBoom->SocketOffset.Z : 12.f;
+	FVector TargetOffset = MorphCameraBoom ? MorphCameraBoom->TargetOffset : FVector::ZeroVector;
+	if (MorphCameraBoom && MorphTarget)
+	{
+		float HalfH = 20.f;
+		if (const UCapsuleComponent* Cap = MorphTarget->GetCapsuleComponent())
+		{
+			HalfH = Cap->GetScaledCapsuleHalfHeight();
+		}
+		constexpr float SlimeRefHalfH = 20.f;
+		const float HeightScale = FMath::Max(HalfH / SlimeRefHalfH, 1.f);
+		const float SocketZ = FMath::Clamp(HalfH * 0.60f, 12.f, 120.f);
+		const float ArmMul = FMath::Clamp(FMath::Sqrt(HeightScale), 1.f, 2.2f);
+		MorphCameraHeightScale = HeightScale;
+		MorphCameraSocketZ = SocketZ;
+		TargetArm = MorphCameraBoom->TargetArmLength * ArmMul;
+		TargetSocketZ = SocketZ;
+		TargetOffset = FVector::ZeroVector;
+	}
+	else
+	{
+		MorphCameraHeightScale = 1.f;
+		MorphCameraSocketZ = 12.f;
+	}
 
 	// Park the slime: hidden, no collision, no movement, and no shadow-proxy cast. The actor
 	// tick stays ON — this component lives on the slime and must keep running the phase
@@ -806,7 +1169,7 @@ void USlimeMorphComponent::PossessEnemy()
 
 	PC->Possess(MorphTarget);
 	PC->SetControlRotation(PreservedViewRotation);
-	RefreshCameraRig(MorphCameraBoom);
+	BeginCameraBlend(MorphCameraBoom, TargetArm, TargetSocketZ, TargetOffset);
 	// Keys held across a possess swap never deliver their release to the new pawn, which
 	// leaves the movement axis stuck and the character walking off on its own.
 	PC->FlushPressedKeys();
@@ -815,6 +1178,8 @@ void USlimeMorphComponent::PossessEnemy()
 	{
 		EnemyCombat->SetPlayerMorphed(true);
 	}
+
+	MorphTarget->RefreshHealthBarAnchor();
 
 	EnsureMorphDodge();
 }
@@ -862,6 +1227,11 @@ void USlimeMorphComponent::PossessSlime()
 	}
 	const FRotator PreservedViewRotation = PC->GetControlRotation();
 
+	if (USlimeLockOnComponent* Lock = MorphTarget->FindComponentByClass<USlimeLockOnComponent>())
+	{
+		Lock->ClearLockOn();
+	}
+
 	ClearMorphDodge();
 
 	if (UEnemyCombatComponent* EnemyCombat = MorphTarget->GetEnemyCombat())
@@ -900,10 +1270,75 @@ void USlimeMorphComponent::PossessSlime()
 		Body->SetSpread(true);
 	}
 
+	USpringArmComponent* SlimeBoom = Slime->GetCameraBoom();
+	USpringArmComponent* MorphBoom = MorphTarget->FindComponentByClass<USpringArmComponent>();
+	UCameraComponent* MorphCamera = MorphTarget->FindComponentByClass<UCameraComponent>();
+	CopyCameraRig(MorphBoom, SlimeBoom, MorphCamera, Slime->GetFollowCamera());
+
+	const float TargetArm = Slime->GetDesiredCameraArmLength();
+	const float TargetSocketZ = 12.f;
+	const FVector TargetOffset = FVector::ZeroVector;
+
 	PC->Possess(Slime);
 	PC->SetControlRotation(PreservedViewRotation);
-	RefreshCameraRig(Slime->GetCameraBoom());
+	BeginCameraBlend(SlimeBoom, TargetArm, TargetSocketZ, TargetOffset);
 	PC->FlushPressedKeys();
+}
+
+void USlimeMorphComponent::BeginCameraBlend(USpringArmComponent* Boom, float TargetArm, float TargetSocketZ, const FVector& TargetOffset)
+{
+	bCameraBlendActive = false;
+	CameraBlendBoom = nullptr;
+	if (!Boom)
+	{
+		return;
+	}
+
+	CameraBlendBoom = Boom;
+	CameraBlendStartArm = Boom->TargetArmLength;
+	CameraBlendTargetArm = TargetArm;
+	CameraBlendStartSocketZ = Boom->SocketOffset.Z;
+	CameraBlendTargetSocketZ = TargetSocketZ;
+	CameraBlendStartOffset = Boom->TargetOffset;
+	CameraBlendTargetOffset = TargetOffset;
+	CameraBlendElapsed = 0.f;
+	bCameraBlendActive = true;
+}
+
+void USlimeMorphComponent::TickCameraBlend(float DeltaTime)
+{
+	if (!bCameraBlendActive)
+	{
+		return;
+	}
+
+	USpringArmComponent* Boom = CameraBlendBoom.Get();
+	if (!Boom)
+	{
+		bCameraBlendActive = false;
+		return;
+	}
+
+	CameraBlendElapsed += DeltaTime;
+	const float Duration = FMath::Max(CameraBlendDuration, 0.05f);
+	const float Alpha = FMath::Clamp(CameraBlendElapsed / Duration, 0.f, 1.f);
+	const float Ease = FMath::SmoothStep(0.f, 1.f, Alpha);
+
+	Boom->TargetArmLength = FMath::Lerp(CameraBlendStartArm, CameraBlendTargetArm, Ease);
+	Boom->TargetOffset = FMath::Lerp(CameraBlendStartOffset, CameraBlendTargetOffset, Ease);
+	Boom->SocketOffset = FVector(
+		Boom->SocketOffset.X,
+		Boom->SocketOffset.Y,
+		FMath::Lerp(CameraBlendStartSocketZ, CameraBlendTargetSocketZ, Ease));
+
+	if (Alpha >= 1.f)
+	{
+		Boom->TargetArmLength = CameraBlendTargetArm;
+		Boom->TargetOffset = CameraBlendTargetOffset;
+		Boom->SocketOffset = FVector(Boom->SocketOffset.X, Boom->SocketOffset.Y, CameraBlendTargetSocketZ);
+		bCameraBlendActive = false;
+		CameraBlendBoom = nullptr;
+	}
 }
 
 void USlimeMorphComponent::SetSlimeMovementEnabled(bool bEnabled)
@@ -1036,10 +1471,10 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 		return;
 	}
 
-	// Morph-only lift: thin translucent shells read darker than the jelly body.
+	// Morph-only lift: Masked Toon reads a bit heavier than the jelly body.
 	// Fire/Lightning already have strong emissive — leave them alone.
 	FSlimeElementProfile Profile = Element->GetCurrentProfile();
-	float MorphBrightness = 1.35f;
+	float MorphBrightness = 1.55f;
 	float MorphRimBoost = 1.45f;
 	float MorphFillEmissive = 0.18f;
 
@@ -1048,7 +1483,7 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 	case ESlimeElement::Water:
 	case ESlimeElement::Wind:
 	case ESlimeElement::Physical:
-		Profile.BaseColor *= 1.3f;
+		Profile.BaseColor *= 1.15f;
 		Profile.SubsurfaceColor *= 1.25f;
 		Profile.RimColor *= 1.35f;
 		Profile.BaseColor.A = 1.f;
@@ -1106,6 +1541,7 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 		MID->SetScalarParameterValue(SlimeMorphParams::Opacity, Profile.Opacity);
 		MID->SetScalarParameterValue(SlimeMorphParams::Roughness, Profile.Roughness);
 		MID->SetScalarParameterValue(SlimeMorphParams::Refraction, Profile.Refraction);
+		MID->SetScalarParameterValue(TEXT("IOR"), Profile.Refraction);
 		MID->SetScalarParameterValue(SlimeMorphParams::FlowSpeed, Profile.FlowSpeed);
 		MID->SetScalarParameterValue(SlimeMorphParams::NoiseScale, Profile.NoiseScale);
 		MID->SetScalarParameterValue(SlimeMorphParams::RimPower, Profile.RimPower);
@@ -1114,11 +1550,14 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 		MID->SetScalarParameterValue(TEXT("MorphFillEmissive"), MorphFillEmissive);
 	};
 
-	for (UMaterialInstanceDynamic* MID : MorphMIDs)
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
 	{
-		Push(MID);
+		for (UMaterialInstanceDynamic* MID : Entry.MorphMIDs)
+		{
+			Push(MID);
+		}
+		Push(Entry.ShellMID);
 	}
-	Push(ShellMID);
 }
 
 void USlimeMorphComponent::TickMorphLocomotion(float Dt)
@@ -1192,7 +1631,10 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 
 	const float Speed = Move->Velocity.Size2D();
 	const bool bMoving = Speed > 10.f;
-	const bool bShouldRun = bMoving && bSprint && !Fighter->RunMontage.IsNull();
+	// Default morph locomotion is run (like WuWa); walk only in a low-speed band.
+	constexpr float MorphWalkMaxSpeed = 180.f;
+	const bool bShouldRun = bMoving && (Speed >= MorphWalkMaxSpeed || bSprint)
+		&& !Fighter->RunMontage.IsNull();
 
 	if (bShouldRun)
 	{
@@ -1219,6 +1661,16 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 				bMorphWalkPlaying = true;
 				bMorphRunPlaying = false;
 				MorphIdleTimer = 0.f;
+			}
+			else if (!Fighter->RunMontage.IsNull())
+			{
+				// No walk clip — fall back to run at low play rate feel.
+				if (UAnimMontage* Run = Fighter->RunMontage.LoadSynchronous())
+				{
+					Fighter->PlayMeshAnimation(Run, true);
+					bMorphRunPlaying = true;
+					bMorphWalkPlaying = false;
+				}
 			}
 		}
 		return;
