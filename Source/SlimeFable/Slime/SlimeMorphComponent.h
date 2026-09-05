@@ -7,6 +7,7 @@
 #include "SlimeMorphComponent.generated.h"
 
 class AEnemyCharacter;
+class APawn;
 class USlimeBodyComponent;
 class USlimeElementComponent;
 class USlimeDevourComponent;
@@ -107,7 +108,7 @@ public:
 	ESlimeMorphPhase GetPhase() const { return Phase; }
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Morph")
-	AEnemyCharacter* GetMorphTarget() const { return MorphTarget; }
+	APawn* GetMorphTarget() const { return MorphTarget; }
 
 	/** Morph target selection wheel (hold Z to open, release to commit). */
 	UFUNCTION(BlueprintCallable, Category = "Slime|Morph|Wheel")
@@ -244,6 +245,10 @@ private:
 	/** The morph target's controller while morphed, otherwise the owner's. */
 	APlayerController* GetActivePlayerController() const;
 
+	/** Strip slime Default+Ability IMC while GASP morph uses IMC_Sandbox; restore on unmorph. */
+	void SuspendSlimeLocomotionImc(APlayerController* PC);
+	void RestoreSlimeLocomotionImc(APlayerController* PC);
+
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeBodyComponent> Body;
 
@@ -254,7 +259,7 @@ private:
 	TObjectPtr<USlimeDevourComponent> Devour;
 
 	UPROPERTY(Transient)
-	TObjectPtr<AEnemyCharacter> MorphTarget;
+	TObjectPtr<APawn> MorphTarget;
 
 	/** Dodge component created on MorphTarget while player-possessed. */
 	UPROPERTY(Transient)
@@ -286,6 +291,7 @@ private:
 	ESlimeMorphPhase Phase = ESlimeMorphPhase::Idle;
 	float PhaseElapsed = 0.f;
 	bool bPossessDone = false;
+	bool bSlimeLocomotionImcSuspended = false;
 	/** True once Blending has handed the mesh back to the enemy's own materials. */
 	bool bOriginalMaterialsActive = false;
 	bool bShellActive = false;

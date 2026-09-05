@@ -10,6 +10,7 @@ class ASlimeWorldPickup;
 class ASlimePlacedActor;
 class AQuestInteractActor;
 class AEnemyCharacter;
+class APawn;
 class USlimeInventoryWidget;
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
@@ -66,7 +67,7 @@ protected:
 	TWeakObjectPtr<ASlimeWorldPickup> FocusedPickup;
 	TWeakObjectPtr<ASlimePlacedActor> FocusedPlaced;
 	TWeakObjectPtr<AQuestInteractActor> FocusedQuest;
-	TWeakObjectPtr<AEnemyCharacter> FocusedDevour;
+	TWeakObjectPtr<APawn> FocusedDevour;
 
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeInventoryWidget> InventoryWidget;

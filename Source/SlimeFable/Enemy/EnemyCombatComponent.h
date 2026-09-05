@@ -11,6 +11,7 @@ class UAnimInstance;
 class UAnimMontage;
 class UNiagaraSystem;
 class UEnemySkillAbility;
+class USoundBase;
 
 UCLASS(ClassGroup = (Enemy), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API UEnemyCombatComponent : public UActorComponent
@@ -75,6 +76,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat")
 	FName MuzzleSocket = NAME_None;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat|Audio",
+		meta = (ToolTip = "出招挥砍音。空则不播。GASP 默认 sfx_attack_01。"))
+	TSoftObjectPtr<USoundBase> AttackSwingSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat|Audio",
+		meta = (ToolTip = "命中目标时的打击音。空则不播。GASP 默认 sfx_hit_01。"))
+	TSoftObjectPtr<USoundBase> AttackImpactSound;
+
 protected:
 	bool CanStartAction() const;
 	bool StartAction(const FEnemySkillDef& Def);
@@ -91,6 +100,9 @@ protected:
 	float ResolveDamage(const FEnemySkillDef& Skill) const;
 	float GetAuraAttackIntervalMul() const;
 
+	/** AnimInstance for montage play/stop: EnemyCharacter mesh, else ISlimeDevourTarget primary, else Character mesh. */
+	UAnimInstance* ResolveOwnerAnimInstance() const;
+
 	/** Player combat key polling while morphed (mirrors USlimeCombatComponent::PollCombatKeys). */
 	void PollPlayerCombatKeys(float DeltaTime);
 
@@ -103,6 +115,8 @@ protected:
 	bool bPlayerMorphed = false;
 	bool bLockedMovementForAttack = false;
 	float CachedMaxWalkSpeedBeforeAttack = 0.f;
+	/** Morph LMB cycles through GetEnemyMoves() instead of always Moves[0]. */
+	int32 PlayerAttackCycleIndex = 0;
 
 	void LockMovementForAttack();
 	void UnlockMovementAfterAttack();

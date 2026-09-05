@@ -9,6 +9,7 @@
 #include "CollisionShape.h"
 #include "Engine/OverlapResult.h"
 #include "EnemyCharacter.h"
+#include "Combat/SlimeDevourTarget.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -363,6 +364,25 @@ void USlimeLockOnComponent::GetActorVerticalSpan(const AActor* Actor, float& Out
 	if (!Actor)
 	{
 		return;
+	}
+
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Actor))
+	{
+		FBox Box;
+		if (Target->GetStableMeshBounds(Box))
+		{
+			OutMinZ = Box.Min.Z;
+			OutMaxZ = Box.Max.Z;
+			return;
+		}
+		if (const UCapsuleComponent* Capsule = Target->GetDevourCapsule())
+		{
+			const FVector Loc = Capsule->GetComponentLocation();
+			const float Half = Capsule->GetScaledCapsuleHalfHeight();
+			OutMinZ = Loc.Z - Half;
+			OutMaxZ = Loc.Z + Half;
+			return;
+		}
 	}
 
 	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Actor))

@@ -44,6 +44,9 @@ public:
 	/** Called when the controller changes so the slime context is layered in. */
 	void RegisterMappingContext();
 
+	/** Remove slime ability IMC (e.g. while possessing a GASP morph that uses IMC_Sandbox). */
+	void UnregisterMappingContext();
+
 	// ---- Input assets, assigned on the character Blueprint ----------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")

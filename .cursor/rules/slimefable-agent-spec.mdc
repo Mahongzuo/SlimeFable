@@ -15,6 +15,7 @@ alwaysApply: true
 6. 涉及音乐、音效、BGM、SFX、主题曲、ComfyUI 音频生成时，再读 `.cursor/skills/slimefable-audio/SKILL.md`。
 7. 涉及幻形、吞噬变身、多槽材质丢失、WorldGrid Face/Up/头发时，再读 `.cursor/skills/slimefable-morph-materials/SKILL.md`。
 8. 涉及拨草、草 WPO 交互、把 `MF_SlimeFoliageInteract` 接到别的草、移植到其他工程时，再读 `.cursor/skills/slimefable-foliage-interact/SKILL.md`。
+9. 涉及测新功能、复制 SlimeLab、功能沙盒图、默认掉到地下时，再读 `.cursor/skills/slimefable-feature-lab/SKILL.md`。
 
 ## 硬约束（摘要）
 
@@ -27,4 +28,4 @@ alwaysApply: true
 - **视觉验证归用户**：描边 / 材质 / 光照 / UI 观感由用户亲自看视口确认。做完实现就停；禁止凭截图或自己判断改线宽、裁剪、颜色、曝光。用户已说不错的视觉点不要再「优化」。
 - 与用户用中文沟通；勿改 `~/.cursor/skills-cursor/`。
 
-需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`。
+需要时可手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`、`/slimefable-feature-lab`。

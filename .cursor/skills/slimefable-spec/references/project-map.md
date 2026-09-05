@@ -39,7 +39,10 @@
 | `Content/Data/DayLevels/DA_DayLevelRegistry` | 日关卡 Primary Data Asset |
 | `Content/ThirdPerson/` | 第三人称模板内容 |
 | `Content/Variant_*` | 官方模板变体关 |
+| `Content/Maps/Sandbox/SlimeLab.umap` | 挤压走廊基线；禁止当新功能堆场 |
+| `Content/Maps/Sandbox/FeatureLabs` | 每功能一张沙盒图（`create_feature_lab.py`） |
 | `Content/Python/create_day_levels.py` | 创建/刷新日关卡 + Registry |
+| `Content/Python/create_feature_lab.py` | 复制 SlimeLab → 大地板功能沙盒 |
 | `Content/Python/start_mcp_8010.py` | 手动启动 MCP 8010 |
 | `Content/Audio/` | 全局 BGM / SFX / Theme（Comfy 生成落盘） |
 | `.cursor/skills/slimefable-audio/` | ComfyUI 音乐/音效生成 Skill + CLI |

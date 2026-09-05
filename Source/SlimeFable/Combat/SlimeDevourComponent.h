@@ -4,8 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "EnemyCharacter.h"
 #include "SlimeDevourComponent.generated.h"
+
+class AEnemyCharacter;
+class APawn;
+class ISlimeDevourTarget;
 
 class APlayerController;
 class ACharacter;
@@ -40,7 +43,7 @@ struct SLIMEFABLE_API FSlimeDevourCapture
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadOnly, Category = "Slime|Devour")
-	TSubclassOf<AEnemyCharacter> EnemyClass;
+	TSubclassOf<APawn> EnemyClass;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Slime|Devour")
 	FText DisplayName;
@@ -117,16 +120,16 @@ public:
 	void CyclePhantomSelection(int32 Step);
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Devour")
-	AEnemyCharacter* FindBestDevourTarget() const;
+	APawn* FindBestDevourTarget() const;
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Devour")
-	bool CanDevourTarget(const AEnemyCharacter* Enemy) const;
+	bool CanDevourTarget(const APawn* Enemy) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
 	bool TryDevourFocused();
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
-	bool BeginHold(AEnemyCharacter* Enemy);
+	bool BeginHold(APawn* Enemy);
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
 	void CancelHold();
@@ -135,7 +138,7 @@ public:
 	bool ReleaseHold();
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
-	bool TryStartDevour(AEnemyCharacter* Enemy);
+	bool TryStartDevour(APawn* Enemy);
 
 	UFUNCTION(BlueprintCallable, Category = "Slime|Devour")
 	void AbortDevour(bool bRestoreBody);
@@ -280,39 +283,40 @@ public:
 protected:
 	void TickPhase(float DeltaTime);
 	void EnterPhase(ESlimeDevourPhase NewPhase);
-	void FaceTarget(AEnemyCharacter* Enemy);
-	bool IsTargetStillValid(const AEnemyCharacter* Enemy) const;
-	bool PrepareDevourTarget(AEnemyCharacter* Enemy);
-	void BeginCloseRange(AEnemyCharacter* Enemy);
-	void BeginCloseRangeDash(AEnemyCharacter* Enemy);
+	void FaceTarget(APawn* Enemy);
+	bool IsTargetStillValid(const APawn* Enemy) const;
+	bool PrepareDevourTarget(APawn* Enemy);
+	void BeginCloseRange(APawn* Enemy);
+	void BeginCloseRangeDash(APawn* Enemy);
 	void TickCloseRangeDash(float DeltaTime);
+	FVector ClampCloseRangeDashLocation(const FVector& Desired) const;
 	void SetCloseRangeCameraLag(bool bBoost);
 	void SetOwnerMovementFrozen(bool bFrozen);
-	bool LaunchCloseRangeWrapper(AEnemyCharacter* Enemy);
-	FVector GetWrapCenter(const AEnemyCharacter* Enemy) const;
-	bool IsCloseRangeWrapped(const AEnemyCharacter* Enemy) const;
-	void FreezeDevourTarget(AEnemyCharacter* Enemy);
-	void RestoreDevourTarget(AEnemyCharacter* Enemy);
-	void HideEnemyWidgets(AEnemyCharacter* Enemy, bool bHide) const;
-	void BeginLatch(AEnemyCharacter* Enemy);
-	void TryLaunchNextLatchShot(AEnemyCharacter* Enemy);
-	void TickLatch(AEnemyCharacter* Enemy, float DeltaTime);
-	void UpdateLatchTargets(AEnemyCharacter* Enemy);
-	void GetLatchAttachPoints(const AEnemyCharacter* Enemy, TArray<FVector>& OutPoints) const;
-	bool GetEnemyMeshBox(const AEnemyCharacter* Enemy, FBox& OutBox) const;
+	bool LaunchCloseRangeWrapper(APawn* Enemy);
+	FVector GetWrapCenter(const APawn* Enemy) const;
+	bool IsCloseRangeWrapped(const APawn* Enemy) const;
+	void FreezeDevourTarget(APawn* Enemy);
+	void RestoreDevourTarget(APawn* Enemy);
+	void HideEnemyWidgets(APawn* Enemy, bool bHide) const;
+	void BeginLatch(APawn* Enemy);
+	void TryLaunchNextLatchShot(APawn* Enemy);
+	void TickLatch(APawn* Enemy, float DeltaTime);
+	void UpdateLatchTargets(APawn* Enemy);
+	void GetLatchAttachPoints(const APawn* Enemy, TArray<FVector>& OutPoints) const;
+	bool GetEnemyMeshBox(const APawn* Enemy, FBox& OutBox) const;
 	bool TryGetLatchBoneLocation(const USkeletalMeshComponent* Skel, const TArray<FName>& Names, FVector& OutLocation) const;
-	FVector MakeLatchPointFromAnchor(const AEnemyCharacter* Enemy, const FVector& Anchor, const FVector& Axis, float MiniRadius) const;
-	FVector TraceMeshAttachPoint(const AEnemyCharacter* Enemy, const FVector& Center, const FVector& Axis, float ExtentAlong, float MiniRadius) const;
+	FVector MakeLatchPointFromAnchor(const APawn* Enemy, const FVector& Anchor, const FVector& Axis, float MiniRadius) const;
+	FVector TraceMeshAttachPoint(const APawn* Enemy, const FVector& Center, const FVector& Axis, float ExtentAlong, float MiniRadius) const;
 	void ClearOwnerLockOn() const;
 	float GetLatchMiniRadius() const;
-	void ApplyEnemyShrink(AEnemyCharacter* Enemy, float Alpha) const;
-	void BeginRetract(AEnemyCharacter* Enemy);
+	void ApplyEnemyShrink(APawn* Enemy, float Alpha) const;
+	void BeginRetract(APawn* Enemy);
 	void TickRetract(float DeltaTime);
 	/** Place enemy so GetWrapCenter equals DesiredWrapCenter. */
-	void SetEnemyWrapCenter(AEnemyCharacter* Enemy, const FVector& DesiredWrapCenter) const;
+	void SetEnemyWrapCenter(APawn* Enemy, const FVector& DesiredWrapCenter) const;
 	int32 GetActiveLatchShotCount() const;
 	void SwallowTarget();
-	void CaptureEnemy(AEnemyCharacter* Enemy, FSlimeDevourCapture& OutCapture) const;
+	void CaptureEnemy(APawn* Enemy, FSlimeDevourCapture& OutCapture) const;
 	void PushPhantomSlot(const FSlimeDevourCapture& Capture);
 	void SpawnInnerMesh(const FSlimeDevourCapture& Capture);
 	void ConfigureInnerMesh(UMeshComponent* Comp) const;
@@ -346,7 +350,7 @@ protected:
 	UPROPERTY(Transient)
 	TArray<FSlimeDevourCapture> PhantomSlots;
 
-	TWeakObjectPtr<AEnemyCharacter> DevourTarget;
+	TWeakObjectPtr<APawn> DevourTarget;
 	TWeakObjectPtr<AActor> PendingDestroyEnemy;
 	FSlimeDevourCapture ActiveCapture;
 	FTransform EnemyStartXform = FTransform::Identity;

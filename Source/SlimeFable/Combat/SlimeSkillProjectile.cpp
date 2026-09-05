@@ -242,7 +242,7 @@ void ASlimeSkillProjectile::Tick(float DeltaSeconds)
 	ObjQuery.AddObjectTypesToQuery(ECC_Pawn);
 	ObjQuery.AddObjectTypesToQuery(ECC_WorldDynamic);
 	ObjQuery.AddObjectTypesToQuery(ECC_PhysicsBody);
-	ObjQuery.AddObjectTypesToQuery(ECC_GameTraceChannel1);
+	ObjQuery.AddObjectTypesToQuery(ECC_GameTraceChannel4);
 	if (Age >= WorldCollisionGrace)
 	{
 		ObjQuery.AddObjectTypesToQuery(ECC_WorldStatic);

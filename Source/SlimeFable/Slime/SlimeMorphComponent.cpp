@@ -4,8 +4,11 @@
 
 #include "EnemyCharacter.h"
 #include "EnemyCombatComponent.h"
+#include "Combat/SlimeDevourTarget.h"
 #include "EnemyFighter.h"
 #include "Camera/CameraComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -16,6 +19,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/Material.h"
 #include "SceneTypes.h"
+#include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeCharacter.h"
 #include "SlimeDevourComponent.h"
@@ -23,6 +27,7 @@
 #include "SlimeElementComponent.h"
 #include "SlimeElementTypes.h"
 #include "SlimeFable.h"
+#include "SlimeFablePlayerController.h"
 #include "SlimeLockOnComponent.h"
 #include "SlimeSpringArmComponent.h"
 #include "Settings/SlimeInputSettings.h"
@@ -263,10 +268,21 @@ void USlimeMorphComponent::TickMorphedKeyInput(float DeltaTime)
 	}
 
 	ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner());
+	if (!Slime)
+	{
+		return;
+	}
+	if (const ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget))
+	{
+		if (MorphIface->UsesMoverMovement())
+		{
+			return; // GameplayCamera owns framing for GASP morph.
+		}
+	}
 	USpringArmComponent* MorphCameraBoom = MorphTarget
 		? MorphTarget->FindComponentByClass<USpringArmComponent>()
 		: nullptr;
-	if (!Slime || !MorphCameraBoom)
+	if (!MorphCameraBoom)
 	{
 		return;
 	}
@@ -282,13 +298,13 @@ void USlimeMorphComponent::TickMorphedKeyInput(float DeltaTime)
 
 	const float ArmMul = FMath::Clamp(FMath::Sqrt(FMath::Max(MorphCameraHeightScale, 1.f)), 1.f, 2.2f);
 	float DesiredArm = Slime->GetDesiredCameraArmLength() * ArmMul;
-	if (const AEnemyCharacter* MorphEnemy = Cast<AEnemyCharacter>(MorphTarget))
+	if (const ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget))
 	{
-		if (MorphEnemy->MorphCameraArmLengthMin > 0.f)
+		if (MorphIface->GetMorphCameraArmLengthMin() > 0.f)
 		{
 			DesiredArm = FMath::GetMappedRangeValueClamped(
 				FVector2D(Slime->CameraArmLengthMin, Slime->CameraArmLengthMax),
-				FVector2D(MorphEnemy->MorphCameraArmLengthMin, Slime->CameraArmLengthMax * ArmMul),
+				FVector2D(MorphIface->GetMorphCameraArmLengthMin(), Slime->CameraArmLengthMax * ArmMul),
 				Slime->GetDesiredCameraArmLength());
 		}
 	}
@@ -642,10 +658,17 @@ void USlimeMorphComponent::SpawnMorphTarget()
 	const FVector SlimeLocation = Slime->GetActorLocation();
 	const float FootZ = SlimeLocation.Z - Slime->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 
-	float EnemyHalfHeight = 0.f;
-	if (const ACharacter* EnemyCDO = SpawnClass->GetDefaultObject<ACharacter>())
+	float EnemyHalfHeight = 96.f;
+	if (const ACharacter* EnemyCDO = Cast<ACharacter>(SpawnClass->GetDefaultObject<AActor>()))
 	{
 		if (const UCapsuleComponent* EnemyCapsule = EnemyCDO->GetCapsuleComponent())
+		{
+			EnemyHalfHeight = EnemyCapsule->GetScaledCapsuleHalfHeight();
+		}
+	}
+	else if (const APawn* PawnCDO = Cast<APawn>(SpawnClass->GetDefaultObject<AActor>()))
+	{
+		if (const UCapsuleComponent* EnemyCapsule = PawnCDO->FindComponentByClass<UCapsuleComponent>())
 		{
 			EnemyHalfHeight = EnemyCapsule->GetScaledCapsuleHalfHeight();
 		}
@@ -656,19 +679,22 @@ void USlimeMorphComponent::SpawnMorphTarget()
 
 	// AlwaysSpawn, never Adjust: the slime capsule is still collidable at this point, so an
 	// adjusting spawn shoves the enemy off to one side instead of growing out of the puddle.
-	AEnemyCharacter* Enemy = World->SpawnActorDeferred<AEnemyCharacter>(SpawnClass, SpawnXform, Slime, Slime,
+	APawn* Enemy = World->SpawnActorDeferred<APawn>(SpawnClass, SpawnXform, Slime, Slime,
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (!Enemy)
 	{
 		return;
 	}
 
-	Enemy->InitAsMorphTarget(Slime);
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
+	{
+		Target->InitAsMorphTarget(Slime);
+	}
 	Enemy->FinishSpawning(SpawnXform);
 
 	// FinishSpawning may resize the capsule from the actual mesh. Align using that final
 	// half-height so the target's feet stay on the slime's ground plane instead of floating.
-	if (UCapsuleComponent* EnemyCapsule = Enemy->GetCapsuleComponent())
+	if (UCapsuleComponent* EnemyCapsule = SlimeDevourUtil::GetCapsule(Enemy))
 	{
 		const FVector AlignedLocation = SlimeMorphPolicies::AlignCapsuleCenterToFoot(
 			Enemy->GetActorLocation(), FootZ, EnemyCapsule->GetScaledCapsuleHalfHeight());
@@ -682,7 +708,19 @@ void USlimeMorphComponent::SpawnMorphTarget()
 	bOriginalMaterialsActive = false;
 	bShellActive = false;
 
-	USkeletalMeshComponent* PrimaryMesh = Enemy->GetMesh();
+	USkeletalMeshComponent* PrimaryMesh = nullptr;
+	if (ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(Enemy))
+	{
+		PrimaryMesh = MorphIface->GetMorphVisualMesh();
+		if (!PrimaryMesh)
+		{
+			PrimaryMesh = MorphIface->GetPrimarySkeletalMesh();
+		}
+	}
+	if (!PrimaryMesh)
+	{
+		PrimaryMesh = SlimeDevourUtil::GetPrimaryMesh(Enemy);
+	}
 	UMaterialInterface* OverlayMat = LoadMorphMaterial();
 	UMaterialInterface* SubstrateMat = LoadMorphSubstrateMaterial();
 	UMaterialInterface* HairMat = LoadMorphHairMaterial();
@@ -700,7 +738,9 @@ void USlimeMorphComponent::SpawnMorphTarget()
 
 	// Snapshot every visual mesh. Transition wears Substrate slime on non-hair slots.
 	// MSM_HAIR sheets keep a dedicated Masked hair slime skin (Substrate cannot cover Hair VF).
-	Enemy->ForEachVisualMesh([this, PrimaryMesh](UMeshComponent* MeshComp)
+	if (ISlimeDevourTarget* VisualTarget = SlimeDevourUtil::As(Enemy))
+	{
+	VisualTarget->ForEachVisualMesh([this, PrimaryMesh](UMeshComponent* MeshComp)
 	{
 		if (!MeshComp)
 		{
@@ -725,6 +765,7 @@ void USlimeMorphComponent::SpawnMorphTarget()
 
 		MorphVisuals.Add(MoveTemp(Entry));
 	});
+	}
 
 	bool bAnySkin = false;
 	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
@@ -899,13 +940,31 @@ void USlimeMorphComponent::DestroyMorphTarget()
 		RestoreAllHiddenMorphSlots();
 		ApplyOriginalMaterials();
 
-		if (UEnemyCombatComponent* EnemyCombat = MorphTarget->GetEnemyCombat())
+		if (ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
 		{
-			EnemyCombat->SetPlayerMorphed(false);
+			if (UEnemyCombatComponent* EnemyCombat = Iface->GetEnemyCombat())
+			{
+				EnemyCombat->SetPlayerMorphed(false);
+			}
+			Iface->SetMorphGameplayEnabled(false);
+			Iface->StopMeshAnimation();
+			auto FreezeMesh = [](USkeletalMeshComponent* Mesh)
+			{
+				if (!Mesh)
+				{
+					return;
+				}
+				Mesh->bPauseAnims = true;
+				Mesh->SetComponentTickEnabled(false);
+			};
+			FreezeMesh(Iface->GetDevourPreviewMesh());
+			FreezeMesh(Iface->GetPrimarySkeletalMesh());
 		}
 
-		MorphTarget->Destroy();
+		MorphTarget->SetActorTickEnabled(false);
+		AActor* DyingMorph = MorphTarget;
 		MorphTarget = nullptr;
+		DyingMorph->SetLifeSpan(0.01f);
 	}
 	MorphVisuals.Reset();
 	bOriginalMaterialsActive = false;
@@ -1121,6 +1180,46 @@ void USlimeMorphComponent::UpdateSlimeOpacity(float Alpha)
 	}
 }
 
+void USlimeMorphComponent::SuspendSlimeLocomotionImc(APlayerController* PC)
+{
+	if (!PC || bSlimeLocomotionImcSuspended)
+	{
+		return;
+	}
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->SuspendGameplayMappingContexts();
+	}
+	if (ASlimeCharacter* SlimeOwner = Cast<ASlimeCharacter>(GetOwner()))
+	{
+		if (USlimeAbilityComponent* Abilities = SlimeOwner->GetSlimeAbilities())
+		{
+			Abilities->UnregisterMappingContext();
+		}
+	}
+	bSlimeLocomotionImcSuspended = true;
+}
+
+void USlimeMorphComponent::RestoreSlimeLocomotionImc(APlayerController* PC)
+{
+	if (!PC || !bSlimeLocomotionImcSuspended)
+	{
+		return;
+	}
+	if (ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(PC))
+	{
+		SlimePC->RestoreGameplayMappingContexts();
+	}
+	if (ASlimeCharacter* SlimeOwner = Cast<ASlimeCharacter>(GetOwner()))
+	{
+		if (USlimeAbilityComponent* Abilities = SlimeOwner->GetSlimeAbilities())
+		{
+			Abilities->RegisterMappingContext();
+		}
+	}
+	bSlimeLocomotionImcSuspended = false;
+}
+
 void USlimeMorphComponent::PossessEnemy()
 {
 	if (!MorphTarget || !GetOwner())
@@ -1142,56 +1241,71 @@ void USlimeMorphComponent::PossessEnemy()
 		return;
 	}
 	const FRotator PreservedViewRotation = PC->GetControlRotation();
-	USpringArmComponent* MorphCameraBoom = MorphTarget->FindComponentByClass<USpringArmComponent>();
-	UCameraComponent* MorphCamera = MorphTarget->FindComponentByClass<UCameraComponent>();
-	// Match slime world framing first (TargetOffset compensates boom origin). Height framing
-	// eases in via TickCameraBlend — avoid RefreshCameraRig snap.
-	CopyCameraRig(Slime->GetCameraBoom(), MorphCameraBoom, Slime->GetFollowCamera(), MorphCamera);
-
-	float TargetArm = MorphCameraBoom ? MorphCameraBoom->TargetArmLength : 260.f;
-	float TargetSocketZ = MorphCameraBoom ? MorphCameraBoom->SocketOffset.Z : 12.f;
-	FVector TargetOffset = MorphCameraBoom ? MorphCameraBoom->TargetOffset : FVector::ZeroVector;
-	if (MorphCameraBoom && MorphTarget)
-	{
-		float HalfH = 20.f;
-		if (const UCapsuleComponent* Cap = MorphTarget->GetCapsuleComponent())
-		{
-			HalfH = Cap->GetScaledCapsuleHalfHeight();
-		}
-		constexpr float SlimeRefHalfH = 20.f;
-		const float HeightScale = FMath::Max(HalfH / SlimeRefHalfH, 1.f);
-		const float SocketZ = FMath::Clamp(HalfH * 0.60f, 12.f, 120.f);
-		const float ArmMul = FMath::Clamp(FMath::Sqrt(HeightScale), 1.f, 2.2f);
-		MorphCameraHeightScale = HeightScale;
-		MorphCameraSocketZ = SocketZ;
-		TargetArm = MorphCameraBoom->TargetArmLength * ArmMul;
-		TargetSocketZ = SocketZ;
-		TargetOffset = FVector::ZeroVector;
-	}
-	else
-	{
-		MorphCameraHeightScale = 1.f;
-		MorphCameraSocketZ = 12.f;
-	}
+	const ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget);
+	const bool bMoverMorph = MorphIface && MorphIface->UsesMoverMovement();
 
 	// Park the slime: hidden, no collision, no movement, and no shadow-proxy cast. The actor
 	// tick stays ON — this component lives on the slime and must keep running the phase
 	// machine and polling the unmorph key while the player drives the morph body.
 	Slime->SetMorphParked(true);
 
-	PC->Possess(MorphTarget);
-	PC->SetControlRotation(PreservedViewRotation);
-	BeginCameraBlend(MorphCameraBoom, TargetArm, TargetSocketZ, TargetOffset);
-	// Keys held across a possess swap never deliver their release to the new pawn, which
-	// leaves the movement axis stuck and the character walking off on its own.
-	PC->FlushPressedKeys();
-
-	if (UEnemyCombatComponent* EnemyCombat = MorphTarget->GetEnemyCombat())
+	if (bMoverMorph)
 	{
-		EnemyCombat->SetPlayerMorphed(true);
+		// GASP BP ReceivePossessed adds IMC_Sandbox + GameplayCamera. Drop slime IMCs and
+		// skip SpringArm takeover so Sandbox locomotion/camera are not double-driven.
+		SuspendSlimeLocomotionImc(PC);
+		MorphCameraHeightScale = 1.f;
+		MorphCameraSocketZ = 12.f;
+		PC->Possess(MorphTarget);
+		PC->SetControlRotation(PreservedViewRotation);
+		PC->FlushPressedKeys();
+	}
+	else
+	{
+		USpringArmComponent* MorphCameraBoom = MorphTarget->FindComponentByClass<USpringArmComponent>();
+		UCameraComponent* MorphCamera = MorphTarget->FindComponentByClass<UCameraComponent>();
+		CopyCameraRig(Slime->GetCameraBoom(), MorphCameraBoom, Slime->GetFollowCamera(), MorphCamera);
+
+		float TargetArm = MorphCameraBoom ? MorphCameraBoom->TargetArmLength : 260.f;
+		float TargetSocketZ = MorphCameraBoom ? MorphCameraBoom->SocketOffset.Z : 12.f;
+		FVector TargetOffset = MorphCameraBoom ? MorphCameraBoom->TargetOffset : FVector::ZeroVector;
+		if (MorphCameraBoom && MorphTarget)
+		{
+			float HalfH = 20.f;
+			if (const UCapsuleComponent* Cap = SlimeDevourUtil::GetCapsule(MorphTarget))
+			{
+				HalfH = Cap->GetScaledCapsuleHalfHeight();
+			}
+			constexpr float SlimeRefHalfH = 20.f;
+			const float HeightScale = FMath::Max(HalfH / SlimeRefHalfH, 1.f);
+			const float SocketZ = FMath::Clamp(HalfH * 0.60f, 12.f, 120.f);
+			const float ArmMul = FMath::Clamp(FMath::Sqrt(HeightScale), 1.f, 2.2f);
+			MorphCameraHeightScale = HeightScale;
+			MorphCameraSocketZ = SocketZ;
+			TargetArm = MorphCameraBoom->TargetArmLength * ArmMul;
+			TargetSocketZ = SocketZ;
+			TargetOffset = FVector::ZeroVector;
+		}
+		else
+		{
+			MorphCameraHeightScale = 1.f;
+			MorphCameraSocketZ = 12.f;
+		}
+
+		PC->Possess(MorphTarget);
+		PC->SetControlRotation(PreservedViewRotation);
+		BeginCameraBlend(MorphCameraBoom, TargetArm, TargetSocketZ, TargetOffset);
+		PC->FlushPressedKeys();
 	}
 
-	MorphTarget->RefreshHealthBarAnchor();
+	if (ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
+	{
+		if (UEnemyCombatComponent* EnemyCombat = Iface->GetEnemyCombat())
+		{
+			EnemyCombat->SetPlayerMorphed(true);
+		}
+		Iface->RefreshHealthBarAnchor();
+	}
 
 	EnsureMorphDodge();
 }
@@ -1246,9 +1360,12 @@ void USlimeMorphComponent::PossessSlime()
 
 	ClearMorphDodge();
 
-	if (UEnemyCombatComponent* EnemyCombat = MorphTarget->GetEnemyCombat())
+	if (ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
 	{
-		EnemyCombat->SetPlayerMorphed(false);
+		if (UEnemyCombatComponent* EnemyCombat = Iface->GetEnemyCombat())
+		{
+			EnemyCombat->SetPlayerMorphed(false);
+		}
 	}
 
 	if (!bHasCachedSlimeReturnTransform)
@@ -1282,18 +1399,33 @@ void USlimeMorphComponent::PossessSlime()
 		Body->SetSpread(true);
 	}
 
+	RestoreSlimeLocomotionImc(PC);
+
 	USpringArmComponent* SlimeBoom = Slime->GetCameraBoom();
 	USpringArmComponent* MorphBoom = MorphTarget->FindComponentByClass<USpringArmComponent>();
 	UCameraComponent* MorphCamera = MorphTarget->FindComponentByClass<UCameraComponent>();
-	CopyCameraRig(MorphBoom, SlimeBoom, MorphCamera, Slime->GetFollowCamera());
+	const bool bMoverMorph = SlimeDevourUtil::As(MorphTarget)
+		&& SlimeDevourUtil::As(MorphTarget)->UsesMoverMovement();
+	if (!bMoverMorph)
+	{
+		CopyCameraRig(MorphBoom, SlimeBoom, MorphCamera, Slime->GetFollowCamera());
+	}
 
 	const float TargetArm = Slime->GetDesiredCameraArmLength();
 	const float TargetSocketZ = 12.f;
 	const FVector TargetOffset = FVector::ZeroVector;
 
+	if (ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget))
+	{
+		MorphIface->StopMeshAnimation();
+	}
+
 	PC->Possess(Slime);
 	PC->SetControlRotation(PreservedViewRotation);
-	BeginCameraBlend(SlimeBoom, TargetArm, TargetSocketZ, TargetOffset);
+	if (!bMoverMorph)
+	{
+		BeginCameraBlend(SlimeBoom, TargetArm, TargetSocketZ, TargetOffset);
+	}
 	PC->FlushPressedKeys();
 }
 
@@ -1383,10 +1515,13 @@ void USlimeMorphComponent::SetMorphTargetGameplayEnabled(bool bEnabled)
 
 	if (!bHasCachedMorphTargetGameplayState)
 	{
-		if (const UCharacterMovementComponent* Movement = MorphTarget->GetCharacterMovement())
+		if (ACharacter* Character = Cast<ACharacter>(MorphTarget))
 		{
-			CachedMorphTargetMovementMode = static_cast<uint8>(Movement->MovementMode.GetValue());
-			CachedMorphTargetCustomMovementMode = Movement->CustomMovementMode;
+			if (const UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+			{
+				CachedMorphTargetMovementMode = static_cast<uint8>(Movement->MovementMode.GetValue());
+				CachedMorphTargetCustomMovementMode = Movement->CustomMovementMode;
+			}
 		}
 		bHasCachedMorphTargetGameplayState = true;
 	}
@@ -1394,32 +1529,54 @@ void USlimeMorphComponent::SetMorphTargetGameplayEnabled(bool bEnabled)
 	// Keep the target capsule and actor collision alive so the spawned body remains grounded.
 	// Only the rendered mesh is removed from collision during the visual transition; otherwise
 	// a giant mesh (for example Tianhuang) becomes a dynamic collider that pushes the slime up.
-	if (USkeletalMeshComponent* Mesh = MorphTarget->GetMesh())
 	{
-		if (!bHasCachedMorphTargetMeshCollisionState)
+		USkeletalMeshComponent* Mesh = nullptr;
+		if (ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget))
 		{
-			CachedMorphTargetMeshCollisionEnabled = static_cast<uint8>(Mesh->GetCollisionEnabled());
-			bHasCachedMorphTargetMeshCollisionState = true;
+			Mesh = MorphIface->GetMorphVisualMesh();
+			if (!Mesh)
+			{
+				Mesh = MorphIface->GetPrimarySkeletalMesh();
+			}
 		}
-		Mesh->SetCollisionEnabled(bEnabled
-			? static_cast<ECollisionEnabled::Type>(CachedMorphTargetMeshCollisionEnabled)
-			: ECollisionEnabled::NoCollision);
+		if (!Mesh)
+		{
+			Mesh = SlimeDevourUtil::GetPrimaryMesh(MorphTarget);
+		}
+		if (Mesh)
+		{
+			if (!bHasCachedMorphTargetMeshCollisionState)
+			{
+				CachedMorphTargetMeshCollisionEnabled = static_cast<uint8>(Mesh->GetCollisionEnabled());
+				bHasCachedMorphTargetMeshCollisionState = true;
+			}
+			Mesh->SetCollisionEnabled(bEnabled
+				? static_cast<ECollisionEnabled::Type>(CachedMorphTargetMeshCollisionEnabled)
+				: ECollisionEnabled::NoCollision);
+		}
 	}
-	if (UCharacterMovementComponent* Movement = MorphTarget->GetCharacterMovement())
+	if (ACharacter* Character = Cast<ACharacter>(MorphTarget))
 	{
-		Movement->StopMovementImmediately();
-		Movement->Velocity = FVector::ZeroVector;
-		if (bEnabled)
+		if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
 		{
-			Movement->SetMovementMode(
-				SlimeMorphPolicies::ResolveActivationMovementMode(
-					static_cast<EMovementMode>(CachedMorphTargetMovementMode)),
-				CachedMorphTargetCustomMovementMode);
+			Movement->StopMovementImmediately();
+			Movement->Velocity = FVector::ZeroVector;
+			if (bEnabled)
+			{
+				Movement->SetMovementMode(
+					SlimeMorphPolicies::ResolveActivationMovementMode(
+						static_cast<EMovementMode>(CachedMorphTargetMovementMode)),
+					CachedMorphTargetCustomMovementMode);
+			}
+			else
+			{
+				Movement->DisableMovement();
+			}
 		}
-		else
-		{
-			Movement->DisableMovement();
-		}
+	}
+	else if (ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
+	{
+		Iface->SetMorphGameplayEnabled(bEnabled);
 	}
 
 	if (bEnabled)
@@ -1440,7 +1597,7 @@ void USlimeMorphComponent::CacheUnmorphPoseAndFreezeTarget()
 
 	const FVector MorphLocation = MorphTarget->GetActorLocation();
 	float MorphFootZ = MorphLocation.Z;
-	if (const UCapsuleComponent* MorphCapsule = MorphTarget->GetCapsuleComponent())
+	if (const UCapsuleComponent* MorphCapsule = SlimeDevourUtil::GetCapsule(MorphTarget))
 	{
 		MorphFootZ -= MorphCapsule->GetScaledCapsuleHalfHeight();
 	}
@@ -1455,11 +1612,18 @@ void USlimeMorphComponent::CacheUnmorphPoseAndFreezeTarget()
 	CachedSlimeReturnTransform = FTransform(MorphTarget->GetActorRotation(), ReturnLocation, FVector::OneVector);
 	bHasCachedSlimeReturnTransform = true;
 
-	if (UCharacterMovementComponent* Movement = MorphTarget->GetCharacterMovement())
+	if (ACharacter* Character = Cast<ACharacter>(MorphTarget))
 	{
-		Movement->StopMovementImmediately();
-		Movement->Velocity = FVector::ZeroVector;
-		Movement->DisableMovement();
+		if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+		{
+			Movement->StopMovementImmediately();
+			Movement->Velocity = FVector::ZeroVector;
+			Movement->DisableMovement();
+		}
+	}
+	else if (ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
+	{
+		Iface->SetMorphGameplayEnabled(false);
 	}
 	MorphTarget->SetActorEnableCollision(false);
 }
@@ -1580,7 +1744,14 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 	}
 
 	// Only single-node-anim enemies need manual locomotion — AnimBP-driven enemies handle it themselves.
-	if (!MorphTarget->UsesSingleNodeAnims())
+	if (const ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
+	{
+		if (!Iface->UsesSingleNodeAnims())
+		{
+			return;
+		}
+	}
+	else
 	{
 		return;
 	}
@@ -1591,7 +1762,7 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 		return;
 	}
 
-	UCharacterMovementComponent* Move = MorphTarget->GetCharacterMovement();
+	UCharacterMovementComponent* Move = Cast<ACharacter>(MorphTarget) ? Cast<ACharacter>(MorphTarget)->GetCharacterMovement() : nullptr;
 	if (!Move)
 	{
 		return;
@@ -1599,12 +1770,15 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 
 	// Jump anim is started in MorphJump on key press — never invent a jump just because spawn
 	// briefly reported !IsMovingOnGround (that caused the "default pose jumps" bug).
-	if (MorphTarget->IsMorphJumpAnimActive())
+	if (AEnemyCharacter* EnemyChar = Cast<AEnemyCharacter>(MorphTarget))
 	{
-		bMorphJumpPlaying = true;
-		bMorphWalkPlaying = false;
-		bMorphRunPlaying = false;
-		MorphIdleTimer = 0.f;
+		if (EnemyChar->IsMorphJumpAnimActive())
+		{
+			bMorphJumpPlaying = true;
+			bMorphWalkPlaying = false;
+			bMorphRunPlaying = false;
+			MorphIdleTimer = 0.f;
+		}
 	}
 
 	const bool bAirborne = Move->IsFalling() || !Move->IsMovingOnGround();
@@ -1614,9 +1788,9 @@ void USlimeMorphComponent::TickMorphLocomotion(float Dt)
 		return;
 	}
 
-	if (bMorphJumpPlaying || MorphTarget->IsMorphJumpAnimActive())
+	if (bMorphJumpPlaying || Fighter->IsMorphJumpAnimActive())
 	{
-		MorphTarget->ClearMorphJumpAnim();
+		Fighter->ClearMorphJumpAnim();
 		bMorphJumpPlaying = false;
 		bMorphWalkPlaying = false;
 		bMorphRunPlaying = false;

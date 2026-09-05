@@ -4,6 +4,7 @@
 
 #include "SlimeFablePlayerController.h"
 #include "EnemyCharacter.h"
+#include "Combat/SlimeDevourTarget.h"
 #include "SlimePlacedActor.h"
 #include "Quest/QuestInteractActor.h"
 #include "Quest/QuestSubsystem.h"
@@ -170,7 +171,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 
 	if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
 	{
-		if (AEnemyCharacter* DevourTarget = Devour->FindBestDevourTarget())
+		if (APawn* DevourTarget = Devour->FindBestDevourTarget())
 		{
 			FocusedDevour = DevourTarget;
 			FocusedPickup.Reset();
@@ -187,9 +188,14 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 
 bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation) const
 {
-	if (AEnemyCharacter* Enemy = FocusedDevour.Get())
+	if (APawn* Enemy = FocusedDevour.Get())
 	{
-		OutLocation = Enemy->GetHudAnchorLocation() + FVector(0.f, 0.f, Enemy->HealthBarZOffset);
+		if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
+		{
+			OutLocation = Target->GetHudAnchorLocation() + FVector(0.f, 0.f, Target->GetHealthBarZOffset());
+			return true;
+		}
+		OutLocation = Enemy->GetActorLocation() + FVector(0.f, 0.f, 100.f);
 		return true;
 	}
 	if (ASlimeWorldPickup* Pickup = FocusedPickup.Get())

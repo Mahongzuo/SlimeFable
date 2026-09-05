@@ -5,9 +5,11 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "EnemyCharacter.h"
+#include "Combat/SlimeDevourTarget.h"
 #include "Abilities/EnemySkillAbility.h"
 #include "EnemyGameplayEffects.h"
 #include "EnemyFighter.h"
+#include "GaspSandboxPawn.h"
 #include "PhoebeEnemy.h"
 #include "PhoebeAnimSetupLibrary.h"
 #include "EnemyProjectile.h"
@@ -27,6 +29,9 @@
 #include "SlimeEnemyGameplayTags.h"
 #include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Settings/SlimeAudioPlay.h"
+#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
 UEnemyCombatComponent::UEnemyCombatComponent()
@@ -37,9 +42,9 @@ UEnemyCombatComponent::UEnemyCombatComponent()
 void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(GetOwner()))
 	{
-		if (Enemy->IsDevourLocked())
+		if (Target->IsDevourLocked())
 		{
 			if (bAttacking)
 			{
@@ -60,14 +65,11 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		if (UAnimMontage* Tracked = ActiveActionMontage.Get())
 		{
-			if (const ACharacter* Character = Cast<ACharacter>(GetOwner()))
+			if (const UAnimInstance* Anim = ResolveOwnerAnimInstance())
 			{
-				if (const UAnimInstance* Anim = Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr)
+				if (!Anim->Montage_IsPlaying(Tracked))
 				{
-					if (!Anim->Montage_IsPlaying(Tracked))
-					{
-						ActiveActionMontage.Reset();
-					}
+					ActiveActionMontage.Reset();
 				}
 			}
 		}
@@ -117,9 +119,9 @@ bool UEnemyCombatComponent::CanStartAction() const
 	{
 		return false;
 	}
-	if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Owner))
 	{
-		if (Enemy->IsDevourLocked())
+		if (Target->IsDevourLocked())
 		{
 			return false;
 		}
@@ -164,12 +166,9 @@ void UEnemyCombatComponent::InterruptCombat()
 	{
 		Enemy->StopMeshAnimation();
 	}
-	else if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+	else if (UAnimInstance* Anim = ResolveOwnerAnimInstance())
 	{
-		if (UAnimInstance* Anim = Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr)
-		{
-			Anim->Montage_Stop(0.1f);
-		}
+		Anim->StopAllMontages(0.1f);
 	}
 	ActiveActionMontage.Reset();
 	RestoreAirAttackMovement();
@@ -216,7 +215,12 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 
 	if (UAnimMontage* Montage = Def.AttackMontage.LoadSynchronous())
 	{
-		UPhoebeAnimSetupLibrary::ApplyInPlaceRootLockToMontage(Montage);
+		EnemyCombat::SanitizeGaspCombatMontage(Montage);
+		// Phoebe sequences need in-place root lock; never rewrite shared GASP interaction assets.
+		if (Cast<AEnemyCharacter>(GetOwner()))
+		{
+			UPhoebeAnimSetupLibrary::ApplyInPlaceRootLockToMontage(Montage);
+		}
 		ActiveActionMontage = Montage;
 		if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner()))
 		{
@@ -235,12 +239,9 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 				bActionAnimationStarted = true;
 			}
 		}
-		else if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+		else if (UAnimInstance* Anim = ResolveOwnerAnimInstance())
 		{
-			if (UAnimInstance* Anim = Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr)
-			{
-				bActionAnimationStarted = Anim->Montage_Play(Montage) > 0.f;
-			}
+			bActionAnimationStarted = Anim->Montage_Play(Montage) > 0.f;
 		}
 	}
 	else
@@ -258,20 +259,27 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 	}
 
 	USlimeDodgeComponent::NotifyPlayerIncomingAttack(this, GetOwner());
+	if (AActor* Owner = GetOwner())
+	{
+		if (USoundBase* Swing = AttackSwingSound.LoadSynchronous())
+		{
+			SlimeAudioPlay::PlaySfxAt(this, Swing, Owner->GetActorLocation());
+		}
+	}
 	return true;
 }
 
 bool UEnemyCombatComponent::PlayTrackedMontage(UAnimMontage* Montage)
 {
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	UAnimInstance* Anim = Character && Character->GetMesh()
-		? Character->GetMesh()->GetAnimInstance()
-		: nullptr;
+	UAnimInstance* Anim = ResolveOwnerAnimInstance();
 	if (!Anim || !Montage)
 	{
 		return false;
 	}
-	UPhoebeAnimSetupLibrary::ApplyInPlaceRootLockToMontage(Montage);
+	if (Cast<AEnemyCharacter>(GetOwner()))
+	{
+		UPhoebeAnimSetupLibrary::ApplyInPlaceRootLockToMontage(Montage);
+	}
 	const bool bPlayed = Anim->Montage_Play(Montage) > 0.f;
 	if (bPlayed)
 	{
@@ -506,15 +514,39 @@ void UEnemyCombatComponent::FinishAction()
 void UEnemyCombatComponent::StopActiveActionMontage(float BlendOutTime)
 {
 	UAnimMontage* Montage = ActiveActionMontage.Get();
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	if (Montage && Character && Character->GetMesh())
+	if (Montage)
 	{
-		if (UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance())
+		if (UAnimInstance* Anim = ResolveOwnerAnimInstance())
 		{
 			Anim->Montage_Stop(BlendOutTime, Montage);
 		}
 	}
 	ActiveActionMontage.Reset();
+}
+
+UAnimInstance* UEnemyCombatComponent::ResolveOwnerAnimInstance() const
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return nullptr;
+	}
+	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
+	{
+		return Enemy->GetMesh() ? Enemy->GetMesh()->GetAnimInstance() : nullptr;
+	}
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Owner))
+	{
+		if (USkeletalMeshComponent* Mesh = Target->GetPrimarySkeletalMesh())
+		{
+			return Mesh->GetAnimInstance();
+		}
+	}
+	if (ACharacter* Character = Cast<ACharacter>(Owner))
+	{
+		return Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr;
+	}
+	return nullptr;
 }
 
 void UEnemyCombatComponent::RestoreAirAttackMovement()
@@ -564,16 +596,19 @@ void UEnemyCombatComponent::ClearActionState(bool bClearAttackLock)
 
 void UEnemyCombatComponent::LockMovementForAttack()
 {
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	UCharacterMovementComponent* Move = Character ? Character->GetCharacterMovement() : nullptr;
-	if (!Move || bLockedMovementForAttack)
+	if (bLockedMovementForAttack)
 	{
 		return;
 	}
-	CachedMaxWalkSpeedBeforeAttack = Move->MaxWalkSpeed;
-	Move->StopMovementImmediately();
-	Move->Velocity = FVector::ZeroVector;
-	Move->MaxWalkSpeed = 0.f;
+	ACharacter* Character = Cast<ACharacter>(GetOwner());
+	UCharacterMovementComponent* Move = Character ? Character->GetCharacterMovement() : nullptr;
+	if (Move)
+	{
+		CachedMaxWalkSpeedBeforeAttack = Move->MaxWalkSpeed;
+		Move->StopMovementImmediately();
+		Move->Velocity = FVector::ZeroVector;
+		Move->MaxWalkSpeed = 0.f;
+	}
 	bLockedMovementForAttack = true;
 }
 
@@ -706,8 +741,15 @@ void UEnemyCombatComponent::FireHit()
 		Origin = USlimeHitProbe::ResolveOrigin(Owner, HitSkill.Hit, Forward);
 	}
 
-	USlimeHitProbe::PerformHit(Owner, HitSkill, Origin, Forward, AlreadyHit);
+	const int32 HitCount = USlimeHitProbe::PerformHit(Owner, HitSkill, Origin, Forward, AlreadyHit);
 	SpawnVfx(ActiveDef.HitNiagara, Origin);
+	if (HitCount > 0)
+	{
+		if (USoundBase* Impact = AttackImpactSound.LoadSynchronous())
+		{
+			SlimeAudioPlay::PlaySfxAt(this, Impact, Origin);
+		}
+	}
 }
 
 void UEnemyCombatComponent::ExecuteDash(const FEnemySkillDef& Def, const FVector& Forward)
@@ -923,20 +965,55 @@ void UEnemyCombatComponent::PollPlayerCombatKeys(float DeltaTime)
 		}
 	}
 
-	const AEnemyFighter* Fighter = Cast<AEnemyFighter>(GetOwner());
-	if (!Fighter)
+	const TArray<FEnemyMoveDef>* MovesPtr = nullptr;
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(GetOwner()))
+	{
+		MovesPtr = &Target->GetEnemyMoves();
+	}
+	else if (const AEnemyFighter* Fighter = Cast<AEnemyFighter>(GetOwner()))
+	{
+		MovesPtr = &Fighter->GetMoves();
+	}
+	if (!MovesPtr || MovesPtr->Num() == 0)
 	{
 		return;
 	}
-	const TArray<FEnemyMoveDef>& Moves = Fighter->GetMoves();
-	if (Moves.Num() == 0)
+	const TArray<FEnemyMoveDef>& Moves = *MovesPtr;
+
+	// Prefer official dual-character Interaction when BP still has it (Gasp Sandbox).
+	if (WasPressed(ESlimeInputAction::Attack, EKeys::LeftMouseButton))
 	{
+		if (AActor* OwnerActor = GetOwner())
+		{
+			auto TryNamed = [OwnerActor](FName Name) -> bool
+			{
+				if (UFunction* Fn = OwnerActor->FindFunction(Name))
+				{
+					if (Fn->NumParms == 1 && Fn->GetReturnProperty() && Fn->GetReturnProperty()->IsA<FBoolProperty>())
+					{
+						bool bOk = false;
+						OwnerActor->ProcessEvent(Fn, &bOk);
+						return bOk;
+					}
+				}
+				return false;
+			};
+			if (TryNamed(TEXT("TryCharacterInteraction")) || TryNamed(TEXT("TryTakedown")))
+			{
+				return;
+			}
+		}
+
+		// Cycle Shove → Tackle → Shove L → Shove R → Takedown …
+		const int32 Idx = PlayerAttackCycleIndex % Moves.Num();
+		PlayerAttackCycleIndex = (PlayerAttackCycleIndex + 1) % Moves.Num();
+		TryExecute(Moves[Idx].Skill);
 		return;
 	}
 
-	if (WasPressed(ESlimeInputAction::Attack, EKeys::LeftMouseButton))
+	// GASP uses LMB to cycle all moves so E stays free for SmartObject sit.
+	if (Cast<AGaspSandboxPawn>(GetOwner()))
 	{
-		TryExecute(Moves[0].Skill);
 		return;
 	}
 

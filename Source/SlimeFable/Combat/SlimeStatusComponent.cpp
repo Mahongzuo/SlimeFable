@@ -10,6 +10,7 @@
 #include "SlimeSkillVfxSubsystem.h"
 #include "EnemyCharacter.h"
 #include "EnemyFighter.h"
+#include "SlimeDevourTarget.h"
 #include "EnemyFighterAIController.h"
 #include "EnemyTower.h"
 #include "UI/SlimeFloatingTextWidget.h"
@@ -258,15 +259,15 @@ void USlimeStatusComponent::RefreshOwnerAttackCadence()
 
 void USlimeStatusComponent::SyncOwnerAuraFlash()
 {
-	AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(GetOwner());
-	if (!Enemy)
+	ISlimeDevourTarget* Target = SlimeDevourUtil::As(GetOwner());
+	if (!Target)
 	{
 		return;
 	}
 
 	if (ReactionResidueRemaining > 0.f)
 	{
-		Enemy->PlayElementAuraFlashByColor(ReactionResidueColor, ReactionResidueRemaining);
+		Target->PlayElementAuraFlashByColor(ReactionResidueColor, ReactionResidueRemaining);
 		return;
 	}
 
@@ -276,11 +277,11 @@ void USlimeStatusComponent::SyncOwnerAuraFlash()
 	{
 		const float* Time = AuraRemaining.Find(Primary);
 		const float Duration = Time ? *Time : 8.f;
-		Enemy->PlayElementAuraFlash(Primary, Duration);
+		Target->PlayElementAuraFlash(Primary, Duration);
 	}
 	else
 	{
-		Enemy->ClearElementAuraFlash();
+		Target->ClearElementAuraFlash();
 	}
 }
 

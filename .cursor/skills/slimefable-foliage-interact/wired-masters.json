@@ -1,0 +1,27 @@
+{
+  "targets": [
+    {
+      "material": "/Game/Fishermans_Cabin/Materials/Material_Masters/M_Foliage",
+      "ground-dirs": [
+        "/Game/Fishermans_Cabin/Meshes/Foliage/Grass",
+        "/Game/Fishermans_Cabin/Meshes/Foliage/Flower"
+      ],
+      "foliage-mi-dir": "/Game/Fishermans_Cabin/Materials/Material_Instances/Foliage",
+      "fallback-ground-mi": "/Game/Fishermans_Cabin/Materials/Material_Instances/Foliage/MI_Ground_Cover",
+      "disable-mis": [
+        "/Game/Fishermans_Cabin/Materials/Material_Instances/Foliage/MI_Tree_Leaves",
+        "/Game/Fishermans_Cabin/Materials/Material_Instances/Foliage/MI_Bush_Leaves",
+        "/Game/Fishermans_Cabin/Materials/Material_Instances/Foliage/MI_Tree_Billboard"
+      ]
+    },
+    {
+      "material": "/Game/Stylized_Forest/Materials/plants/M_plants",
+      "ground-dirs": [
+        "/Game/Stylized_Forest/Meshes/plants"
+      ],
+      "foliage-mi-dir": "/Game/Stylized_Forest/Materials/plants",
+      "fallback-ground-mi": "/Game/Stylized_Forest/Materials/plants/MI_grass_01_Inst",
+      "disable-mis": []
+    }
+  ]
+}

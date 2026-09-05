@@ -872,6 +872,71 @@ void AEnemyCharacter::SetDevourLocked(bool bLocked)
 	bDevourLocked = bLocked;
 }
 
+USkeletalMeshComponent* AEnemyCharacter::GetDevourPreviewMesh() const
+{
+	if (USkeletalMeshComponent* Skel = GetMesh())
+	{
+		if (Skel->GetSkeletalMeshAsset() && Skel->IsVisible())
+		{
+			return Skel;
+		}
+	}
+	USkeletalMeshComponent* Fallback = nullptr;
+	ForEachVisualMesh([&Fallback](UMeshComponent* MeshComp)
+	{
+		if (Fallback)
+		{
+			return;
+		}
+		if (USkeletalMeshComponent* Skel = Cast<USkeletalMeshComponent>(MeshComp))
+		{
+			if (Skel->GetSkeletalMeshAsset() && Skel->IsVisible())
+			{
+				Fallback = Skel;
+			}
+		}
+	});
+	return Fallback ? Fallback : GetMesh();
+}
+
+void AEnemyCharacter::FreezeForDevour()
+{
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->StopMovementImmediately();
+		Move->Velocity = FVector::ZeroVector;
+		Move->GravityScale = 0.f;
+		Move->SetMovementMode(MOVE_None);
+		Move->DisableMovement();
+	}
+}
+
+void AEnemyCharacter::RestoreFromDevour()
+{
+	if (UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Move->GravityScale = 1.f;
+		Move->SetDefaultMovementMode();
+	}
+}
+
+void AEnemyCharacter::SetMorphGameplayEnabled(bool bEnabled)
+{
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->StopMovementImmediately();
+		Movement->Velocity = FVector::ZeroVector;
+		if (bEnabled)
+		{
+			Movement->SetDefaultMovementMode();
+		}
+		else
+		{
+			Movement->DisableMovement();
+		}
+	}
+}
+
 void AEnemyCharacter::PlayHitFlash()
 {
 	if (bDeathSequence || DeathDissolveElapsed > 0.f)

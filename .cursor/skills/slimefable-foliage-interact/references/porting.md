@@ -31,7 +31,7 @@ Python：
 --disable-mis=/Game/.../MI_TreeLeaves
 ```
 
-脚本会：创建/复用 MPC + MF；把 MF 接到该 Master 的 World Position Offset（若找不到 `WPO_Fin` 会报错——对方图若没有这个 Named Reroute，先改 `wire_foliage_master` 去接现有 WPO 输入，或让 MF 的 `ExistingWPO` 接 0）。
+脚本会：创建/复用 MPC + MF（**已有 MF 不重建**，避免拆掉其它 Master 的 Call GUID）；把 MF 接到该 Master 的 World Position Offset（没有 `WPO_Fin` 时改接当前 WPO 输入）。每次还会重接 `wired-masters.json` 里已登记的 Master。只有改 HLSL 才加 `--rebuild-mf`，且重建后必须重接清单。
 
 3. 地被 MI 打开 `Enable Slime Interact?`；树/灌木走 `--disable-mis` 强制 False。
 4. `verify_slime_foliage_interact.py` 带同样的 `--material` / `--out-dir`。

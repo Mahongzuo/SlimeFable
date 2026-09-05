@@ -28,6 +28,7 @@
 #include "SlimeHealthComponent.h"
 #include "EnemyCharacter.h"
 #include "SlimeEnemyCharacter.h"
+#include "Combat/SlimeDevourTarget.h"
 #include "Components/Border.h"
 #include "Inventory/SlimeInventorySubsystem.h"
 #include "Inventory/SlimeItemDefinition.h"
@@ -889,6 +890,14 @@ namespace
 
 	FText ResolveLockOnDisplayName(AActor* Target)
 	{
+		if (const ISlimeDevourTarget* DevourTarget = SlimeDevourUtil::As(Target))
+		{
+			const FText Resolved = DevourTarget->GetResolvedDisplayName();
+			if (!Resolved.IsEmpty())
+			{
+				return Resolved;
+			}
+		}
 		if (const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Target))
 		{
 			return Enemy->GetResolvedDisplayName();

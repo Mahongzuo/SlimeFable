@@ -11,6 +11,7 @@
 #include "Slime/SlimeElementTypes.h"
 #include "SlimeLockTarget.h"
 #include "Slime/FoliageInteractVolume.h"
+#include "Combat/SlimeDevourTarget.h"
 #include "EnemyCharacter.generated.h"
 
 class UEnemyCombatComponent;
@@ -42,7 +43,7 @@ struct FInputActionValue;
 
 UCLASS(meta = (PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API AEnemyCharacter : public ACharacter, public ISlimeLockTarget, public ICombatDamageable,
-	public IFoliageInteractVolume
+	public IFoliageInteractVolume, public ISlimeDevourTarget
 {
 	GENERATED_BODY()
 
@@ -59,13 +60,13 @@ public:
 	virtual void FellOutOfWorld(const UDamageType& DmgType) override;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	USlimeHealthComponent* GetEnemyHealth() const { return Health; }
+	USlimeHealthComponent* GetEnemyHealth() const override { return Health; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	USlimeStatusComponent* GetEnemyStatus() const { return Status; }
+	USlimeStatusComponent* GetEnemyStatus() const override { return Status; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	UEnemyCombatComponent* GetEnemyCombat() const { return Combat; }
+	UEnemyCombatComponent* GetEnemyCombat() const override { return Combat; }
 
 	UFUNCTION(BlueprintPure, Category = "Combat|AI")
 	UAbilitySystemComponent* GetEnemyAbilitySystem() const { return AbilitySystem; }
@@ -100,7 +101,7 @@ public:
 	float GetPoisePercent() const;
 
 	UFUNCTION(BlueprintPure, Category = "Combat|AI")
-	float GetHealthPercent() const;
+	float GetHealthPercent() const override;
 
 	/** Called from UEnemyAttributeSet once GAS has resolved an attribute change. */
 	void OnGasDamageApplied(float Damage, AActor* DamageInstigator);
@@ -119,34 +120,46 @@ public:
 	const TArray<TObjectPtr<USceneComponent>>& GetGeneratedParts() const { return GeneratedParts; }
 
 	/** Every UMeshComponent on this actor except the placeholder cube (primary, GeneratedParts, BP extras, Groom). */
-	void ForEachVisualMesh(TFunctionRef<void(UMeshComponent*)> Fn) const;
+	void ForEachVisualMesh(TFunctionRef<void(UMeshComponent*)> Fn) const override;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	bool IsInDeathSequence() const { return bDeathSequence; }
+	bool IsInDeathSequence() const override { return bDeathSequence; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	bool IsPhantomInstance() const { return bPhantomInstance; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	bool IsDevouredDeath() const { return bDevouredDeath; }
+	bool IsDevouredDeath() const override { return bDevouredDeath; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	bool IsDevourLocked() const { return bDevourLocked; }
+	bool IsDevourLocked() const override { return bDevourLocked; }
 
-	void SetDevourLocked(bool bLocked);
+	void SetDevourLocked(bool bLocked) override;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	bool IsDevourableNow() const;
+	bool IsDevourableNow() const override;
+
+	virtual float GetDevourHealthThreshold() const override { return DevourHealthThreshold; }
+	virtual USkeletalMeshComponent* GetPrimarySkeletalMesh() const override { return GetMesh(); }
+	virtual USkeletalMeshComponent* GetDevourPreviewMesh() const override;
+	virtual UCapsuleComponent* GetDevourCapsule() const override { return GetCapsuleComponent(); }
+	virtual bool UsesMoverMovement() const override { return false; }
+	virtual void FreezeForDevour() override;
+	virtual void RestoreFromDevour() override;
+	virtual float GetHealthBarZOffset() const override { return HealthBarZOffset; }
+	virtual float GetMorphCameraArmLengthMin() const override { return MorphCameraArmLengthMin; }
+	virtual void SetMorphGameplayEnabled(bool bEnabled) override;
+	virtual TSubclassOf<APawn> GetDevourSpawnClass() const override { return GetClass(); }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	AActor* GetPhantomMaster() const { return PhantomMaster.Get(); }
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
-	void InitAsPhantom(float LifeSeconds, AActor* Master);
+	void InitAsPhantom(float LifeSeconds, AActor* Master) override;
 
 	/** True while this enemy is the player's morph body (possessed slime disguise). */
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	bool IsMorphTarget() const { return bMorphTarget; }
+	bool IsMorphTarget() const override { return bMorphTarget; }
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	AActor* GetMorphMaster() const { return MorphMaster.Get(); }
@@ -157,15 +170,15 @@ public:
 	 *  Call after SpawnActorDeferred and before FinishSpawning.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
-	virtual void InitAsMorphTarget(AActor* Master);
+	virtual void InitAsMorphTarget(AActor* Master) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
-	void BeginDevouredDeath(AActor* Devourer);
+	void BeginDevouredDeath(AActor* Devourer) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void BeginPhantomExpire();
 
-	FLinearColor ResolveDevourWheelTint() const;
+	FLinearColor ResolveDevourWheelTint() const override;
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void PlayHitFlash();
@@ -175,14 +188,14 @@ public:
 
 	/** Sustained elemental aura using the per-element overlay table (Lightning/Wind special MIs). */
 	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void PlayElementAuraFlash(ESlimeElement Element, float Duration);
+	void PlayElementAuraFlash(ESlimeElement Element, float Duration) override;
 
 	/** Sustained tint via M_EnemyHitFlash + HitColor (reaction residue / color-only callers). */
 	UFUNCTION(BlueprintCallable, Category = "Combat", meta = (DisplayName = "Play Element Aura Flash (Color)"))
-	void PlayElementAuraFlashByColor(FLinearColor FlashColor, float Duration);
+	void PlayElementAuraFlashByColor(FLinearColor FlashColor, float Duration) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
-	void ClearElementAuraFlash();
+	void ClearElementAuraFlash() override;
 
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -296,7 +309,7 @@ public:
 	FText DisplayName;
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	FText GetResolvedDisplayName() const;
+	FText GetResolvedDisplayName() const override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "-200.0", ClampMax = "800.0", Units = "cm",
 		ToolTip = "血条在网格顶上方的额外厘米。默认 12。网格用参考姿势包围盒，不跟动画抖。没网格时退回胶囊顶。"))
@@ -396,14 +409,14 @@ public:
 
 	/** World-space center of visible mesh parts (primary / MeshParts / placeholder). */
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	FVector GetVisualBoundsCenter() const;
+	FVector GetVisualBoundsCenter() const override;
 
 	/** Reference-pose mesh box in world space (no animation jitter). */
-	bool GetStableMeshBounds(FBox& OutBox) const;
+	bool GetStableMeshBounds(FBox& OutBox) const override;
 
 	/** Actor XY + cached mesh top Z. Ignores animation jitter; follows the capsule. */
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	FVector GetHudAnchorLocation() const;
+	FVector GetHudAnchorLocation() const override;
 
 	void RefreshWorldHealthBarVisibility(const APawn* Player, const AActor* LockedTarget);
 
@@ -411,10 +424,10 @@ public:
 	void RestoreToSpawn();
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
-	virtual bool UsesSingleNodeAnims() const { return false; }
+	virtual bool UsesSingleNodeAnims() const override { return false; }
 
 	void PlayMeshAnimation(UAnimationAsset* Asset, bool bLoop);
-	void StopMeshAnimation();
+	void StopMeshAnimation() override;
 
 	/** Morph locomotion: true after MorphJump until landed. */
 	bool IsMorphJumpAnimActive() const { return bMorphJumpAnimActive; }
@@ -425,7 +438,7 @@ public:
 
 	/** Recompute world health-bar Z from mesh bounds (call after morph possess / capsule fit). */
 	UFUNCTION(BlueprintCallable, Category = "Enemy|HUD")
-	void RefreshHealthBarAnchor();
+	void RefreshHealthBarAnchor() override;
 
 protected:
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;

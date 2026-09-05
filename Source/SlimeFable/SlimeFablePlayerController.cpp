@@ -118,6 +118,65 @@ void ASlimeFablePlayerController::SetupInputComponent()
 	}
 }
 
+void ASlimeFablePlayerController::SuspendGameplayMappingContexts()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (!Subsystem)
+	{
+		return;
+	}
+	for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+	{
+		if (CurrentContext)
+		{
+			Subsystem->RemoveMappingContext(CurrentContext);
+		}
+	}
+	for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+	{
+		if (CurrentContext)
+		{
+			Subsystem->RemoveMappingContext(CurrentContext);
+		}
+	}
+}
+
+void ASlimeFablePlayerController::RestoreGameplayMappingContexts()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (!Subsystem)
+	{
+		return;
+	}
+	for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+	{
+		if (CurrentContext)
+		{
+			Subsystem->AddMappingContext(CurrentContext, 0);
+		}
+	}
+	if (!ShouldUseTouchControls())
+	{
+		for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+		{
+			if (CurrentContext)
+			{
+				Subsystem->AddMappingContext(CurrentContext, 0);
+			}
+		}
+	}
+}
+
 bool ASlimeFablePlayerController::ShouldUseTouchControls() const
 {
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;

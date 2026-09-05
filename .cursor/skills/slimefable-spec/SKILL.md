@@ -30,9 +30,10 @@ description: >-
 | 音乐 / 音效 / BGM / SFX / ComfyUI 音频生成 | 读并遵循 `slimefable-audio` |
 | 幻形 / 吞噬变身 / 多槽材质丢失 / WorldGrid Face·Up·头发 | 读并遵循 `slimefable-morph-materials` |
 | 拨草 / 草 WPO 交互 / 接别的草 Master / 移植到其他工程 | 读并遵循 `slimefable-foliage-interact` |
+| 测新功能、复制 SlimeLab、功能沙盒图、掉到地下 | 读并遵循 `slimefable-feature-lab` |
 | 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
-手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`。
+手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`、`/slimefable-feature-lab`。
 
 ## 项目硬事实
 

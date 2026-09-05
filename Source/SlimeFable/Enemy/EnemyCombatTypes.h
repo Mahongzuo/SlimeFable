@@ -7,11 +7,18 @@
 #include "GameplayTagContainer.h"
 #include "EnemyCombatTypes.generated.h"
 
+class AActor;
+class UAnimationAsset;
 class UAnimMontage;
+class UCapsuleComponent;
 class UNiagaraSystem;
 class USkeletalMesh;
+class USkeletalMeshComponent;
+class USoundBase;
 class UStaticMesh;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
+class UMeshComponent;
 class UGameplayEffect;
 
 UENUM(BlueprintType)
@@ -246,5 +253,74 @@ namespace EnemyCombat
 	SLIMEFABLE_API FSlimeSkillDef ToSlimeHitSkill(const FEnemySkillDef& Def);
 	SLIMEFABLE_API void FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves);
 	SLIMEFABLE_API void FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves);
+	/** GASP / Mover enemies: melee-only kit (no Dash — CMC LaunchCharacter unavailable). */
+	SLIMEFABLE_API void FillDefaultGaspMoves(TArray<FEnemyMoveDef>& OutMoves);
+	/** Strip ragdoll / movement-mode notifies from our GASP combat montage copies. */
+	SLIMEFABLE_API void SanitizeGaspCombatMontage(UAnimMontage* Montage);
+	/** Load a hit-react montage, or wrap the Mannequin sequence as a dynamic montage. */
+	SLIMEFABLE_API UAnimMontage* LoadGaspHitReactMontage(const TSoftObjectPtr<UAnimMontage>& SoftMontage, const TCHAR* SequencePath);
+	/** 0 front, 1 back, 2 left, 3 right. */
+	SLIMEFABLE_API int32 ResolveGaspHitCardinal(const AActor* Actor, const FVector& HitLocation);
+	/** Official Interaction victim knockdown. Does not sanitize ragdoll notifies. */
+	SLIMEFABLE_API UAnimMontage* LoadGaspDeathKnockdownMontage(int32 Cardinal);
+	/** Montage source sequence when available so death can play without an AnimBP. */
+	SLIMEFABLE_API UAnimationAsset* LoadGaspDeathKnockdownAnim(int32 Cardinal);
+	/** Clear source AnimBP and play SingleNode death. Returns play length, or 0 if failed. */
+	SLIMEFABLE_API float PlayGaspDeathSingleNode(USkeletalMeshComponent* Mesh, UAnimationAsset* Anim);
+	/** Drop capsule physics and stop ragdoll so the death pose can leave the capsule. */
+	SLIMEFABLE_API void PrepareGaspDeathPhysics(
+		UCapsuleComponent* Capsule,
+		USkeletalMeshComponent* SourceMesh,
+		USkeletalMeshComponent* VisualMesh);
+	SLIMEFABLE_API void ApplyGaspDeathDissolveOverlay(UMeshComponent* Mesh, UMaterialInterface* Material, UMaterialInstanceDynamic*& OutMID);
+	SLIMEFABLE_API void SetGaspDeathDissolveAmount(UMaterialInstanceDynamic* MID, float Amount);
+	SLIMEFABLE_API UMaterialInterface* LoadDefaultHitFlashMaterial();
+	SLIMEFABLE_API UMaterialInterface* LoadDefaultLightningHitOverlay();
+	SLIMEFABLE_API UMaterialInterface* LoadDefaultWindHitOverlay();
+	SLIMEFABLE_API UMaterialInterface* ResolveGaspElementHitOverlay(
+		ESlimeElement Element,
+		UMaterialInterface* HitFlashFallback,
+		UMaterialInterface* LightningOverlay,
+		UMaterialInterface* WindOverlay);
+	SLIMEFABLE_API bool GaspElementOverlayUsesHitFlashParams(
+		ESlimeElement Element,
+		UMaterialInterface* FlashMat,
+		UMaterialInterface* HitFlashFallback);
+	SLIMEFABLE_API void DriveGaspOverlayIntensity(
+		UMaterialInstanceDynamic* MID,
+		bool bUsesHitFlashParams,
+		float Pulse,
+		float OpacityMul,
+		float HitTime);
+	/** Overlay only visible devour/visual meshes (Echo). Hidden UEFN source is skipped. */
+	SLIMEFABLE_API void ApplyGaspVisualOverlay(AActor* Actor, UMaterialInstanceDynamic* MID);
+	SLIMEFABLE_API void ClearGaspVisualOverlay(AActor* Actor);
+	/** @deprecated Use ApplyGaspVisualOverlay. */
+	SLIMEFABLE_API void ApplyGaspHitFlashOverlay(AActor* Actor, UMaterialInstanceDynamic* MID);
+	SLIMEFABLE_API void ClearGaspHitFlashOverlay(AActor* Actor);
+	SLIMEFABLE_API void PlayGaspSfxAt(
+		const UObject* WorldContext,
+		const TSoftObjectPtr<USoundBase>& Soft,
+		const TCHAR* FallbackPath,
+		const FVector& Location);
 	SLIMEFABLE_API FEnemySkillDef MakeDefaultMissileSkill();
+
+	inline const TCHAR* DefaultHitFlashPath = TEXT("/Game/_Slime/FX/M_EnemyHitFlash.M_EnemyHitFlash");
+	inline const TCHAR* DefaultLightningOverlayPath =
+		TEXT("/Game/NiagaraExamples/Materials/MI_Mesh_Overlay_TeslaCoil_Player.MI_Mesh_Overlay_TeslaCoil_Player");
+	inline const TCHAR* DefaultWindOverlayPath = TEXT("/Game/_Slime/FX/MI_EnemyHitOverlay_Wind.MI_EnemyHitOverlay_Wind");
+	inline const TCHAR* DefaultGaspAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_attack_01.sfx_attack_01");
+	inline const TCHAR* DefaultGaspHitTakenSound = TEXT("/Game/Audio/SFX/Combat/sfx_hit_01.sfx_hit_01");
+	inline const TCHAR* DefaultGaspAttackImpactSound = TEXT("/Game/Audio/SFX/Combat/sfx_hit_01.sfx_hit_01");
+
+	struct FGaspRagdollHitArgs
+	{
+		FVector HitLocation = FVector::ZeroVector;
+		FVector HitNormal = FVector::UpVector;
+		FVector Impulse = FVector::ZeroVector;
+	};
+
+	/** ProcessEvent official Sandbox ragdoll graphs (OnHit / UpdateImpactDirection / PlayRollingGetups). */
+	SLIMEFABLE_API bool CallGaspRagdollFunction(AActor* Actor, FName FunctionName, const FGaspRagdollHitArgs* Args = nullptr);
+	SLIMEFABLE_API void CallGaspRagdollOnHit(AActor* Actor, const FVector& HitLocation, const FVector& Impulse);
 }

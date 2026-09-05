@@ -106,6 +106,26 @@ void USlimeAbilityComponent::RegisterMappingContext()
 	}
 }
 
+void USlimeAbilityComponent::UnregisterMappingContext()
+{
+	if (!SlimeMappingContext)
+	{
+		return;
+	}
+	const APlayerController* PlayerController = GetOwningPlayerController();
+	if (!PlayerController)
+	{
+		return;
+	}
+	if (const ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+		{
+			Subsystem->RemoveMappingContext(SlimeMappingContext);
+		}
+	}
+}
+
 void USlimeAbilityComponent::BindInput(UEnhancedInputComponent* EnhancedInput)
 {
 	if (!EnhancedInput)

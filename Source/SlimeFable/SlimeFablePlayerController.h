@@ -52,6 +52,10 @@ public:
 	/** Retarget keyboard/mouse UI focus while keeping the current pause/modal stack. */
 	void RetargetUIFocus(UUserWidget* FocusWidget);
 
+	/** Temporarily remove DefaultMappingContexts so a morph pawn's IMC_Sandbox owns locomotion. */
+	void SuspendGameplayMappingContexts();
+	void RestoreGameplayMappingContexts();
+
 protected:
 
 	/** Input Mapping Contexts */

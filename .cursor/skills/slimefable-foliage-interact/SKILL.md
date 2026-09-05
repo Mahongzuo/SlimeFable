@@ -49,14 +49,20 @@ description: >-
 6. **StaticSwitch 默认 True**。没 override 的草 Master / 子 MI 否则只有风摇。树叶 MI 再强制 False。
 7. **`SetMaterialInstanceStaticSwitchParameterValue` 成功也返回 False**。写完必须回读 override。
 8. 体积优先 `IFoliageInteractVolume`（史莱姆膜、敌人死亡抑制）；否则骨骼 Bounds / 胶囊。组件**不要**再 include 项目角色类。
+9. **禁止拆共用 MF**。`MF_SlimeFoliageInteract` 被所有已接关卡共用。重建会换 FunctionInput GUID，其它关（如 0812）踩踏会断。脚本默认复用；只有改 HLSL 才加 `--rebuild-mf`，且重建后必须重接登记表里每一张 Master。
+10. **接新关植物必须带 `--foliage-mi-dir`**。漏传时不要用渔夫小屋 Foliage 目录去强制关 Switch。`--disable-mis` 只写本关要关掉的树叶 MI。
+
+已接线清单：[wired-masters.json](wired-masters.json)。每次跑 wire 都会把清单里的 Master 全部重接一遍，再把本次 `--material` 登记进去。
 
 ## 接到本仓库另一张草 Master
 
 无头（有 GUI 时加 `-nullrhi`）：
 
 ```powershell
-& "D:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "E:\UE\SlimeFable\SlimeFable.uproject" -ExecutePythonScript="E:/UE/SlimeFable/Content/Python/wire_slime_foliage_interact.py" -- --material=/Game/Your/M_Grass --ground-dirs=/Game/Your/Grass --disable-mis=/Game/Your/MI_Leaves -unattended -nop4 -nullrhi -nosound
+& "D:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "E:\UE\SlimeFable\SlimeFable.uproject" -ExecutePythonScript="E:/UE/SlimeFable/Content/Python/wire_slime_foliage_interact.py" -- --material=/Game/Your/M_Grass --ground-dirs=/Game/Your/Grass --foliage-mi-dir=/Game/Your/FoliageMIs --disable-mis=/Game/Your/MI_Leaves -unattended -nop4 -nullrhi -nosound
 ```
+
+不要加 `--rebuild-mf`。脚本会：复用 MF → 接新 Master → 重接 0812 / 森林等已登记关。只想重接已有关：不带 `--material` 直接跑。校验两边：`--verify-both`。
 
 再跑 `verify_slime_foliage_interact.py`，同样带 `--material` / `--out-dir`。
 

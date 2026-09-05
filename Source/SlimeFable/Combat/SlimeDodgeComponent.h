@@ -76,7 +76,7 @@ public:
 protected:
 	void PollRightMouse();
 	void TryHandleRightClick();
-	void PerformCombatRoll();
+	void PerformCombatRoll(bool bSpawnRollAfterimage = true);
 	void PerformPerfectDodge();
 	void SpawnAfterimage();
 	FVector ResolveRollDirection() const;

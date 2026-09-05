@@ -27,6 +27,7 @@
 #include "EnemyAllyAIController.h"
 #include "EnemyCharacter.h"
 #include "EnemyCombatComponent.h"
+#include "SlimeDevourTarget.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -190,37 +191,43 @@ float USlimeDevourComponent::GetBlobRadius() const
 	return Body->SolverParams.RestRadius * FMath::Max(Body->GetAppliedBodyScale(), Body->GetBodyScale());
 }
 
-bool USlimeDevourComponent::CanDevourTarget(const AEnemyCharacter* Enemy) const
+bool USlimeDevourComponent::CanDevourTarget(const APawn* Enemy) const
 {
-	if (!Enemy)
+	const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy);
+	if (!Target)
 	{
 		return false;
 	}
-	if (!Enemy->IsDevourableNow())
+	if (!Target->IsDevourableNow())
 	{
 		return false;
 	}
-	const USlimeHealthComponent* Health = Enemy->GetEnemyHealth();
-	const float Threshold = Enemy->DevourHealthThreshold > KINDA_SMALL_NUMBER
-		? Enemy->DevourHealthThreshold
+	const USlimeHealthComponent* Health = Target->GetEnemyHealth();
+	const float Threshold = Target->GetDevourHealthThreshold() > KINDA_SMALL_NUMBER
+		? Target->GetDevourHealthThreshold()
 		: DevourHealthThreshold;
-	if (!Health || !Health->IsAlive() || Health->GetHealthPercent() > Threshold)
+	if (!Health || Health->MaxHP < 1.f || !Health->IsAlive())
+	{
+		return false;
+	}
+	if (Health->GetHealthPercent() > Threshold + KINDA_SMALL_NUMBER)
 	{
 		return false;
 	}
 	return true;
 }
 
-bool USlimeDevourComponent::IsTargetStillValid(const AEnemyCharacter* Enemy) const
+bool USlimeDevourComponent::IsTargetStillValid(const APawn* Enemy) const
 {
-	if (!IsValid(Enemy) || Enemy->IsInDeathSequence())
+	const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy);
+	if (!IsValid(Enemy) || !Target || Target->IsInDeathSequence())
 	{
 		return false;
 	}
 	return CanDevourTarget(Enemy);
 }
 
-AEnemyCharacter* USlimeDevourComponent::FindBestDevourTarget() const
+APawn* USlimeDevourComponent::FindBestDevourTarget() const
 {
 	APawn* Pawn = Cast<APawn>(GetOwner());
 	UWorld* World = GetWorld();
@@ -247,7 +254,7 @@ AEnemyCharacter* USlimeDevourComponent::FindBestDevourTarget() const
 
 	if (Phase == ESlimeDevourPhase::Charging)
 	{
-		if (AEnemyCharacter* Current = DevourTarget.Get())
+		if (APawn* Current = DevourTarget.Get())
 		{
 			if (IsTargetStillValid(Current))
 			{
@@ -258,11 +265,11 @@ AEnemyCharacter* USlimeDevourComponent::FindBestDevourTarget() const
 
 	const FVector Loc = Pawn->GetActorLocation();
 	const float RadiusSq = FMath::Square(DevourRadius);
-	AEnemyCharacter* Best = nullptr;
+	APawn* Best = nullptr;
 	float BestDistSq = RadiusSq;
-	for (TActorIterator<AEnemyCharacter> It(World); It; ++It)
+	for (TActorIterator<APawn> It(World); It; ++It)
 	{
-		AEnemyCharacter* Enemy = *It;
+		APawn* Enemy = *It;
 		if (!CanDevourTarget(Enemy))
 		{
 			continue;
@@ -282,7 +289,7 @@ bool USlimeDevourComponent::TryDevourFocused()
 	return BeginHold(FindBestDevourTarget());
 }
 
-bool USlimeDevourComponent::BeginHold(AEnemyCharacter* Enemy)
+bool USlimeDevourComponent::BeginHold(APawn* Enemy)
 {
 	if (!CanStartDevour() || !CanDevourTarget(Enemy) || !Body)
 	{
@@ -339,11 +346,13 @@ bool USlimeDevourComponent::ReleaseHold()
 		return false;
 	}
 
-	AEnemyCharacter* Target = DevourTarget.Get();
+	APawn* Target = DevourTarget.Get();
+	const float Dist = GetOwner()
+		? FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation())
+		: TNumericLimits<float>::Max();
 	const bool bCloseRange = PhaseElapsed < HoldSeconds
 		&& IsTargetStillValid(Target)
-		&& GetOwner()
-		&& FVector::Dist(GetOwner()->GetActorLocation(), Target->GetActorLocation()) < CloseRangeRadius;
+		&& Dist < DevourRadius;
 	if (bCloseRange)
 	{
 		BeginCloseRange(Target);
@@ -354,7 +363,7 @@ bool USlimeDevourComponent::ReleaseHold()
 	return false;
 }
 
-bool USlimeDevourComponent::TryStartDevour(AEnemyCharacter* Enemy)
+bool USlimeDevourComponent::TryStartDevour(APawn* Enemy)
 {
 	if (!CanStartDevour() || !CanDevourTarget(Enemy) || !Body)
 	{
@@ -364,7 +373,7 @@ bool USlimeDevourComponent::TryStartDevour(AEnemyCharacter* Enemy)
 	return DevourTarget.IsValid();
 }
 
-bool USlimeDevourComponent::PrepareDevourTarget(AEnemyCharacter* Enemy)
+bool USlimeDevourComponent::PrepareDevourTarget(APawn* Enemy)
 {
 	if (!Enemy || !Body || !CanDevourTarget(Enemy))
 	{
@@ -415,7 +424,7 @@ bool USlimeDevourComponent::PrepareDevourTarget(AEnemyCharacter* Enemy)
 	return true;
 }
 
-void USlimeDevourComponent::BeginCloseRange(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::BeginCloseRange(APawn* Enemy)
 {
 	if (!PrepareDevourTarget(Enemy))
 	{
@@ -483,7 +492,47 @@ void USlimeDevourComponent::SetOwnerMovementFrozen(bool bFrozen)
 	}
 }
 
-void USlimeDevourComponent::BeginCloseRangeDash(AEnemyCharacter* Enemy)
+FVector USlimeDevourComponent::ClampCloseRangeDashLocation(const FVector& Desired) const
+{
+	AActor* Owner = GetOwner();
+	UWorld* World = Owner ? Owner->GetWorld() : nullptr;
+	if (!World)
+	{
+		return Desired;
+	}
+
+	float HalfH = 40.f;
+	if (ACharacter* Char = Cast<ACharacter>(Owner))
+	{
+		if (UCapsuleComponent* Cap = Char->GetCapsuleComponent())
+		{
+			HalfH = Cap->GetScaledCapsuleHalfHeight();
+		}
+	}
+
+	FHitResult Hit;
+	const float TraceZ = FMath::Max(Desired.Z, Owner->GetActorLocation().Z);
+	const FVector TraceStart = FVector(Desired.X, Desired.Y, TraceZ + 200.f);
+	const FVector TraceEnd = FVector(Desired.X, Desired.Y, TraceZ - 2000.f);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DevourDashClamp), false, Owner);
+	if (APawn* Target = DevourTarget.Get())
+	{
+		Params.AddIgnoredActor(Target);
+	}
+	if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, Params))
+	{
+		const float MinZ = Hit.ImpactPoint.Z + HalfH + 8.f;
+		if (Desired.Z < MinZ)
+		{
+			FVector Clamped = Desired;
+			Clamped.Z = MinZ;
+			return Clamped;
+		}
+	}
+	return Desired;
+}
+
+void USlimeDevourComponent::BeginCloseRangeDash(APawn* Enemy)
 {
 	AActor* Owner = GetOwner();
 	if (!Owner || !Enemy)
@@ -494,7 +543,7 @@ void USlimeDevourComponent::BeginCloseRangeDash(AEnemyCharacter* Enemy)
 	SetOwnerMovementFrozen(true);
 	CloseRangeDashStart = Owner->GetActorLocation();
 	const FVector BlobOffset = Owner->GetActorLocation() - GetBlobCenter();
-	CloseRangeDashEnd = GetWrapCenter(Enemy) + BlobOffset;
+	CloseRangeDashEnd = ClampCloseRangeDashLocation(GetWrapCenter(Enemy) + BlobOffset);
 	SetCloseRangeCameraLag(true);
 	EnterPhase(ESlimeDevourPhase::CloseRangeDash);
 }
@@ -503,7 +552,7 @@ void USlimeDevourComponent::TickCloseRangeDash(float DeltaTime)
 {
 	(void)DeltaTime;
 	AActor* Owner = GetOwner();
-	AEnemyCharacter* Target = DevourTarget.Get();
+	APawn* Target = DevourTarget.Get();
 	if (!Owner || !Target)
 	{
 		AbortDevour(true);
@@ -513,7 +562,7 @@ void USlimeDevourComponent::TickCloseRangeDash(float DeltaTime)
 	SetOwnerMovementFrozen(true);
 	// Align visual blob center onto enemy mesh wrap center (not ActorLocation).
 	const FVector BlobOffset = Owner->GetActorLocation() - GetBlobCenter();
-	CloseRangeDashEnd = GetWrapCenter(Target) + BlobOffset;
+	CloseRangeDashEnd = ClampCloseRangeDashLocation(GetWrapCenter(Target) + BlobOffset);
 	const float Duration = FMath::Max(CloseRangeDashSeconds, 0.05f);
 	const float Alpha = FMath::Clamp(PhaseElapsed / Duration, 0.f, 1.f);
 	const float Smooth = Alpha * Alpha * (3.f - 2.f * Alpha);
@@ -529,7 +578,7 @@ void USlimeDevourComponent::TickCloseRangeDash(float DeltaTime)
 	}
 }
 
-void USlimeDevourComponent::SetEnemyWrapCenter(AEnemyCharacter* Enemy, const FVector& DesiredWrapCenter) const
+void USlimeDevourComponent::SetEnemyWrapCenter(APawn* Enemy, const FVector& DesiredWrapCenter) const
 {
 	if (!Enemy)
 	{
@@ -539,29 +588,51 @@ void USlimeDevourComponent::SetEnemyWrapCenter(AEnemyCharacter* Enemy, const FVe
 	const FVector ActorLoc = Enemy->GetActorLocation();
 	const FVector Offset = CurrentWrap - ActorLoc;
 	Enemy->SetActorLocation(DesiredWrapCenter - Offset, false, nullptr, ETeleportType::TeleportPhysics);
-	if (UCharacterMovementComponent* Move = Enemy->GetCharacterMovement())
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
 	{
-		Move->Velocity = FVector::ZeroVector;
-		Move->GravityScale = 0.f;
-		Move->SetMovementMode(MOVE_None);
+		if (Target->UsesMoverMovement())
+		{
+			Target->FreezeForDevour();
+			return;
+		}
+	}
+	if (ACharacter* Character = Cast<ACharacter>(Enemy))
+	{
+		if (UCharacterMovementComponent* Move = Character->GetCharacterMovement())
+		{
+			Move->Velocity = FVector::ZeroVector;
+			Move->GravityScale = 0.f;
+			Move->SetMovementMode(MOVE_None);
+		}
 	}
 }
 
-FVector USlimeDevourComponent::GetWrapCenter(const AEnemyCharacter* Enemy) const
+FVector USlimeDevourComponent::GetWrapCenter(const APawn* Enemy) const
 {
 	if (!Enemy)
 	{
 		return FVector::ZeroVector;
+	}
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
+	{
+		if (Target->UsesMoverMovement())
+		{
+			return Target->GetVisualBoundsCenter();
+		}
 	}
 	FBox MeshBox;
 	if (GetEnemyMeshBox(Enemy, MeshBox))
 	{
 		return MeshBox.GetCenter();
 	}
-	return Enemy->GetVisualBoundsCenter();
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
+	{
+		return Target->GetVisualBoundsCenter();
+	}
+	return Enemy->GetActorLocation();
 }
 
-bool USlimeDevourComponent::IsCloseRangeWrapped(const AEnemyCharacter* Enemy) const
+bool USlimeDevourComponent::IsCloseRangeWrapped(const APawn* Enemy) const
 {
 	if (!Body || !Enemy || CloseRangeShotId == 0)
 	{
@@ -572,7 +643,7 @@ bool USlimeDevourComponent::IsCloseRangeWrapped(const AEnemyCharacter* Enemy) co
 	return FVector::DistSquared(ShotCenter, GetWrapCenter(Enemy)) <= FMath::Square(Arrive);
 }
 
-bool USlimeDevourComponent::LaunchCloseRangeWrapper(AEnemyCharacter* Enemy)
+bool USlimeDevourComponent::LaunchCloseRangeWrapper(APawn* Enemy)
 {
 	if (!Body || !Enemy)
 	{
@@ -610,7 +681,7 @@ void USlimeDevourComponent::EnterPhase(ESlimeDevourPhase NewPhase)
 	}
 }
 
-void USlimeDevourComponent::FaceTarget(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::FaceTarget(APawn* Enemy)
 {
 	AActor* Owner = GetOwner();
 	if (!Owner || !Enemy)
@@ -630,7 +701,7 @@ void USlimeDevourComponent::FaceTarget(AEnemyCharacter* Enemy)
 
 void USlimeDevourComponent::TickPhase(float DeltaTime)
 {
-	AEnemyCharacter* Target = DevourTarget.Get();
+	APawn* Target = DevourTarget.Get();
 
 	if (Phase == ESlimeDevourPhase::Charging
 		|| Phase == ESlimeDevourPhase::CloseRangeShrink
@@ -699,6 +770,9 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 		break;
 	case ESlimeDevourPhase::CloseRangeShrink:
 		{
+			const float HoverZ = GetBlobRadius() * 0.35f;
+			const FVector Hover = EnemyStartXform.GetLocation() + FVector(0.f, 0.f, HoverZ);
+			Target->SetActorLocation(Hover, false, nullptr, ETeleportType::TeleportPhysics);
 			const float Alpha = FMath::Clamp(PhaseElapsed / FMath::Max(CloseRangeShrinkSeconds, 0.01f), 0.f, 1.f);
 			ApplyEnemyShrink(Target, Alpha);
 			if (PhaseElapsed >= CloseRangeShrinkSeconds)
@@ -760,7 +834,7 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 	}
 }
 
-void USlimeDevourComponent::BeginLatch(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::BeginLatch(APawn* Enemy)
 {
 	if (!PrepareDevourTarget(Enemy))
 	{
@@ -776,7 +850,7 @@ void USlimeDevourComponent::BeginLatch(AEnemyCharacter* Enemy)
 	EnterPhase(ESlimeDevourPhase::Shrink);
 }
 
-void USlimeDevourComponent::TryLaunchNextLatchShot(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::TryLaunchNextLatchShot(APawn* Enemy)
 {
 	const int32 ShotCount = GetActiveLatchShotCount();
 	if (!Body || !Enemy || LatchLaunchIndex >= ShotCount)
@@ -809,7 +883,7 @@ void USlimeDevourComponent::TryLaunchNextLatchShot(AEnemyCharacter* Enemy)
 	}
 }
 
-void USlimeDevourComponent::TickLatch(AEnemyCharacter* Enemy, float DeltaTime)
+void USlimeDevourComponent::TickLatch(APawn* Enemy, float DeltaTime)
 {
 	(void)DeltaTime;
 	if (!Enemy)
@@ -849,12 +923,34 @@ float USlimeDevourComponent::GetLatchMiniRadius() const
 	return GetBlobRadius() * FMath::Pow(Fraction, 1.f / 3.f);
 }
 
-bool USlimeDevourComponent::GetEnemyMeshBox(const AEnemyCharacter* Enemy, FBox& OutBox) const
+bool USlimeDevourComponent::GetEnemyMeshBox(const APawn* Enemy, FBox& OutBox) const
 {
 	OutBox = FBox(ForceInit);
 	if (!Enemy)
 	{
 		return false;
+	}
+
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(const_cast<APawn*>(Enemy)))
+	{
+		if (Target->UsesMoverMovement())
+		{
+			if (USkeletalMeshComponent* Preview = Target->GetDevourPreviewMesh())
+			{
+				if (Preview->GetSkeletalMeshAsset() != nullptr && !Preview->bHiddenInGame)
+				{
+					OutBox = Preview->Bounds.GetBox();
+					return true;
+				}
+			}
+			FBox Stable;
+			if (Target->GetStableMeshBounds(Stable))
+			{
+				OutBox = Stable;
+				return true;
+			}
+			return false;
+		}
 	}
 
 	bool bAny = false;
@@ -868,20 +964,26 @@ bool USlimeDevourComponent::GetEnemyMeshBox(const AEnemyCharacter* Enemy, FBox& 
 		bAny = true;
 	};
 
-	if (USkeletalMeshComponent* Skel = Enemy->GetMesh())
+	if (USkeletalMeshComponent* Preview = SlimeDevourUtil::GetPreviewMesh(Enemy))
+	{
+		if (Preview->GetSkeletalMeshAsset() != nullptr)
+		{
+			Accumulate(Preview);
+		}
+	}
+	if (USkeletalMeshComponent* Skel = SlimeDevourUtil::GetPrimaryMesh(Enemy))
 	{
 		if (Skel->GetSkeletalMeshAsset() != nullptr)
 		{
 			Accumulate(Skel);
 		}
 	}
-	for (const TObjectPtr<USceneComponent>& Part : Enemy->GetGeneratedParts())
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(const_cast<APawn*>(Enemy)))
 	{
-		Accumulate(Cast<UPrimitiveComponent>(Part.Get()));
-	}
-	if (Enemy->GetPlaceholderMesh())
-	{
-		Accumulate(Enemy->GetPlaceholderMesh());
+		Target->ForEachVisualMesh([&](UMeshComponent* MeshComp)
+		{
+			Accumulate(Cast<UPrimitiveComponent>(MeshComp));
+		});
 	}
 	return bAny;
 }
@@ -907,7 +1009,7 @@ bool USlimeDevourComponent::TryGetLatchBoneLocation(const USkeletalMeshComponent
 	return false;
 }
 
-FVector USlimeDevourComponent::MakeLatchPointFromAnchor(const AEnemyCharacter* Enemy, const FVector& Anchor, const FVector& Axis, float MiniRadius) const
+FVector USlimeDevourComponent::MakeLatchPointFromAnchor(const APawn* Enemy, const FVector& Anchor, const FVector& Axis, float MiniRadius) const
 {
 	const FVector Dir = Axis.GetSafeNormal();
 	const float StickOffset = MiniRadius * FMath::Clamp(LatchStickOffsetFraction, 0.05f, 1.f);
@@ -956,18 +1058,20 @@ FVector USlimeDevourComponent::MakeLatchPointFromAnchor(const AEnemyCharacter* E
 		}
 	};
 
-	if (USkeletalMeshComponent* Skel = Enemy->GetMesh())
+	if (USkeletalMeshComponent* Skel = SlimeDevourUtil::GetPrimaryMesh(Enemy))
 	{
 		if (Skel->GetSkeletalMeshAsset())
 		{
 			TraceComp(Skel);
 		}
 	}
-	for (const TObjectPtr<USceneComponent>& Part : Enemy->GetGeneratedParts())
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(const_cast<APawn*>(Enemy)))
 	{
-		TraceComp(Cast<UPrimitiveComponent>(Part.Get()));
+		Target->ForEachVisualMesh([&](UMeshComponent* MeshComp)
+		{
+			TraceComp(Cast<UPrimitiveComponent>(MeshComp));
+		});
 	}
-	TraceComp(Enemy->GetPlaceholderMesh());
 
 	if (!bHit)
 	{
@@ -982,7 +1086,7 @@ FVector USlimeDevourComponent::MakeLatchPointFromAnchor(const AEnemyCharacter* E
 	return Best.ImpactPoint + Normal.GetSafeNormal() * StickOffset;
 }
 
-FVector USlimeDevourComponent::TraceMeshAttachPoint(const AEnemyCharacter* Enemy, const FVector& Center, const FVector& Axis, float ExtentAlong, float MiniRadius) const
+FVector USlimeDevourComponent::TraceMeshAttachPoint(const APawn* Enemy, const FVector& Center, const FVector& Axis, float ExtentAlong, float MiniRadius) const
 {
 	const FVector Dir = Axis.GetSafeNormal();
 	const float StickOffset = MiniRadius * FMath::Clamp(LatchStickOffsetFraction, 0.05f, 1.f);
@@ -1030,18 +1134,20 @@ FVector USlimeDevourComponent::TraceMeshAttachPoint(const AEnemyCharacter* Enemy
 		}
 	};
 
-	if (USkeletalMeshComponent* Skel = Enemy->GetMesh())
+	if (USkeletalMeshComponent* Skel = SlimeDevourUtil::GetPrimaryMesh(Enemy))
 	{
 		if (Skel->GetSkeletalMeshAsset())
 		{
 			TraceComp(Skel);
 		}
 	}
-	for (const TObjectPtr<USceneComponent>& Part : Enemy->GetGeneratedParts())
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(const_cast<APawn*>(Enemy)))
 	{
-		TraceComp(Cast<UPrimitiveComponent>(Part.Get()));
+		Target->ForEachVisualMesh([&](UMeshComponent* MeshComp)
+		{
+			TraceComp(Cast<UPrimitiveComponent>(MeshComp));
+		});
 	}
-	TraceComp(Enemy->GetPlaceholderMesh());
 
 	if (!bHit)
 	{
@@ -1056,7 +1162,7 @@ FVector USlimeDevourComponent::TraceMeshAttachPoint(const AEnemyCharacter* Enemy
 	return Best.ImpactPoint + Normal.GetSafeNormal() * StickOffset;
 }
 
-void USlimeDevourComponent::GetLatchAttachPoints(const AEnemyCharacter* Enemy, TArray<FVector>& OutPoints) const
+void USlimeDevourComponent::GetLatchAttachPoints(const APawn* Enemy, TArray<FVector>& OutPoints) const
 {
 	OutPoints.Reset();
 	if (!Enemy)
@@ -1087,7 +1193,7 @@ void USlimeDevourComponent::GetLatchAttachPoints(const AEnemyCharacter* Enemy, T
 		TEXT("shoulder_r"), TEXT("RightArm"), TEXT("upperarm_r_twist")
 	};
 
-	USkeletalMeshComponent* Skel = Enemy->GetMesh();
+	USkeletalMeshComponent* Skel = SlimeDevourUtil::GetPrimaryMesh(Enemy);
 	FVector HeadAnchor = FVector::ZeroVector;
 	FVector LeftAnchor = FVector::ZeroVector;
 	FVector RightAnchor = FVector::ZeroVector;
@@ -1103,7 +1209,11 @@ void USlimeDevourComponent::GetLatchAttachPoints(const AEnemyCharacter* Enemy, T
 	}
 
 	FBox MeshBox;
-	FVector Center = Enemy->GetVisualBoundsCenter();
+	FVector Center = Enemy->GetActorLocation();
+	if (const ISlimeDevourTarget* BoundsTarget = SlimeDevourUtil::As(Enemy))
+	{
+		Center = BoundsTarget->GetVisualBoundsCenter();
+	}
 	FVector Extent(40.f, 40.f, 40.f);
 	if (GetEnemyMeshBox(Enemy, MeshBox))
 	{
@@ -1119,7 +1229,7 @@ void USlimeDevourComponent::GetLatchAttachPoints(const AEnemyCharacter* Enemy, T
 	OutPoints.Add(TraceMeshAttachPoint(Enemy, Center, Right, Along(Right), MiniR));
 }
 
-void USlimeDevourComponent::UpdateLatchTargets(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::UpdateLatchTargets(APawn* Enemy)
 {
 	if (!Body || !Enemy || LatchShotIds.Num() == 0)
 	{
@@ -1171,7 +1281,7 @@ int32 USlimeDevourComponent::GetActiveLatchShotCount() const
 	return FMath::Clamp(LatchShotCount, 1, 3);
 }
 
-void USlimeDevourComponent::BeginRetract(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::BeginRetract(APawn* Enemy)
 {
 	if (!Enemy)
 	{
@@ -1206,7 +1316,7 @@ void USlimeDevourComponent::BeginRetract(AEnemyCharacter* Enemy)
 void USlimeDevourComponent::TickRetract(float DeltaTime)
 {
 	(void)DeltaTime;
-	AEnemyCharacter* Target = DevourTarget.Get();
+	APawn* Target = DevourTarget.Get();
 	if (!Target)
 	{
 		AbortDevour(true);
@@ -1234,7 +1344,7 @@ void USlimeDevourComponent::TickRetract(float DeltaTime)
 	}
 }
 
-void USlimeDevourComponent::ApplyEnemyShrink(AEnemyCharacter* Enemy, float Alpha) const
+void USlimeDevourComponent::ApplyEnemyShrink(APawn* Enemy, float Alpha) const
 {
 	if (!Enemy)
 	{
@@ -1247,7 +1357,7 @@ void USlimeDevourComponent::ApplyEnemyShrink(AEnemyCharacter* Enemy, float Alpha
 
 void USlimeDevourComponent::SwallowTarget()
 {
-	AEnemyCharacter* Target = DevourTarget.Get();
+	APawn* Target = DevourTarget.Get();
 	if (!IsValid(Target))
 	{
 		AbortDevour(true);
@@ -1258,13 +1368,15 @@ void USlimeDevourComponent::SwallowTarget()
 	PushPhantomSlot(ActiveCapture);
 	SpawnInnerMesh(ActiveCapture);
 
-	Target->ClearElementAuraFlash();
-	if (USlimeStatusComponent* EnemyStatus = Target->GetEnemyStatus())
+	if (ISlimeDevourTarget* DevourIface = SlimeDevourUtil::As(Target))
 	{
-		EnemyStatus->ClearAllAuras();
+		DevourIface->ClearElementAuraFlash();
+		if (USlimeStatusComponent* EnemyStatus = DevourIface->GetEnemyStatus())
+		{
+			EnemyStatus->ClearAllAuras();
+		}
+		DevourIface->BeginDevouredDeath(GetOwner());
 	}
-
-	Target->BeginDevouredDeath(GetOwner());
 	PendingDestroyEnemy.Reset();
 	DevourTarget.Reset();
 	bSavedEnemyGravity = false;
@@ -1297,7 +1409,7 @@ void USlimeDevourComponent::CleanupLatchShots()
 	}
 }
 
-void USlimeDevourComponent::FreezeDevourTarget(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::FreezeDevourTarget(APawn* Enemy)
 {
 	if (!Enemy)
 	{
@@ -1305,13 +1417,17 @@ void USlimeDevourComponent::FreezeDevourTarget(AEnemyCharacter* Enemy)
 	}
 	EnemyStartXform = Enemy->GetActorTransform();
 	EnemyStartScale = Enemy->GetActorScale3D();
-	Enemy->SetDevourLocked(true);
-	if (UEnemyCombatComponent* EnemyCombatComp = Enemy->GetEnemyCombat())
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
 	{
-		EnemyCombatComp->InterruptCombat();
+		Target->SetDevourLocked(true);
+		if (UEnemyCombatComponent* EnemyCombatComp = Target->GetEnemyCombat())
+		{
+			EnemyCombatComp->InterruptCombat();
+		}
+		Target->StopMeshAnimation();
+		Target->FreezeForDevour();
 	}
-	Enemy->StopMeshAnimation();
-	if (USkeletalMeshComponent* Skel = Enemy->GetMesh())
+	if (USkeletalMeshComponent* Skel = SlimeDevourUtil::GetPrimaryMesh(Enemy))
 	{
 		if (UAnimInstance* Anim = Skel->GetAnimInstance())
 		{
@@ -1321,18 +1437,21 @@ void USlimeDevourComponent::FreezeDevourTarget(AEnemyCharacter* Enemy)
 	}
 	HideEnemyWidgets(Enemy, true);
 	Enemy->SetActorEnableCollision(false);
-	if (UCharacterMovementComponent* Move = Enemy->GetCharacterMovement())
+	if (ACharacter* Character = Cast<ACharacter>(Enemy))
 	{
-		if (!bSavedEnemyGravity)
+		if (UCharacterMovementComponent* Move = Character->GetCharacterMovement())
 		{
-			SavedEnemyGravityScale = Move->GravityScale;
-			bSavedEnemyGravity = true;
+			if (!bSavedEnemyGravity)
+			{
+				SavedEnemyGravityScale = Move->GravityScale;
+				bSavedEnemyGravity = true;
+			}
+			Move->StopMovementImmediately();
+			Move->Velocity = FVector::ZeroVector;
+			Move->GravityScale = 0.f;
+			Move->SetMovementMode(MOVE_None);
+			Move->DisableMovement();
 		}
-		Move->StopMovementImmediately();
-		Move->Velocity = FVector::ZeroVector;
-		Move->GravityScale = 0.f;
-		Move->SetMovementMode(MOVE_None);
-		Move->DisableMovement();
 	}
 	if (AController* AI = Enemy->GetController())
 	{
@@ -1348,9 +1467,10 @@ void USlimeDevourComponent::FreezeDevourTarget(AEnemyCharacter* Enemy)
 	}
 }
 
-void USlimeDevourComponent::RestoreDevourTarget(AEnemyCharacter* Enemy)
+void USlimeDevourComponent::RestoreDevourTarget(APawn* Enemy)
 {
-	if (!IsValid(Enemy) || Enemy->IsDevouredDeath() || Enemy->IsInDeathSequence())
+	ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy);
+	if (!IsValid(Enemy) || (Target && Target->IsInDeathSequence()))
 	{
 		return;
 	}
@@ -1358,16 +1478,23 @@ void USlimeDevourComponent::RestoreDevourTarget(AEnemyCharacter* Enemy)
 	Enemy->SetActorScale3D(EnemyStartScale);
 	Enemy->SetActorHiddenInGame(false);
 	Enemy->SetActorEnableCollision(true);
-	Enemy->SetDevourLocked(false);
-	HideEnemyWidgets(Enemy, false);
-	if (UCharacterMovementComponent* Move = Enemy->GetCharacterMovement())
+	if (Target)
 	{
-		if (bSavedEnemyGravity)
+		Target->SetDevourLocked(false);
+		Target->RestoreFromDevour();
+	}
+	HideEnemyWidgets(Enemy, false);
+	if (ACharacter* Character = Cast<ACharacter>(Enemy))
+	{
+		if (UCharacterMovementComponent* Move = Character->GetCharacterMovement())
 		{
-			Move->GravityScale = SavedEnemyGravityScale;
-			bSavedEnemyGravity = false;
+			if (bSavedEnemyGravity)
+			{
+				Move->GravityScale = SavedEnemyGravityScale;
+				bSavedEnemyGravity = false;
+			}
+			Move->SetDefaultMovementMode();
 		}
-		Move->SetDefaultMovementMode();
 	}
 	if (AController* AI = Enemy->GetController())
 	{
@@ -1386,7 +1513,7 @@ void USlimeDevourComponent::ClearOwnerLockOn() const
 	}
 }
 
-void USlimeDevourComponent::HideEnemyWidgets(AEnemyCharacter* Enemy, bool bHide) const
+void USlimeDevourComponent::HideEnemyWidgets(APawn* Enemy, bool bHide) const
 {
 	if (!Enemy)
 	{
@@ -1404,7 +1531,7 @@ void USlimeDevourComponent::HideEnemyWidgets(AEnemyCharacter* Enemy, bool bHide)
 	}
 }
 
-void USlimeDevourComponent::CaptureEnemy(AEnemyCharacter* Enemy, FSlimeDevourCapture& OutCapture) const
+void USlimeDevourComponent::CaptureEnemy(APawn* Enemy, FSlimeDevourCapture& OutCapture) const
 {
 	OutCapture = FSlimeDevourCapture();
 	if (!Enemy)
@@ -1412,9 +1539,12 @@ void USlimeDevourComponent::CaptureEnemy(AEnemyCharacter* Enemy, FSlimeDevourCap
 		return;
 	}
 	OutCapture.EnemyClass = Enemy->GetClass();
-	OutCapture.DisplayName = Enemy->GetResolvedDisplayName();
 	OutCapture.CaptureWorldXform = Enemy->GetActorTransform();
-	OutCapture.WheelTint = Enemy->ResolveDevourWheelTint();
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
+	{
+		OutCapture.DisplayName = Target->GetResolvedDisplayName();
+		OutCapture.WheelTint = Target->ResolveDevourWheelTint();
+	}
 
 	auto FillBounds = [&OutCapture](UMeshComponent* Comp)
 	{
@@ -1428,7 +1558,7 @@ void USlimeDevourComponent::CaptureEnemy(AEnemyCharacter* Enemy, FSlimeDevourCap
 		OutCapture.CaptureWorldXform = Comp->GetComponentTransform();
 	};
 
-	USkeletalMeshComponent* Skel = Enemy->GetMesh();
+	USkeletalMeshComponent* Skel = SlimeDevourUtil::GetPreviewMesh(Enemy);
 	if (Skel && Skel->GetSkeletalMeshAsset() && Skel->IsVisible())
 	{
 		BuildCaptureFromMesh(Skel, nullptr, OutCapture);
@@ -1444,30 +1574,30 @@ void USlimeDevourComponent::CaptureEnemy(AEnemyCharacter* Enemy, FSlimeDevourCap
 	}
 	if (!OutCapture.SkeletalMesh && !OutCapture.StaticMesh)
 	{
-		for (USceneComponent* Part : Enemy->GetGeneratedParts())
+		if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(Enemy))
 		{
-			if (USkeletalMeshComponent* PartSkel = Cast<USkeletalMeshComponent>(Part))
+			Target->ForEachVisualMesh([&](UMeshComponent* MeshComp)
 			{
-				if (BuildCaptureFromMesh(PartSkel, nullptr, OutCapture))
+				if (OutCapture.SkeletalMesh || OutCapture.StaticMesh)
 				{
-					FillBounds(PartSkel);
-					break;
+					return;
 				}
-			}
-			if (UStaticMeshComponent* PartStatic = Cast<UStaticMeshComponent>(Part))
-			{
-				if (BuildCaptureFromMesh(nullptr, PartStatic, OutCapture))
+				if (USkeletalMeshComponent* PartSkel = Cast<USkeletalMeshComponent>(MeshComp))
 				{
-					FillBounds(PartStatic);
-					break;
+					if (BuildCaptureFromMesh(PartSkel, nullptr, OutCapture))
+					{
+						FillBounds(PartSkel);
+					}
 				}
-			}
+				else if (UStaticMeshComponent* PartStatic = Cast<UStaticMeshComponent>(MeshComp))
+				{
+					if (BuildCaptureFromMesh(nullptr, PartStatic, OutCapture))
+					{
+						FillBounds(PartStatic);
+					}
+				}
+			});
 		}
-	}
-	if (!OutCapture.SkeletalMesh && !OutCapture.StaticMesh)
-	{
-		BuildCaptureFromMesh(nullptr, Enemy->GetPlaceholderMesh(), OutCapture);
-		FillBounds(Enemy->GetPlaceholderMesh());
 	}
 }
 
@@ -1557,23 +1687,77 @@ void USlimeDevourComponent::SpawnInnerMesh(const FSlimeDevourCapture& Capture)
 				InnerPoseable->SetMaterial(Index, Capture.SkeletalMaterials[Index]);
 			}
 		}
-		if (AEnemyCharacter* Target = DevourTarget.Get())
+		if (APawn* Target = DevourTarget.Get())
 		{
-			USkeletalMeshComponent* Source = Target->GetMesh();
-			if (!Source || !Source->GetSkeletalMeshAsset())
-			{
-				for (USceneComponent* Part : Target->GetGeneratedParts())
-				{
-					if (USkeletalMeshComponent* PartSkel = Cast<USkeletalMeshComponent>(Part))
-					{
-						Source = PartSkel;
-						break;
-					}
-				}
-			}
+			// Prefer the visible preview mesh only — never fall back across mismatched skeletons.
+			USkeletalMeshComponent* Source = SlimeDevourUtil::GetPreviewMesh(Target);
 			if (Source && Source->GetSkeletalMeshAsset())
 			{
-				InnerPoseable->CopyPoseFromSkeletalComponent(Source);
+				const USkinnedAsset* SourceAsset = Source->GetSkinnedAsset();
+				const USkinnedAsset* CaptureAsset = InnerPoseable->GetSkinnedAsset();
+				const bool bSameMesh = (SourceAsset == CaptureAsset);
+
+				if (bSameMesh)
+				{
+					InnerPoseable->CopyPoseFromSkeletalComponent(Source);
+				}
+				else
+				{
+					// Cross-skeleton: copy matching bones in component space (local-space name match warps props).
+					const TArray<FTransform>& SourceCS = Source->GetComponentSpaceTransforms();
+					int32 CopiedBones = 0;
+					for (int32 SourceBoneIndex = 0; SourceBoneIndex < SourceCS.Num(); ++SourceBoneIndex)
+					{
+						const FName BoneName = Source->GetBoneName(SourceBoneIndex);
+						if (InnerPoseable->GetBoneIndex(BoneName) == INDEX_NONE)
+						{
+							continue;
+						}
+						InnerPoseable->SetBoneTransformByName(BoneName, SourceCS[SourceBoneIndex], EBoneSpaces::ComponentSpace);
+						++CopiedBones;
+					}
+					UE_LOG(LogSlimeFable, Log,
+						TEXT("DevourInner: cross-skel pose Source=%s Capture=%s copiedBones=%d"),
+						*GetNameSafe(Source->GetSkeletalMeshAsset()),
+						*GetNameSafe(Capture.SkeletalMesh.Get()),
+						CopiedBones);
+				}
+
+				// Sync bone visibility / near-zero scale so weapons/props don't float at full size.
+				const TArray<uint8>& VisStates = Source->GetBoneVisibilityStates();
+				const TArray<FTransform>& LocalBones = Source->GetBoneSpaceTransforms();
+				int32 HiddenBones = 0;
+				const int32 NumBones = FMath::Min(VisStates.Num(), Source->GetNumBones());
+				for (int32 BoneIndex = 0; BoneIndex < NumBones; ++BoneIndex)
+				{
+					const FName BoneName = Source->GetBoneName(BoneIndex);
+					bool bHide = VisStates[BoneIndex] != BVS_Visible;
+					if (!bHide && LocalBones.IsValidIndex(BoneIndex))
+					{
+						const FVector Scale = LocalBones[BoneIndex].GetScale3D();
+						if (Scale.GetAbsMin() < 0.01f)
+						{
+							bHide = true;
+						}
+					}
+					if (bHide && InnerPoseable->GetBoneIndex(BoneName) != INDEX_NONE)
+					{
+						InnerPoseable->HideBoneByName(BoneName, PBO_None);
+						++HiddenBones;
+					}
+				}
+				UE_LOG(LogSlimeFable, Log,
+					TEXT("DevourInner: Source=%s Capture=%s sameMesh=%d hiddenBones=%d"),
+					*GetNameSafe(Source->GetSkeletalMeshAsset()),
+					*GetNameSafe(Capture.SkeletalMesh.Get()),
+					bSameMesh ? 1 : 0,
+					HiddenBones);
+			}
+			else
+			{
+				UE_LOG(LogSlimeFable, Warning,
+					TEXT("DevourInner: no preview skeletal mesh on %s — inner pose skipped"),
+					*GetNameSafe(Target));
 			}
 		}
 		InnerPoseable->SetWorldTransform(MakeFittedInnerTransform());
@@ -1702,16 +1886,20 @@ void USlimeDevourComponent::AbortDevour(bool bRestoreBody)
 {
 	SetCloseRangeCameraLag(false);
 	SetOwnerMovementFrozen(false);
-	if (AEnemyCharacter* Live = DevourTarget.Get())
+	if (APawn* Live = DevourTarget.Get())
 	{
 		RestoreDevourTarget(Live);
 	}
 	bSavedEnemyGravity = false;
-	if (AEnemyCharacter* Pending = Cast<AEnemyCharacter>(PendingDestroyEnemy.Get()))
+	if (APawn* Pending = Cast<APawn>(PendingDestroyEnemy.Get()))
 	{
-		if (IsValid(Pending) && Pending->IsDevouredDeath())
+		if (IsValid(Pending))
 		{
-			Pending->Destroy();
+			const ISlimeDevourTarget* PendingTarget = SlimeDevourUtil::As(Pending);
+			if (PendingTarget && PendingTarget->IsDevouredDeath())
+			{
+				Pending->Destroy();
+			}
 		}
 	}
 	PendingDestroyEnemy.Reset();
@@ -1902,12 +2090,15 @@ bool USlimeDevourComponent::TryPhantom(int32 Slot)
 	SpawnParams.Owner = Pawn;
 	SpawnParams.Instigator = Pawn;
 
-	AEnemyCharacter* Phantom = World->SpawnActorDeferred<AEnemyCharacter>(SpawnClass, SpawnXform, Pawn, Pawn, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+	APawn* Phantom = World->SpawnActorDeferred<APawn>(SpawnClass, SpawnXform, Pawn, Pawn, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 	if (!Phantom)
 	{
 		return false;
 	}
-	Phantom->InitAsPhantom(PhantomLifeSeconds, Pawn);
+	if (ISlimeDevourTarget* Target = SlimeDevourUtil::As(Phantom))
+	{
+		Target->InitAsPhantom(PhantomLifeSeconds, Pawn);
+	}
 	Phantom->FinishSpawning(SpawnXform);
 	PhantomSlots.RemoveAt(Slot);
 	if (SelectedPhantomSlot >= PhantomSlots.Num())

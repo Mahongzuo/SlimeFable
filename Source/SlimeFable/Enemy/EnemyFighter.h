@@ -128,6 +128,7 @@ public:
 	float ChaseSpeed = 600.f;
 
 	const TArray<FEnemyMoveDef>& GetMoves() const { return Moves; }
+	virtual const TArray<FEnemyMoveDef>& GetEnemyMoves() const override { return Moves; }
 
 	virtual bool UsesSingleNodeAnims() const override { return bUseSingleNodeAnims; }
 

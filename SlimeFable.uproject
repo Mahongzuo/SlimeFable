@@ -247,6 +247,38 @@
 		{
 			"Name": "DrawDebugLibrary",
 			"Enabled": true
+		},
+		{
+			"Name": "SmartObjects",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayBehaviors",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayBehaviorSmartObjects",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayInteractions",
+			"Enabled": true
+		},
+		{
+			"Name": "ContextualAnimation",
+			"Enabled": true
+		},
+		{
+			"Name": "NavCorridor",
+			"Enabled": true
+		},
+		{
+			"Name": "PhysicsControl",
+			"Enabled": true
+		},
+		{
+			"Name": "CurveExpression",
+			"Enabled": true
 		}
 	]
 }

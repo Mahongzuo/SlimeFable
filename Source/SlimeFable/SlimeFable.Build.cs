@@ -35,7 +35,8 @@ public class SlimeFable : ModuleRules
 			"AnimationLocomotionLibraryRuntime",
 			"AnimationWarpingRuntime",
 			"MotionWarping",
-			"MotionTrajectory"
+			"MotionTrajectory",
+			"Mover"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {

@@ -3,20 +3,24 @@
 #include "SlimeDodgeComponent.h"
 
 #include "Components/SkeletalMeshComponent.h"
+#include "DefaultMovementSet/InstantMovementEffects/BasicInstantMovementEffects.h"
 #include "PhoebeClimbComponent.h"
 #include "PhoebeEnemy.h"
 #include "EnemyCharacter.h"
 #include "EnemyFighter.h"
 #include "EnemyTower.h"
+#include "GaspSandboxPawn.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "MoverComponent.h"
 #include "SlimeAIController.h"
 #include "SlimeBodyComponent.h"
 #include "SlimeDevourComponent.h"
+#include "SlimeDevourTarget.h"
 #include "SlimeDodgeAfterimage.h"
 #include "SlimeEnemyCharacter.h"
 #include "SlimeHealthComponent.h"
@@ -196,6 +200,28 @@ bool USlimeDodgeComponent::IsInEnemyThreatRange() const
 		}
 	}
 
+	// GASP Sandbox pawns (not AEnemyCharacter): use DetectRange so combat roll wins over blink.
+	for (TActorIterator<AGaspSandboxPawn> It(World); It; ++It)
+	{
+		AGaspSandboxPawn* Gasp = *It;
+		if (!Gasp || Gasp == Owner || Gasp->IsMorphTarget() || Gasp->IsInDeathSequence())
+		{
+			continue;
+		}
+		if (const USlimeHealthComponent* EnemyHealth = Gasp->GetEnemyHealth())
+		{
+			if (!EnemyHealth->IsAlive())
+			{
+				continue;
+			}
+		}
+
+		if (FVector::DistSquared(Loc, Gasp->GetActorLocation()) <= FMath::Square(Gasp->DetectRange))
+		{
+			return true;
+		}
+	}
+
 	return false;
 }
 
@@ -270,41 +296,92 @@ void USlimeDodgeComponent::TryHandleRightClick()
 
 FVector USlimeDodgeComponent::ResolveRollDirection() const
 {
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	if (!Character)
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	if (!Pawn)
 	{
 		return FVector::ForwardVector;
 	}
 
-	FVector Dir = Character->GetLastMovementInputVector();
+	FVector Dir = Pawn->GetLastMovementInputVector();
 	Dir.Z = 0.f;
 	if (Dir.IsNearlyZero())
 	{
-		if (UCharacterMovementComponent* Move = Character->GetCharacterMovement())
+		Dir = Pawn->GetPendingMovementInputVector();
+		Dir.Z = 0.f;
+	}
+	if (Dir.IsNearlyZero())
+	{
+		Dir = Pawn->GetVelocity();
+		Dir.Z = 0.f;
+	}
+	if (Dir.IsNearlyZero())
+	{
+		if (const AGaspSandboxPawn* Gasp = Cast<AGaspSandboxPawn>(Pawn))
 		{
-			Dir = Move->Velocity;
+			Dir = Gasp->GetAiMoveIntent();
 			Dir.Z = 0.f;
 		}
 	}
 	if (Dir.IsNearlyZero())
 	{
-		Dir = Character->GetActorForwardVector();
+		if (const ACharacter* Character = Cast<ACharacter>(Pawn))
+		{
+			if (const UCharacterMovementComponent* Move = Character->GetCharacterMovement())
+			{
+				Dir = Move->Velocity;
+				Dir.Z = 0.f;
+			}
+		}
+	}
+	if (Dir.IsNearlyZero())
+	{
+		Dir = Pawn->GetActorForwardVector();
 		Dir.Z = 0.f;
 	}
 	return Dir.GetSafeNormal();
 }
 
-void USlimeDodgeComponent::PerformCombatRoll()
+void USlimeDodgeComponent::PerformCombatRoll(bool bSpawnRollAfterimage)
 {
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	if (!Character)
+	AActor* Owner = GetOwner();
+	if (!Owner)
 	{
 		return;
 	}
+
 	const FVector Dir = ResolveRollDirection();
 	const float Duration = FMath::Max(RollDuration, 0.05f);
 	const float Speed = RollDistance / Duration;
-	Character->LaunchCharacter(Dir * Speed + FVector(0.f, 0.f, 40.f), true, true);
+	const FVector Impulse = Dir * Speed + FVector(0.f, 0.f, 40.f);
+
+	if (ACharacter* Character = Cast<ACharacter>(Owner))
+	{
+		Character->LaunchCharacter(Impulse, true, true);
+	}
+	else if (UMoverComponent* Mover = Owner->FindComponentByClass<UMoverComponent>())
+	{
+		TSharedPtr<FApplyVelocityEffect> Effect = MakeShared<FApplyVelocityEffect>();
+		Effect->VelocityToApply = Impulse;
+		Effect->bAdditiveVelocity = false;
+		Mover->QueueInstantMovementEffect(Effect);
+	}
+
+	// Regular roll ghost: GASP / skeletal devour targets only. Slime body stays on perfect dodge.
+	if (bSpawnRollAfterimage && !Owner->FindComponentByClass<USlimeBodyComponent>())
+	{
+		if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Owner))
+		{
+			USkeletalMeshComponent* Mesh = Target->GetDevourPreviewMesh();
+			if (!Mesh || !Mesh->GetSkeletalMeshAsset())
+			{
+				Mesh = Target->GetPrimarySkeletalMesh();
+			}
+			if (Mesh && Mesh->GetSkeletalMeshAsset())
+			{
+				SpawnAfterimage();
+			}
+		}
+	}
 }
 
 void USlimeDodgeComponent::PerformPerfectDodge()
@@ -316,7 +393,7 @@ void USlimeDodgeComponent::PerformPerfectDodge()
 		Health->SetInvulnerableFor(PerfectInvulnDuration);
 	}
 
-	PerformCombatRoll();
+	PerformCombatRoll(false);
 	SlimeDodgeAudio::PlayAtOwner(this, PerfectDodgeSound, SlimeDodgeAudio::DefaultPerfect);
 	OnPerfectDodge.Broadcast();
 }
@@ -347,9 +424,20 @@ void USlimeDodgeComponent::SpawnAfterimage()
 	}
 
 	USkeletalMeshComponent* Source = nullptr;
-	if (const ACharacter* Character = Cast<ACharacter>(Owner))
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Owner))
 	{
-		Source = Character->GetMesh();
+		Source = Target->GetDevourPreviewMesh();
+		if (!Source || !Source->GetSkeletalMeshAsset())
+		{
+			Source = Target->GetPrimarySkeletalMesh();
+		}
+	}
+	if (!Source || !Source->GetSkeletalMeshAsset())
+	{
+		if (const ACharacter* Character = Cast<ACharacter>(Owner))
+		{
+			Source = Character->GetMesh();
+		}
 	}
 	if (!Source || !Source->GetSkeletalMeshAsset())
 	{

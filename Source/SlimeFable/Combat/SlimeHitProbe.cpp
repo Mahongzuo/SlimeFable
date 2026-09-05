@@ -185,8 +185,8 @@ bool USlimeHitProbe::GatherOverlaps(
 	ObjParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 	ObjParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjParams.AddObjectTypesToQuery(ECC_PhysicsBody);
-	// Project custom Object Channel "Slicable" (see DefaultEngine.ini).
-	ObjParams.AddObjectTypesToQuery(ECC_GameTraceChannel1);
+	// Project custom Object Channel "Slicable" (Channel4 — see DefaultEngine.ini).
+	ObjParams.AddObjectTypesToQuery(ECC_GameTraceChannel4);
 
 	const bool bHit = World->OverlapMultiByObjectType(
 		OutOverlaps,

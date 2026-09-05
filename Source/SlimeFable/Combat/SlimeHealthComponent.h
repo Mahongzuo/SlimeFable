@@ -71,9 +71,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	bool IsInvulnerable() const;
 
+	/** Public so non-Character pawns (GASP Mover) can dissolve after death. */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void BeginDeathDissolve();
+
 private:
 	void HandleDeath(AActor* DamageCauser);
-	void BeginDeathDissolve();
 	void TickDeathDissolve();
 	void FinishDeathDissolve();
 	void ApplyDeathVisual(float Alpha) const;
