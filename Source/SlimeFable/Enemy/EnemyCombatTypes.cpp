@@ -187,7 +187,6 @@ void EnemyCombat::FillDefaultGaspMoves(TArray<FEnemyMoveDef>& OutMoves)
 
 	// Standalone mannequin melee (Variant_Combat). Official GASP has no punch/kick montages.
 	const TCHAR* Combo = TEXT("/Game/Variant_Combat/Anims/AM_ComboAttack.AM_ComboAttack");
-	const TCHAR* Charged = TEXT("/Game/Variant_Combat/Anims/AM_ChargedAttack.AM_ChargedAttack");
 
 	auto AddMelee = [&](const TCHAR* MoveId, const FText& Name, const TCHAR* MontagePath, float Weight,
 		float Damage, float Knockback, float HitStart, float HitEnd, float Recovery, float Radius, float Range)
@@ -216,34 +215,12 @@ void EnemyCombat::FillDefaultGaspMoves(TArray<FEnemyMoveDef>& OutMoves)
 		OutMoves.Add(Move);
 	};
 
-	// LMB cycles Combo 1/2/3 → Charged. GASP skips Q/E/R so E can sit.
+	// LMB cycles Combo 1/2/3/4. Charged (AM_ChargedAttack) loops in place and still
+	// lets the pawn walk; temporarily reuse the light combo montage for the 4th hit.
 	AddMelee(TEXT("GaspCombo1"), FText::FromString(TEXT("Combo 1")), Combo, 1.5f, 14.f, 280.f, 0.28f, 0.48f, 0.45f, 70.f, 120.f);
 	AddMelee(TEXT("GaspCombo2"), FText::FromString(TEXT("Combo 2")), Combo, 1.2f, 16.f, 300.f, 0.28f, 0.48f, 0.45f, 70.f, 120.f);
 	AddMelee(TEXT("GaspCombo3"), FText::FromString(TEXT("Combo 3")), Combo, 1.0f, 18.f, 320.f, 0.28f, 0.48f, 0.5f, 75.f, 130.f);
-
-	{
-		FEnemyMoveDef Move;
-		Move.MoveId = TEXT("GaspCharged");
-		Move.Skill.DisplayName = FText::FromString(TEXT("Charged"));
-		Move.Skill.Exec = EEnemySkillExec::AoE;
-		Move.Skill.Windup = 0.2f;
-		Move.Skill.HitStart = 0.45f;
-		Move.Skill.HitEnd = 0.7f;
-		Move.Skill.Recovery = 0.8f;
-		Move.Skill.Damage = 24.f;
-		Move.Skill.Knockback = 420.f;
-		Move.Skill.LaunchZ = 160.f;
-		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 150.f;
-		Move.Skill.Hit.Range = 0.f;
-		Move.Skill.AttackMontage = SoftMontage(Charged);
-		Move.MinRange = 0.f;
-		Move.MaxRange = 200.f;
-		Move.Weight = 0.8f;
-		Move.TelegraphTime = 0.3f;
-		Move.Cooldown = 3.5f;
-		OutMoves.Add(Move);
-	}
+	AddMelee(TEXT("GaspCharged"), FText::FromString(TEXT("Combo 4")), Combo, 0.8f, 18.f, 320.f, 0.28f, 0.48f, 0.5f, 75.f, 130.f);
 }
 
 void EnemyCombat::SanitizeGaspCombatMontage(UAnimMontage* Montage)

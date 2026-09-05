@@ -150,7 +150,7 @@ public:
 	void EnsureCombatReady() { EnsureMoveKit(); }
 
 	UFUNCTION(BlueprintCallable, Category = "GASP")
-	void TriggerSandboxRagdoll();
+	virtual void TriggerSandboxRagdoll();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour",
 		meta = (ToolTip = "能否被史莱姆吞噬。默认开。"))
@@ -330,30 +330,30 @@ protected:
 	bool CallBoolFunctionByName(FName FunctionName);
 	void BindMorphLocomotionActions(APlayerController* PC);
 	void UnbindMorphLocomotionActions();
-	void RestoreUnexpectedRagdoll();
-	bool WantsHeldRagdollMode() const;
+	virtual void RestoreUnexpectedRagdoll();
+	virtual bool WantsHeldRagdollMode() const;
 	void ForcePhysicalRagdollBodies(bool bDisableCapsule);
-	void KeepDeathRagdollPhysics();
+	virtual void KeepDeathRagdollPhysics();
 	void SetMorphLocomotionTicksEnabled(bool bEnabled);
-	bool ApplyPendingRagdollInput(FCharacterDefaultInputs& Inputs);
-	void BeginKnockdownDeath();
+	virtual bool ApplyPendingRagdollInput(FCharacterDefaultInputs& Inputs);
+	virtual void BeginKnockdownDeath();
 	void QueueDeathRagdoll();
-	void AccrueCombatStun(float Damage);
-	void BeginCombatKnockdown();
-	void TickCombatKnockdown();
-	void EndCombatKnockdown();
-	void ConfirmDeathRagdollThenStopAI();
+	virtual void AccrueCombatStun(float Damage);
+	virtual void BeginCombatKnockdown();
+	virtual void TickCombatKnockdown();
+	virtual void EndCombatKnockdown();
+	virtual void ConfirmDeathRagdollThenStopAI();
 	void StopDeathController();
 	void SetSmartObjectPlayerLogic(bool bEnable);
 
 	UFUNCTION()
-	void PlayCombatGetUp();
+	virtual void PlayCombatGetUp();
 
 	UFUNCTION()
 	void HandleDeathMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	UFUNCTION()
-	void StartDeathDissolve();
+	virtual void StartDeathDissolve();
 
 	UFUNCTION()
 	void TickDeathDissolve();
@@ -378,7 +378,7 @@ protected:
 	static bool IsCameraAttachedMesh(const UMeshComponent* Mesh);
 
 	UFUNCTION()
-	void HandleDied();
+	virtual void HandleDied();
 
 	UFUNCTION()
 	void HandleMoverPostFinalize(const FMoverSyncState& SyncState, const FMoverAuxStateContext& AuxState);

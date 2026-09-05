@@ -65,7 +65,7 @@ static FAutoConsoleVariableRef CVarGaspMoveDebug(
 	TEXT("Log GASP mover controller/mode/velocity/intent every second when non-zero."),
 	ECVF_Default);
 
-static int64 MatchUserDefinedEnumByDisplayName(UEnum* Enum, const FString& Needle);
+static int64 MatchGaspMoverEnumByDisplayName(UEnum* Enum, const FString& Needle);
 
 AGaspMoverEnemy::AGaspMoverEnemy()
 {
@@ -602,7 +602,7 @@ void AGaspMoverEnemy::WriteMoverCustomInputs(FMoverInputCmdContext& InputCmdResu
 			}
 			if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
 			{
-				const int64 Value = MatchUserDefinedEnumByDisplayName(EnumProp->GetEnum(), DisplayNeedle);
+				const int64 Value = MatchGaspMoverEnumByDisplayName(EnumProp->GetEnum(), DisplayNeedle);
 				if (Value != INDEX_NONE)
 				{
 					void* ValuePtr = EnumProp->ContainerPtrToValuePtr<void>(StructPtr);
@@ -614,7 +614,7 @@ void AGaspMoverEnemy::WriteMoverCustomInputs(FMoverInputCmdContext& InputCmdResu
 			{
 				if (UEnum* Enum = ByteProp->GetIntPropertyEnum())
 				{
-					const int64 Value = MatchUserDefinedEnumByDisplayName(Enum, DisplayNeedle);
+					const int64 Value = MatchGaspMoverEnumByDisplayName(Enum, DisplayNeedle);
 					if (Value != INDEX_NONE)
 					{
 						ByteProp->SetPropertyValue_InContainer(StructPtr, static_cast<uint8>(Value));
@@ -2081,7 +2081,7 @@ void AGaspMoverEnemy::FinishDeathSequence()
 	Destroy();
 }
 
-static int64 MatchUserDefinedEnumByDisplayName(UEnum* Enum, const FString& Needle)
+static int64 MatchGaspMoverEnumByDisplayName(UEnum* Enum, const FString& Needle)
 {
 	if (!Enum)
 	{
@@ -2187,7 +2187,7 @@ void AGaspMoverEnemy::FillGaspAnimPropertiesInternal(UScriptStruct* Struct, void
 			}
 			if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
 			{
-				const int64 Value = MatchUserDefinedEnumByDisplayName(EnumProp->GetEnum(), DisplayNeedle);
+				const int64 Value = MatchGaspMoverEnumByDisplayName(EnumProp->GetEnum(), DisplayNeedle);
 				if (Value != INDEX_NONE)
 				{
 					void* ValuePtr = EnumProp->ContainerPtrToValuePtr<void>(StructPtr);
@@ -2199,7 +2199,7 @@ void AGaspMoverEnemy::FillGaspAnimPropertiesInternal(UScriptStruct* Struct, void
 			{
 				if (UEnum* Enum = ByteProp->GetIntPropertyEnum())
 				{
-					const int64 Value = MatchUserDefinedEnumByDisplayName(Enum, DisplayNeedle);
+					const int64 Value = MatchGaspMoverEnumByDisplayName(Enum, DisplayNeedle);
 					if (Value != INDEX_NONE)
 					{
 						ByteProp->SetPropertyValue_InContainer(StructPtr, static_cast<uint8>(Value));
@@ -2318,7 +2318,7 @@ void AGaspMoverEnemy::FillGaspTraversalPropertiesInternal(UScriptStruct* Struct,
 			}
 			if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
 			{
-				const int64 Value = MatchUserDefinedEnumByDisplayName(EnumProp->GetEnum(), DisplayNeedle);
+				const int64 Value = MatchGaspMoverEnumByDisplayName(EnumProp->GetEnum(), DisplayNeedle);
 				if (Value != INDEX_NONE)
 				{
 					void* ValuePtr = EnumProp->ContainerPtrToValuePtr<void>(StructPtr);
@@ -2330,7 +2330,7 @@ void AGaspMoverEnemy::FillGaspTraversalPropertiesInternal(UScriptStruct* Struct,
 			{
 				if (UEnum* Enum = ByteProp->GetIntPropertyEnum())
 				{
-					const int64 Value = MatchUserDefinedEnumByDisplayName(Enum, DisplayNeedle);
+					const int64 Value = MatchGaspMoverEnumByDisplayName(Enum, DisplayNeedle);
 					if (Value != INDEX_NONE)
 					{
 						ByteProp->SetPropertyValue_InContainer(StructPtr, static_cast<uint8>(Value));

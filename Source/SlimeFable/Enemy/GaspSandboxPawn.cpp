@@ -60,7 +60,7 @@ static TAutoConsoleVariable<int32> CVarSlimeGaspMorphTrace(
 
 namespace GaspSandboxPrivate
 {
-	static int64 MatchUserDefinedEnumByDisplayName(UEnum* Enum, const FString& Needle)
+	static int64 MatchGaspSandboxEnumByDisplayName(UEnum* Enum, const FString& Needle)
 	{
 		if (!Enum)
 		{
@@ -113,7 +113,7 @@ namespace GaspSandboxPrivate
 			}
 			if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
 			{
-				const int64 Value = MatchUserDefinedEnumByDisplayName(EnumProp->GetEnum(), GaitName);
+				const int64 Value = MatchGaspSandboxEnumByDisplayName(EnumProp->GetEnum(), GaitName);
 				if (Value != INDEX_NONE)
 				{
 					void* ValuePtr = EnumProp->ContainerPtrToValuePtr<void>(StructPtr);
@@ -125,7 +125,7 @@ namespace GaspSandboxPrivate
 			{
 				if (UEnum* Enum = ByteProp->GetIntPropertyEnum())
 				{
-					const int64 Value = MatchUserDefinedEnumByDisplayName(Enum, GaitName);
+					const int64 Value = MatchGaspSandboxEnumByDisplayName(Enum, GaitName);
 					if (Value != INDEX_NONE)
 					{
 						ByteProp->SetPropertyValue_InContainer(StructPtr, static_cast<uint8>(Value));
@@ -561,8 +561,8 @@ void AGaspSandboxPawn::BeginPlay()
 	EnsureInputBridge();
 	AttachHealthBarToCapsule();
 	ApplyActiveVisualOnly();
-	EnsureMoverModes();
 	Super::BeginPlay();
+	EnsureMoverModes();
 	SpawnOrigin = GetActorLocation();
 	BindWorldHealthBar();
 	EnsureMeshTickAfterMover();
@@ -1412,7 +1412,12 @@ void AGaspSandboxPawn::EnsureMoverModes()
 			continue;
 		}
 		UBaseMovementMode* NewMode = NewObject<UBaseMovementMode>(CachedMover, ModeClass, Spec.Name);
-		CachedMover->MovementModes.Add(Spec.Name, NewMode);
+		if (!CachedMover->AddMovementModeFromObject(Spec.Name, NewMode))
+		{
+			UE_LOG(LogSlimeFable, Warning, TEXT("GaspSandboxPawn %s: failed to register movement mode %s"),
+				*GetName(), *Spec.Name.ToString());
+			continue;
+		}
 		UE_LOG(LogSlimeFable, Log, TEXT("GaspSandboxPawn %s: registered movement mode %s"),
 			*GetName(), *Spec.Name.ToString());
 	}
@@ -1422,6 +1427,13 @@ void AGaspSandboxPawn::EnsureMoverModes()
 		CachedMover->StartingMovementMode = CachedMover->FindMovementModeByName(FName(TEXT("Walking")))
 			? FName(TEXT("Walking"))
 			: FName(TEXT("Falling"));
+	}
+
+	// TMap may already contain Ragdoll from an earlier call that ran before
+	// Simulation existed. Re-add so QueueNextMode can find it.
+	if (UBaseMovementMode* RagdollMode = CachedMover->FindMovementModeByName(FName(TEXT("Ragdoll"))))
+	{
+		CachedMover->AddMovementModeFromObject(FName(TEXT("Ragdoll")), RagdollMode);
 	}
 }
 
@@ -1440,7 +1452,9 @@ void AGaspSandboxPawn::TriggerSandboxRagdoll()
 	DispatchBoolEventOnComponents(TEXT("TriggerRagdoll"));
 	if (UFunction* Fn = FindFunction(TEXT("TriggerRagdoll")))
 	{
-		ProcessEvent(Fn, nullptr);
+		// The official event takes (bool, FMontageBlendSettings, injury enum): a null parm
+		// block would make the VM read from address 0.
+		GaspSandboxPrivate::ProcessBoolFunction(this, Fn);
 	}
 }
 
