@@ -302,6 +302,44 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		}
 	}
 
+	if (InputSettings && InputSettings->ShouldReadGamepadAbilityKeys())
+	{
+		const bool bFaceA = PlayerController->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom);
+		if (bFaceA)
+		{
+			GamepadAHoldSeconds += DeltaTime;
+			if (!bGamepadALaunchArmed && GamepadAHoldSeconds >= 0.3f && !bCombatLocked && !bPhantomWheelOpen && !bPollLaunchDown)
+			{
+				bGamepadALaunchArmed = true;
+				if (!bCharging)
+				{
+					BeginLaunchCharge();
+				}
+			}
+		}
+		else
+		{
+			if (bGamepadALaunchArmed)
+			{
+				bGamepadALaunchArmed = false;
+				if (bCharging && !bPollLaunchDown)
+				{
+					ReleaseLaunchCharge();
+				}
+			}
+			GamepadAHoldSeconds = 0.f;
+		}
+	}
+	else if (bGamepadALaunchArmed)
+	{
+		bGamepadALaunchArmed = false;
+		GamepadAHoldSeconds = 0.f;
+		if (bCharging && !bPollLaunchDown)
+		{
+			ReleaseLaunchCharge();
+		}
+	}
+
 	const bool bWheel = IsDown(ESlimeInputAction::ElementWheel, EKeys::Tab);
 	if (bWheel && !bPollWheelDown)
 	{
@@ -336,6 +374,19 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		if (WasPressed(ESlimeInputAction::ElementFormation, EKeys::L))
 		{
 			OpenFormation();
+		}
+		if (InputSettings && InputSettings->ShouldReadGamepadAbilityKeys())
+		{
+			if (PlayerController->WasInputKeyJustPressed(EKeys::Gamepad_DPad_Left))
+			{
+				GamepadElementSlot = (GamepadElementSlot + 5) % 6;
+				TrySwitchOrderedElement(GamepadElementSlot);
+			}
+			else if (PlayerController->WasInputKeyJustPressed(EKeys::Gamepad_DPad_Right))
+			{
+				GamepadElementSlot = (GamepadElementSlot + 1) % 6;
+				TrySwitchOrderedElement(GamepadElementSlot);
+			}
 		}
 	}
 

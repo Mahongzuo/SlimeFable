@@ -6,6 +6,7 @@
 #include "Components/InputComponent.h"
 #include "DayLevel/DayLevelSubsystem.h"
 #include "EnhancedInputSubsystems.h"
+#include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "InputCoreTypes.h"
 #include "InputMappingContext.h"
@@ -18,6 +19,7 @@
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeCheatComponent.h"
 #include "UI/PauseMenuWidget.h"
+#include "UI/SlimeTouchHUDWidget.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -66,23 +68,40 @@ void ASlimeFablePlayerController::BeginPlay()
 		ApplyTopUIInput();
 	}
 
-	if (IsLocalPlayerController() && ShouldUseTouchControls())
+	if (IsLocalPlayerController())
 	{
-		MobileControlsWidget = CreateWidget<UUserWidget>(this, MobileControlsWidgetClass);
-		if (MobileControlsWidget)
+		if (UGameInstance* GI = GetGameInstance())
 		{
-			MobileControlsWidget->AddToPlayerScreen(0);
+			if (USlimeInputSettings* Settings = GI->GetSubsystem<USlimeInputSettings>())
+			{
+				PlayInputModeHandle = Settings->OnPlayInputModeChanged.AddUObject(
+					this, &ASlimeFablePlayerController::RefreshPlayInputPresentation);
+			}
 		}
-		else
+		RefreshPlayInputPresentation();
+	}
+}
+
+void ASlimeFablePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeInputSettings* Settings = GI->GetSubsystem<USlimeInputSettings>())
 		{
-			UE_LOG(LogSlimeFable, Error, TEXT("Could not spawn mobile controls widget."));
+			if (PlayInputModeHandle.IsValid())
+			{
+				Settings->OnPlayInputModeChanged.Remove(PlayInputModeHandle);
+				PlayInputModeHandle.Reset();
+			}
 		}
 	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ASlimeFablePlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
+	UpdateLastInputDevice();
 	UpdateAltCursor();
 }
 
@@ -115,6 +134,7 @@ void ASlimeFablePlayerController::SetupInputComponent()
 	if (InputComponent)
 	{
 		InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ASlimeFablePlayerController::TogglePauseMenu);
+		InputComponent->BindKey(EKeys::Gamepad_Special_Right, IE_Pressed, this, &ASlimeFablePlayerController::TogglePauseMenu);
 	}
 }
 
@@ -124,6 +144,7 @@ void ASlimeFablePlayerController::SuspendGameplayMappingContexts()
 	{
 		return;
 	}
+	bGameplayMappingsSuspended = true;
 	UEnhancedInputLocalPlayerSubsystem* Subsystem =
 		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
 	if (!Subsystem)
@@ -165,6 +186,7 @@ void ASlimeFablePlayerController::RestoreGameplayMappingContexts()
 			Subsystem->AddMappingContext(CurrentContext, 0);
 		}
 	}
+	bGameplayMappingsSuspended = false;
 	if (!ShouldUseTouchControls())
 	{
 		for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
@@ -179,7 +201,176 @@ void ASlimeFablePlayerController::RestoreGameplayMappingContexts()
 
 bool ASlimeFablePlayerController::ShouldUseTouchControls() const
 {
-	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const USlimeInputSettings* Settings = GI->GetSubsystem<USlimeInputSettings>())
+		{
+			if (Settings->GetPlayInputMode() == ESlimePlayInputMode::KeyboardMouse)
+			{
+				return false;
+			}
+			if (Settings->ShouldUseTouchHud())
+			{
+				return true;
+			}
+		}
+	}
+	return bForceTouchControls;
+}
+
+void ASlimeFablePlayerController::RequestTogglePauseMenu()
+{
+	TogglePauseMenu();
+}
+
+void ASlimeFablePlayerController::RefreshPlayInputPresentation()
+{
+	if (!IsLocalPlayerController())
+	{
+		return;
+	}
+	SyncTouchHudAndLookContext();
+}
+
+void ASlimeFablePlayerController::SyncTouchHudAndLookContext()
+{
+	const bool bTouch = ShouldUseTouchControls();
+	if (bTouch)
+	{
+		// BP_ThirdPersonPlayerController still points at Epic UI_TouchSimple
+		// (two empty wheels). Never spawn that; only accept our touch HUD.
+		if (MobileControlsWidget && !MobileControlsWidget->IsA(USlimeTouchHUDWidget::StaticClass()))
+		{
+			MobileControlsWidget->RemoveFromParent();
+			MobileControlsWidget = nullptr;
+		}
+		if (!MobileControlsWidget)
+		{
+			TSubclassOf<UUserWidget> ClassToSpawn = USlimeTouchHUDWidget::StaticClass();
+			if (MobileControlsWidgetClass
+				&& MobileControlsWidgetClass->IsChildOf(USlimeTouchHUDWidget::StaticClass()))
+			{
+				ClassToSpawn = MobileControlsWidgetClass;
+			}
+			MobileControlsWidget = CreateWidget<UUserWidget>(this, ClassToSpawn);
+			if (MobileControlsWidget)
+			{
+				MobileControlsWidget->AddToPlayerScreen(20);
+			}
+			else
+			{
+				UE_LOG(LogSlimeFable, Error, TEXT("Could not spawn touch controls widget."));
+			}
+		}
+		if (USlimeTouchHUDWidget* TouchHud = Cast<USlimeTouchHUDWidget>(MobileControlsWidget))
+		{
+			TouchHud->ApplyHandedness();
+		}
+	}
+	else if (MobileControlsWidget)
+	{
+		MobileControlsWidget->RemoveFromParent();
+		MobileControlsWidget = nullptr;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (USlimeInputSettings* Settings = GI->GetSubsystem<USlimeInputSettings>())
+			{
+				Settings->ClearVirtualActions();
+			}
+		}
+	}
+
+	if (bGameplayMappingsSuspended)
+	{
+		return;
+	}
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (!Subsystem)
+	{
+		return;
+	}
+	for (UInputMappingContext* CurrentContext : MobileExcludedMappingContexts)
+	{
+		if (!CurrentContext)
+		{
+			continue;
+		}
+		if (bTouch)
+		{
+			Subsystem->RemoveMappingContext(CurrentContext);
+		}
+		else
+		{
+			Subsystem->AddMappingContext(CurrentContext, 0);
+		}
+	}
+}
+
+void ASlimeFablePlayerController::UpdateLastInputDevice()
+{
+	UGameInstance* GI = GetGameInstance();
+	USlimeInputSettings* Settings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr;
+	if (!Settings)
+	{
+		return;
+	}
+
+	static const FKey GamepadKeys[] = {
+		EKeys::Gamepad_FaceButton_Bottom, EKeys::Gamepad_FaceButton_Right,
+		EKeys::Gamepad_FaceButton_Left, EKeys::Gamepad_FaceButton_Top,
+		EKeys::Gamepad_LeftShoulder, EKeys::Gamepad_RightShoulder,
+		EKeys::Gamepad_LeftTrigger, EKeys::Gamepad_RightTrigger,
+		EKeys::Gamepad_DPad_Up, EKeys::Gamepad_DPad_Down,
+		EKeys::Gamepad_DPad_Left, EKeys::Gamepad_DPad_Right,
+		EKeys::Gamepad_LeftThumbstick, EKeys::Gamepad_RightThumbstick,
+		EKeys::Gamepad_Special_Left, EKeys::Gamepad_Special_Right
+	};
+	for (const FKey& Key : GamepadKeys)
+	{
+		if (WasInputKeyJustPressed(Key))
+		{
+			Settings->NoteLastInputDevice(ESlimeLastInputDevice::Gamepad);
+			return;
+		}
+	}
+
+	const float StickX = GetInputAnalogKeyState(EKeys::Gamepad_LeftX);
+	const float StickY = GetInputAnalogKeyState(EKeys::Gamepad_LeftY);
+	if (FMath::Sqrt(StickX * StickX + StickY * StickY) > 0.75f)
+	{
+		Settings->NoteLastInputDevice(ESlimeLastInputDevice::Gamepad);
+		return;
+	}
+
+	static const FKey KeyboardKeys[] = {
+		EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::SpaceBar,
+		EKeys::LeftShift, EKeys::E, EKeys::Q, EKeys::R, EKeys::F,
+		EKeys::C, EKeys::X, EKeys::G, EKeys::Z, EKeys::Tab, EKeys::B, EKeys::J
+	};
+	for (const FKey& Key : KeyboardKeys)
+	{
+		if (WasInputKeyJustPressed(Key))
+		{
+			Settings->NoteLastInputDevice(ESlimeLastInputDevice::KeyboardMouse);
+			return;
+		}
+	}
+	if (WasInputKeyJustPressed(EKeys::LeftMouseButton)
+		|| WasInputKeyJustPressed(EKeys::RightMouseButton)
+		|| WasInputKeyJustPressed(EKeys::MiddleMouseButton))
+	{
+		Settings->NoteLastInputDevice(ESlimeLastInputDevice::KeyboardMouse);
+		return;
+	}
+
+	float MouseX = 0.f;
+	float MouseY = 0.f;
+	GetInputMouseDelta(MouseX, MouseY);
+	if (FMath::Abs(MouseX) + FMath::Abs(MouseY) > 2.f)
+	{
+		Settings->NoteLastInputDevice(ESlimeLastInputDevice::KeyboardMouse);
+	}
 }
 
 void ASlimeFablePlayerController::RetargetUIFocus(UUserWidget* FocusWidget)

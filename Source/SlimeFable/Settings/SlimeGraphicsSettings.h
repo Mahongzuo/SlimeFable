@@ -99,6 +99,27 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Graphics")
 	FString GetPixelStreamingUrl() const { return PixelStreamingUrl; }
 
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	ESlimePixelStreamTarget GetPixelStreamTarget() const { return PixelStreamTarget; }
+
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	FText GetPixelStreamTargetDisplayName() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	void CyclePixelStreamTarget();
+
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	FString GetCloudPlayUrl() const;
+
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	FString GetLanPlayUrl() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	bool CopyCloudPlayUrl(FText& OutStatus);
+
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	bool CopyLanPlayUrl(FText& OutStatus);
+
 	UFUNCTION(BlueprintCallable, Category = "Graphics")
 	bool TrySetPixelStreaming(bool bEnable, FText& OutError);
 
@@ -128,6 +149,13 @@ protected:
 	void CacheTsrScreenPercentage() const;
 	void RestoreTsrScreenPercentage() const;
 	void ApplyDlssMode() const;
+	void ApplyPixelStreamTargetUrl();
+	void LoadPlayToken();
+	bool EnsureLocalSignalling(FText& OutStatus);
+	bool LaunchLocalSignalling();
+	static bool IsLocalTcpOpen(int32 Port);
+	static FString DetectLanIPv4();
+	static bool CopyTextToClipboard(const FString& Text);
 
 	FString AdapterName;
 	FString VendorName;
@@ -143,9 +171,13 @@ protected:
 	bool bFrameGen = false;
 	bool bHasUserOrAutoQuality = false;
 	bool bPixelStreaming = false;
+	ESlimePixelStreamTarget PixelStreamTarget = ESlimePixelStreamTarget::Cloud;
 	FString PixelStreamingUrl;
+	FString CloudPixelStreamingUrl;
+	FString PixelStreamingPlayToken;
 
 	/** Screen percentage from scalability / TSR, restored when DLSS turns off. */
 	mutable float CachedTsrScreenPercentage = 100.f;
 	mutable bool bHasCachedTsrScreenPercentage = false;
+	double LastLocalSignallingLaunchSeconds = -1000.0;
 };

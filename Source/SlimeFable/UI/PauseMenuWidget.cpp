@@ -6,6 +6,7 @@
 #include "UI/AudioSettingsWidget.h"
 #include "UI/TutorialMenuWidget.h"
 #include "UI/MenuUIStyle.h"
+#include "Settings/SlimeInputSettings.h"
 #include "SlimeFablePlayerController.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -130,7 +131,8 @@ bool UPauseMenuWidget::TryHandleEscape()
 
 FReply UPauseMenuWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::Escape)
+	if (InKeyEvent.GetKey() == EKeys::Escape
+		|| USlimeInputSettings::IsGamepadDismissKey(InKeyEvent.GetKey()))
 	{
 		if (TryHandleEscape())
 		{

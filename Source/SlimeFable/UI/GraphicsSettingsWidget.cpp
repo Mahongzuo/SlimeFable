@@ -9,6 +9,8 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/PanelSlot.h"
+#include "Components/PanelWidget.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
@@ -66,6 +68,18 @@ void UGraphicsSettingsWidget::NativeConstruct()
 	{
 		PixelStreamingButton->OnClicked.AddUniqueDynamic(this, &UGraphicsSettingsWidget::OnPixelStreamingClicked);
 	}
+	if (PixelStreamTargetButton)
+	{
+		PixelStreamTargetButton->OnClicked.AddUniqueDynamic(this, &UGraphicsSettingsWidget::OnPixelStreamTargetClicked);
+	}
+	if (CopyCloudLinkButton)
+	{
+		CopyCloudLinkButton->OnClicked.AddUniqueDynamic(this, &UGraphicsSettingsWidget::OnCopyCloudLinkClicked);
+	}
+	if (CopyLanLinkButton)
+	{
+		CopyLanLinkButton->OnClicked.AddUniqueDynamic(this, &UGraphicsSettingsWidget::OnCopyLanLinkClicked);
+	}
 	if (BackButton)
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UGraphicsSettingsWidget::OnBackClicked);
@@ -95,6 +109,7 @@ void UGraphicsSettingsWidget::BuildLayoutIfNeeded()
 		&& PixelStreamingButton && BackButton)
 	{
 		bBuiltInCode = false;
+		EnsurePixelStreamExtraButtons();
 		return;
 	}
 
@@ -181,7 +196,90 @@ void UGraphicsSettingsWidget::BuildLayoutIfNeeded()
 	FrameGenButton = AddButton(TEXT("FrameGenButton"), FText::FromString(TEXT("帧生成：关")));
 	AutoDetectButton = AddButton(TEXT("AutoDetectButton"), FText::FromString(TEXT("自动检测")));
 	PixelStreamingButton = AddButton(TEXT("PixelStreamingButton"), FText::FromString(TEXT("像素流送：关")));
+	PixelStreamTargetButton = AddButton(TEXT("PixelStreamTargetButton"), FText::FromString(TEXT("推流目标：云端")));
+	CopyCloudLinkButton = AddButton(TEXT("CopyCloudLinkButton"), FText::FromString(TEXT("复制云端观看链接")));
+	CopyLanLinkButton = AddButton(TEXT("CopyLanLinkButton"), FText::FromString(TEXT("复制局域网链接")));
 	BackButton = AddButton(TEXT("BackButton"), FText::FromString(TEXT("返回")));
+}
+
+void UGraphicsSettingsWidget::EnsurePixelStreamExtraButtons()
+{
+	if (!WidgetTree)
+	{
+		return;
+	}
+
+	auto FindInsertParent = [](UWidget* After, UPanelWidget*& OutParent, int32& OutIndex) -> bool
+	{
+		OutParent = nullptr;
+		OutIndex = 0;
+		if (!After)
+		{
+			return false;
+		}
+		if (USizeBox* AfterSize = Cast<USizeBox>(After->GetParent()))
+		{
+			OutParent = Cast<UPanelWidget>(AfterSize->GetParent());
+			if (OutParent)
+			{
+				OutIndex = OutParent->GetChildIndex(AfterSize) + 1;
+				return true;
+			}
+		}
+		if (UPanelWidget* Direct = Cast<UPanelWidget>(After->GetParent()))
+		{
+			OutParent = Direct;
+			OutIndex = Direct->GetChildIndex(After) + 1;
+			return true;
+		}
+		return false;
+	};
+
+	auto InsertInkButton = [this](const FName& Name, const FText& Label, UPanelWidget* Parent, int32 Index) -> UButton*
+	{
+		if (!Parent)
+		{
+			return nullptr;
+		}
+		USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(
+			USizeBox::StaticClass(),
+			*FString::Printf(TEXT("%s_Size"), *Name.ToString()));
+		SizeBox->SetWidthOverride(360.f);
+		SizeBox->SetHeightOverride(52.f);
+		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		UTextBlock* LabelBlock = WidgetTree->ConstructWidget<UTextBlock>(
+			UTextBlock::StaticClass(),
+			*FString::Printf(TEXT("%s_Label"), *Name.ToString()));
+		LabelBlock->SetText(Label);
+		LabelBlock->SetJustification(ETextJustify::Center);
+		Button->AddChild(LabelBlock);
+		SizeBox->AddChild(Button);
+		if (UPanelSlot* Inserted = Parent->InsertChildAt(Index, SizeBox))
+		{
+			if (UVerticalBoxSlot* VSlot = Cast<UVerticalBoxSlot>(Inserted))
+			{
+				VSlot->SetPadding(FMargin(0.f, 6.f));
+				VSlot->SetHorizontalAlignment(HAlign_Center);
+			}
+		}
+		return Button;
+	};
+
+	UPanelWidget* Parent = nullptr;
+	int32 Index = 0;
+	UWidget* After = PixelStreamingButton;
+	if (!PixelStreamTargetButton && FindInsertParent(After, Parent, Index))
+	{
+		PixelStreamTargetButton = InsertInkButton(TEXT("PixelStreamTargetButton"), FText::FromString(TEXT("推流目标：云端")), Parent, Index);
+	}
+	if (!CopyCloudLinkButton && FindInsertParent(PixelStreamTargetButton ? Cast<UWidget>(PixelStreamTargetButton) : After, Parent, Index))
+	{
+		CopyCloudLinkButton = InsertInkButton(TEXT("CopyCloudLinkButton"), FText::FromString(TEXT("复制云端观看链接")), Parent, Index);
+	}
+	if (!CopyLanLinkButton && FindInsertParent(CopyCloudLinkButton ? Cast<UWidget>(CopyCloudLinkButton) : PixelStreamTargetButton, Parent, Index))
+	{
+		CopyLanLinkButton = InsertInkButton(TEXT("CopyLanLinkButton"), FText::FromString(TEXT("复制局域网链接")), Parent, Index);
+	}
 }
 
 void UGraphicsSettingsWidget::ApplyLook()
@@ -202,7 +300,8 @@ void UGraphicsSettingsWidget::ApplyLook()
 	const FVector2D Size(360.f, 52.f);
 	UButton* AllButtons[] = {
 		Quality0Button, Quality1Button, Quality2Button, Quality3Button,
-		UpscalerButton, DLSSQualityButton, FrameGenButton, AutoDetectButton, PixelStreamingButton, BackButton
+		UpscalerButton, DLSSQualityButton, FrameGenButton, AutoDetectButton, PixelStreamingButton,
+		PixelStreamTargetButton, CopyCloudLinkButton, CopyLanLinkButton, BackButton
 	};
 	for (UButton* Button : AllButtons)
 	{
@@ -228,6 +327,9 @@ void UGraphicsSettingsWidget::ApplyLook()
 	StyleChildLabel(FrameGenButton, 20.f);
 	StyleChildLabel(AutoDetectButton, 20.f);
 	StyleChildLabel(PixelStreamingButton, 20.f);
+	StyleChildLabel(PixelStreamTargetButton, 20.f);
+	StyleChildLabel(CopyCloudLinkButton, 20.f);
+	StyleChildLabel(CopyLanLinkButton, 20.f);
 	StyleChildLabel(BackButton, 20.f);
 }
 
@@ -322,6 +424,19 @@ void UGraphicsSettingsWidget::RefreshSelection()
 		}
 		SetButtonLabel(PixelStreamingButton, FText::FromString(PsLabel), bPsOn, 20.f);
 	}
+
+	if (PixelStreamTargetButton)
+	{
+		const bool bLan = Graphics && Graphics->GetPixelStreamTarget() == ESlimePixelStreamTarget::Lan;
+		SetButtonLabel(
+			PixelStreamTargetButton,
+			Graphics ? Graphics->GetPixelStreamTargetDisplayName() : FText::FromString(TEXT("推流目标：云端")),
+			bLan,
+			20.f);
+	}
+
+	SetButtonLabel(CopyCloudLinkButton, FText::FromString(TEXT("复制云端观看链接")), false, 20.f);
+	SetButtonLabel(CopyLanLinkButton, FText::FromString(TEXT("复制局域网链接")), false, 20.f);
 }
 
 void UGraphicsSettingsWidget::ApplyQuality(int32 Level)
@@ -381,6 +496,43 @@ void UGraphicsSettingsWidget::OnPixelStreamingClicked()
 		Graphics->TogglePixelStreaming();
 	}
 	RefreshSelection();
+}
+
+void UGraphicsSettingsWidget::OnPixelStreamTargetClicked()
+{
+	if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
+	{
+		Graphics->CyclePixelStreamTarget();
+	}
+	RefreshSelection();
+}
+
+void UGraphicsSettingsWidget::OnCopyCloudLinkClicked()
+{
+	FText Status;
+	if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
+	{
+		Graphics->CopyCloudPlayUrl(Status);
+	}
+	RefreshSelection();
+	if (StatusText && !Status.IsEmpty())
+	{
+		StatusText->SetText(Status);
+	}
+}
+
+void UGraphicsSettingsWidget::OnCopyLanLinkClicked()
+{
+	FText Status;
+	if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
+	{
+		Graphics->CopyLanPlayUrl(Status);
+	}
+	RefreshSelection();
+	if (StatusText && !Status.IsEmpty())
+	{
+		StatusText->SetText(Status);
+	}
 }
 
 void UGraphicsSettingsWidget::OnBackClicked()

@@ -10,6 +10,8 @@
 
 class APlayerController;
 
+DECLARE_MULTICAST_DELEGATE(FOnSlimePlayInputModeChanged);
+
 /**
  *  Remappable slime gameplay keys. Poll paths and UI both read from here.
  *  Persists to GameUserSettings.ini section [SlimeInput].
@@ -59,14 +61,75 @@ public:
 	static FKey GetDefaultKey(ESlimeInputAction Action);
 	static TArray<ESlimeInputAction> GetAllActions();
 
+	UFUNCTION(BlueprintPure, Category = "Input")
+	ESlimePlayInputMode GetPlayInputMode() const { return PlayInputMode; }
+
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void SetPlayInputMode(ESlimePlayInputMode Mode);
+
+	UFUNCTION(BlueprintPure, Category = "Input")
+	ESlimeResolvedInputMode ResolvePlayInputMode() const;
+
+	UFUNCTION(BlueprintPure, Category = "Input")
+	FText GetPlayInputModeDisplayName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Input")
+	ESlimeTouchHandedness GetTouchHandedness() const { return TouchHandedness; }
+
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void SetTouchHandedness(ESlimeTouchHandedness Hand);
+
+	UFUNCTION(BlueprintPure, Category = "Input")
+	bool ShouldReadGamepadAbilityKeys() const;
+
+	UFUNCTION(BlueprintPure, Category = "Input")
+	bool ShouldUseTouchHud() const;
+
+	UFUNCTION(BlueprintPure, Category = "Input")
+	bool ShouldShowPixelStreamPlayHint() const;
+
+	void NotifyPixelStreamingChanged();
+
+	void NoteLastInputDevice(ESlimeLastInputDevice Device);
+	ESlimeLastInputDevice GetLastInputDevice() const { return LastInputDevice; }
+
+	static FKey GetDefaultGamepadKey(ESlimeInputAction Action);
+	static FText GetGamepadGuideText();
+	static bool IsGamepadDismissKey(const FKey& Key);
+
+	void SetVirtualActionDown(ESlimeInputAction Action, bool bDown);
+	void ClearVirtualActions();
+	void SetVirtualMoveAxis(FVector2D Axis);
+	FVector2D GetVirtualMoveAxis() const { return VirtualMoveAxis; }
+	void AddVirtualLookDelta(FVector2D Delta);
+	FVector2D ConsumeVirtualLookDelta();
+	void SetTouchPointerBusy(bool bBusy);
+	bool IsTouchPointerBusy() const { return bTouchPointerBusy; }
+
+	FOnSlimePlayInputModeChanged OnPlayInputModeChanged;
+
 protected:
 	void FillDefaults();
 	void MigrateBindSchemeIfNeeded();
 	FString ActionConfigName(ESlimeInputAction Action) const;
+	void SaveDevicePrefs();
+	void LoadDevicePrefs();
+	bool IsVirtualActionDown(ESlimeInputAction Action) const;
+	bool WasVirtualActionPressed(ESlimeInputAction Action) const;
 
 	UPROPERTY()
 	TMap<ESlimeInputAction, FKey> Keys;
 
 	/** Keys last written into Enhanced Input contexts (for remap chase). */
 	TMap<ESlimeInputAction, FKey> AppliedMovementKeys;
+
+	ESlimePlayInputMode PlayInputMode = ESlimePlayInputMode::KeyboardMouse;
+	ESlimeTouchHandedness TouchHandedness = ESlimeTouchHandedness::Right;
+	ESlimeLastInputDevice LastInputDevice = ESlimeLastInputDevice::None;
+
+	TSet<ESlimeInputAction> VirtualDown;
+	TMap<ESlimeInputAction, uint64> VirtualPressFrame;
+	FVector2D VirtualMoveAxis = FVector2D::ZeroVector;
+	FVector2D VirtualLookPending = FVector2D::ZeroVector;
+	bool bTouchPointerBusy = false;
 };

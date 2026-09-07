@@ -60,7 +60,16 @@ void UKeybindSettingsWidget::NativeConstruct()
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UKeybindSettingsWidget::OnBackClicked);
 	}
+	if (PlayModeButton)
+	{
+		PlayModeButton->OnClicked.AddUniqueDynamic(this, &UKeybindSettingsWidget::OnPlayModeClicked);
+	}
+	if (HandednessButton)
+	{
+		HandednessButton->OnClicked.AddUniqueDynamic(this, &UKeybindSettingsWidget::OnHandednessClicked);
+	}
 
+	RefreshDeviceControls();
 	RefreshList();
 }
 
@@ -126,6 +135,46 @@ void UKeybindSettingsWidget::BuildLayoutIfNeeded()
 	{
 		StatusSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 		StatusSlot->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	HintText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HintText"));
+	HintText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UVerticalBoxSlot* HintSlot = VBox->AddChildToVerticalBox(HintText))
+	{
+		HintSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+		HintSlot->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	auto AddHeaderButton = [this, VBox](const FName& Name, const FText& Label) -> UButton*
+	{
+		USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(
+			USizeBox::StaticClass(),
+			*FString::Printf(TEXT("%s_Size"), *Name.ToString()));
+		SizeBox->SetWidthOverride(320.f);
+		SizeBox->SetHeightOverride(48.f);
+		UVerticalBoxSlot* SizeSlot = VBox->AddChildToVerticalBox(SizeBox);
+		SizeSlot->SetPadding(FMargin(0.f, 4.f));
+		SizeSlot->SetHorizontalAlignment(HAlign_Center);
+
+		UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+		SizeBox->AddChild(Button);
+		UTextBlock* LabelBlock = WidgetTree->ConstructWidget<UTextBlock>(
+			UTextBlock::StaticClass(),
+			*FString::Printf(TEXT("%s_Label"), *Name.ToString()));
+		LabelBlock->SetText(Label);
+		LabelBlock->SetJustification(ETextJustify::Center);
+		Button->AddChild(LabelBlock);
+		return Button;
+	};
+	PlayModeButton = AddHeaderButton(TEXT("PlayModeButton"), FText::FromString(TEXT("游玩方式：自动")));
+	HandednessButton = AddHeaderButton(TEXT("HandednessButton"), FText::FromString(TEXT("触屏布局：右手")));
+
+	GamepadGuideText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("GamepadGuideText"));
+	GamepadGuideText->SetText(USlimeInputSettings::GetGamepadGuideText());
+	if (UVerticalBoxSlot* GuideSlot = VBox->AddChildToVerticalBox(GamepadGuideText))
+	{
+		GuideSlot->SetPadding(FMargin(8.f, 8.f));
+		GuideSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 
 	USizeBox* ScrollSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ScrollSize"));
@@ -201,6 +250,22 @@ void UKeybindSettingsWidget::ApplyLook()
 	};
 	StyleChildLabel(ResetButton, 20.f);
 	StyleChildLabel(BackButton, 20.f);
+	StyleChildLabel(PlayModeButton, 18.f);
+	StyleChildLabel(HandednessButton, 18.f);
+
+	FMenuUIStyle::ApplyMaterialButtonStyle(PlayModeButton, BrushBtn, FVector2D(320.f, 48.f));
+	FMenuUIStyle::ApplyMaterialButtonStyle(HandednessButton, BrushBtn, FVector2D(320.f, 48.f));
+	FMenuUIStyle::BindInkButtonHover(PlayModeButton, PlayModeButton ? Cast<UTextBlock>(PlayModeButton->GetContent()) : nullptr);
+	FMenuUIStyle::BindInkButtonHover(HandednessButton, HandednessButton ? Cast<UTextBlock>(HandednessButton->GetContent()) : nullptr);
+	if (HintText)
+	{
+		FMenuUIStyle::ApplyBrushCJKFont(HintText, 16.f, FMenuUIStyle::WarmMutedTextColor());
+	}
+	if (GamepadGuideText)
+	{
+		GamepadGuideText->SetText(USlimeInputSettings::GetGamepadGuideText());
+		FMenuUIStyle::ApplyBrushCJKFont(GamepadGuideText, 15.f, FMenuUIStyle::WarmMutedTextColor());
+	}
 }
 
 void UKeybindSettingsWidget::RefreshList()
@@ -337,11 +402,111 @@ bool UKeybindSettingsWidget::CaptureKey(FKey Key)
 	return true;
 }
 
+void UKeybindSettingsWidget::RefreshDeviceControls()
+{
+	USlimeInputSettings* Settings = GetInputSettings();
+	if (PlayModeButton)
+	{
+		if (UTextBlock* Label = Cast<UTextBlock>(PlayModeButton->GetContent()))
+		{
+			Label->SetText(Settings
+				? Settings->GetPlayInputModeDisplayName()
+				: FText::FromString(TEXT("游玩方式：键鼠")));
+			FMenuUIStyle::ApplyBrushCJKFont(Label, 18.f, FMenuUIStyle::WarmTextColor());
+		}
+	}
+	if (HandednessButton)
+	{
+		const bool bShowTouch = Settings && (Settings->GetPlayInputMode() == ESlimePlayInputMode::Touch
+			|| Settings->ShouldUseTouchHud());
+		UWidget* HandParent = HandednessButton->GetParent();
+		if (HandParent)
+		{
+			HandParent->SetVisibility(bShowTouch ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		}
+		else
+		{
+			HandednessButton->SetVisibility(bShowTouch ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		}
+		if (UTextBlock* Label = Cast<UTextBlock>(HandednessButton->GetContent()))
+		{
+			const bool bLeft = Settings && Settings->GetTouchHandedness() == ESlimeTouchHandedness::Left;
+			Label->SetText(FText::FromString(bLeft ? TEXT("触屏布局：左手") : TEXT("触屏布局：右手")));
+			FMenuUIStyle::ApplyBrushCJKFont(Label, 18.f, FMenuUIStyle::WarmTextColor());
+		}
+	}
+	if (HintText)
+	{
+		const bool bHint = Settings && Settings->ShouldShowPixelStreamPlayHint();
+		HintText->SetVisibility(bHint ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		if (bHint)
+		{
+			const bool bTouchHud = Settings->ShouldUseTouchHud();
+			HintText->SetText(FText::FromString(bTouchHud
+				? TEXT("像素流已开：手机显示触屏按钮")
+				: TEXT("像素流已开：当前键鼠，不显示触屏按钮。手机请切到触屏或自动")));
+			FMenuUIStyle::ApplyBrushCJKFont(HintText, 16.f, FMenuUIStyle::WarmMutedTextColor());
+		}
+	}
+}
+
+void UKeybindSettingsWidget::OnPlayModeClicked()
+{
+	USlimeInputSettings* Settings = GetInputSettings();
+	if (!Settings)
+	{
+		return;
+	}
+	ESlimePlayInputMode Next = ESlimePlayInputMode::KeyboardMouse;
+	switch (Settings->GetPlayInputMode())
+	{
+	case ESlimePlayInputMode::KeyboardMouse:
+		Next = ESlimePlayInputMode::Auto;
+		break;
+	case ESlimePlayInputMode::Auto:
+		Next = ESlimePlayInputMode::Gamepad;
+		break;
+	case ESlimePlayInputMode::Gamepad:
+		Next = ESlimePlayInputMode::Touch;
+		break;
+	default:
+		Next = ESlimePlayInputMode::KeyboardMouse;
+		break;
+	}
+	Settings->SetPlayInputMode(Next);
+	if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayer()))
+	{
+		PC->RefreshPlayInputPresentation();
+	}
+	RefreshDeviceControls();
+}
+
+void UKeybindSettingsWidget::OnHandednessClicked()
+{
+	USlimeInputSettings* Settings = GetInputSettings();
+	if (!Settings)
+	{
+		return;
+	}
+	const bool bLeft = Settings->GetTouchHandedness() == ESlimeTouchHandedness::Left;
+	Settings->SetTouchHandedness(bLeft ? ESlimeTouchHandedness::Right : ESlimeTouchHandedness::Left);
+	if (ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayer()))
+	{
+		PC->RefreshPlayInputPresentation();
+	}
+	RefreshDeviceControls();
+}
+
 FReply UKeybindSettingsWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
 	if (ListeningAction.IsSet())
 	{
 		CaptureKey(InKeyEvent.GetKey());
+		return FReply::Handled();
+	}
+	if (USlimeInputSettings::IsGamepadDismissKey(InKeyEvent.GetKey()))
+	{
+		OnBackClicked();
 		return FReply::Handled();
 	}
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);

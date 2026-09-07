@@ -24,3 +24,10 @@ enum class ESlimeDLSSQuality : uint8
 	UltraPerformance UMETA(DisplayName = "超级性能"),
 	DLAA UMETA(DisplayName = "DLAA")
 };
+
+UENUM(BlueprintType)
+enum class ESlimePixelStreamTarget : uint8
+{
+	Cloud UMETA(DisplayName = "云端"),
+	Lan UMETA(DisplayName = "局域网")
+};

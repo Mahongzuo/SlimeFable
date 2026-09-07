@@ -2,6 +2,7 @@
 
 #include "UI/SlimeElementFormationWidget.h"
 #include "UI/MenuUIStyle.h"
+#include "Settings/SlimeInputSettings.h"
 #include "Slime/SlimeElementProgressSubsystem.h"
 #include "Slime/SlimeAbilityComponent.h"
 #include "SlimeFablePlayerController.h"
@@ -308,7 +309,8 @@ void USlimeElementFormationWidget::OnCloseClicked()
 
 FReply USlimeElementFormationWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::Escape || InKeyEvent.GetKey() == EKeys::L)
+	if (InKeyEvent.GetKey() == EKeys::Escape || InKeyEvent.GetKey() == EKeys::L
+		|| USlimeInputSettings::IsGamepadDismissKey(InKeyEvent.GetKey()))
 	{
 		CloseSelf();
 		return FReply::Handled();

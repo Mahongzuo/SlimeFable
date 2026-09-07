@@ -25,6 +25,7 @@ public:
 
 protected:
 	void BuildLayoutIfNeeded();
+	void EnsurePixelStreamExtraButtons();
 	void ApplyLook();
 	void ApplyQuality(int32 Level);
 	void SetButtonLabel(UButton* Button, const FText& Label, bool bSelected, float FontSize);
@@ -59,6 +60,15 @@ protected:
 
 	UFUNCTION()
 	void OnPixelStreamingClicked();
+
+	UFUNCTION()
+	void OnPixelStreamTargetClicked();
+
+	UFUNCTION()
+	void OnCopyCloudLinkClicked();
+
+	UFUNCTION()
+	void OnCopyLanLinkClicked();
 
 	UPROPERTY()
 	TWeakObjectPtr<UUserWidget> ReturnTarget;
@@ -101,6 +111,15 @@ protected:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> PixelStreamingButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PixelStreamTargetButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> CopyCloudLinkButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> CopyLanLinkButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BackButton;

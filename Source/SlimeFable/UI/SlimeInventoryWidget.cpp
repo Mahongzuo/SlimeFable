@@ -76,7 +76,8 @@ FReply USlimeInventoryWidget::NativeOnKeyDown(const FGeometry& InGeometry, const
 			CloseKey = InputSettings->GetKey(ESlimeInputAction::Inventory);
 		}
 	}
-	if (InKeyEvent.GetKey() == CloseKey)
+	if (InKeyEvent.GetKey() == CloseKey
+		|| USlimeInputSettings::IsGamepadDismissKey(InKeyEvent.GetKey()))
 	{
 		OnCloseClicked();
 		return FReply::Handled();

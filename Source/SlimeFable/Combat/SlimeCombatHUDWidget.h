@@ -16,6 +16,29 @@ class UButton;
 class UBorder;
 class UOverlay;
 class UMaterialInstanceDynamic;
+class USlimeCombatHUDWidget;
+
+UCLASS()
+class SLIMEFABLE_API USlimeCombatHudClickProxy : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY()
+	TObjectPtr<USlimeCombatHUDWidget> Owner;
+
+	int32 Index = 0;
+	bool bSkill = false;
+
+	UFUNCTION()
+	void HandlePressed();
+
+	UFUNCTION()
+	void HandleReleased();
+
+	UFUNCTION()
+	void HandleClicked();
+};
 
 UCLASS()
 class SLIMEFABLE_API USlimeCombatHUDWidget : public UUserWidget
@@ -31,9 +54,15 @@ public:
 
 	void SetCombat(USlimeCombatComponent* InCombat);
 	void SetDeathVisible(bool bVisible);
+	void SetVirtualSkill(int32 Index, bool bDown);
+	void ActivateElementSlot(int32 Index);
 
 protected:
 	void BuildLayoutIfNeeded();
+	void EnsureClickableSlots();
+	void ApplyCombatHudSizes();
+	void BindSkillSlot(UButton* Button, int32 Index);
+	void BindElementSlot(UButton* Button, int32 Index);
 	void Refresh();
 	void RefreshLockOnBar(float DeltaTime);
 	void ApplyProgressBarFill(UProgressBar* Bar, const FLinearColor& Fill);
@@ -116,6 +145,15 @@ protected:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> HotbarLabels;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UButton>> SkillSlotButtons;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UButton>> ElementButtons;
+
+	UPROPERTY()
+	TArray<TObjectPtr<USlimeCombatHudClickProxy>> ClickProxies;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> InteractPrompt;

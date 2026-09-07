@@ -3,9 +3,12 @@
 #include "Settings/SlimeInputSettings.h"
 
 #include "EnhancedInputSubsystems.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "InputMappingContext.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Settings/SlimeGraphicsSettings.h"
 #include "SlimeFable.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -13,6 +16,8 @@ namespace SlimeInputPrivate
 {
 	static const TCHAR* ConfigSection = TEXT("SlimeInput");
 	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
+	static const TCHAR* PlayModeKey = TEXT("PlayInputMode");
+	static const TCHAR* HandednessKey = TEXT("TouchHandedness");
 	static constexpr int32 CurrentBindSchemeVersion = 6;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
@@ -38,6 +43,7 @@ void USlimeInputSettings::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 	FillDefaults();
 	Load();
+	LoadDevicePrefs();
 	MigrateBindSchemeIfNeeded();
 	AppliedMovementKeys = Keys;
 }
@@ -222,6 +228,7 @@ void USlimeInputSettings::Save()
 			*GetKey(Action).ToString(),
 			GGameUserSettingsIni);
 	}
+	SaveDevicePrefs();
 	GConfig->Flush(false, GGameUserSettingsIni);
 }
 
@@ -362,7 +369,24 @@ bool USlimeInputSettings::IsKeyDown(const APlayerController* PC, ESlimeInputActi
 		return false;
 	}
 	const FKey Key = GetKey(Action);
-	return Key.IsValid() && PC->IsInputKeyDown(Key);
+	const bool bIgnoreMouse = Action == ESlimeInputAction::Attack && Key.IsMouseButton() && IsTouchPointerBusy();
+	if (Key.IsValid() && !bIgnoreMouse && PC->IsInputKeyDown(Key))
+	{
+		return true;
+	}
+	if (IsVirtualActionDown(Action))
+	{
+		return true;
+	}
+	if (ShouldReadGamepadAbilityKeys())
+	{
+		const FKey Pad = GetDefaultGamepadKey(Action);
+		if (Pad.IsValid() && PC->IsInputKeyDown(Pad))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool USlimeInputSettings::WasKeyPressed(const APlayerController* PC, ESlimeInputAction Action) const
@@ -372,7 +396,24 @@ bool USlimeInputSettings::WasKeyPressed(const APlayerController* PC, ESlimeInput
 		return false;
 	}
 	const FKey Key = GetKey(Action);
-	return Key.IsValid() && PC->WasInputKeyJustPressed(Key);
+	const bool bIgnoreMouse = Action == ESlimeInputAction::Attack && Key.IsMouseButton() && IsTouchPointerBusy();
+	if (Key.IsValid() && !bIgnoreMouse && PC->WasInputKeyJustPressed(Key))
+	{
+		return true;
+	}
+	if (WasVirtualActionPressed(Action))
+	{
+		return true;
+	}
+	if (ShouldReadGamepadAbilityKeys())
+	{
+		const FKey Pad = GetDefaultGamepadKey(Action);
+		if (Pad.IsValid() && PC->WasInputKeyJustPressed(Pad))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool USlimeInputSettings::UsesCustomMovementKeys() const
@@ -433,4 +474,271 @@ void USlimeInputSettings::ApplyEnhancedInputRemaps(APlayerController* PC)
 	}
 
 	AppliedMovementKeys = Keys;
+}
+
+void USlimeInputSettings::SaveDevicePrefs()
+{
+	if (!GConfig)
+	{
+		return;
+	}
+	GConfig->SetInt(
+		SlimeInputPrivate::ConfigSection,
+		SlimeInputPrivate::PlayModeKey,
+		static_cast<int32>(PlayInputMode),
+		GGameUserSettingsIni);
+	GConfig->SetInt(
+		SlimeInputPrivate::ConfigSection,
+		SlimeInputPrivate::HandednessKey,
+		static_cast<int32>(TouchHandedness),
+		GGameUserSettingsIni);
+}
+
+void USlimeInputSettings::LoadDevicePrefs()
+{
+	if (!GConfig)
+	{
+		return;
+	}
+	int32 ModeValue = static_cast<int32>(ESlimePlayInputMode::KeyboardMouse);
+	if (GConfig->GetInt(
+		SlimeInputPrivate::ConfigSection,
+		SlimeInputPrivate::PlayModeKey,
+		ModeValue,
+		GGameUserSettingsIni))
+	{
+		PlayInputMode = static_cast<ESlimePlayInputMode>(
+			FMath::Clamp(ModeValue, 0, static_cast<int32>(ESlimePlayInputMode::Touch)));
+	}
+	int32 HandValue = static_cast<int32>(ESlimeTouchHandedness::Right);
+	if (GConfig->GetInt(
+		SlimeInputPrivate::ConfigSection,
+		SlimeInputPrivate::HandednessKey,
+		HandValue,
+		GGameUserSettingsIni))
+	{
+		TouchHandedness = static_cast<ESlimeTouchHandedness>(
+			FMath::Clamp(HandValue, 0, static_cast<int32>(ESlimeTouchHandedness::Left)));
+	}
+}
+
+void USlimeInputSettings::SetPlayInputMode(ESlimePlayInputMode Mode)
+{
+	if (PlayInputMode == Mode)
+	{
+		return;
+	}
+	PlayInputMode = Mode;
+	if (PlayInputMode != ESlimePlayInputMode::Touch)
+	{
+		ClearVirtualActions();
+	}
+	Save();
+	OnPlayInputModeChanged.Broadcast();
+}
+
+void USlimeInputSettings::SetTouchHandedness(ESlimeTouchHandedness Hand)
+{
+	if (TouchHandedness == Hand)
+	{
+		return;
+	}
+	TouchHandedness = Hand;
+	Save();
+	OnPlayInputModeChanged.Broadcast();
+}
+
+ESlimeResolvedInputMode USlimeInputSettings::ResolvePlayInputMode() const
+{
+	switch (PlayInputMode)
+	{
+	case ESlimePlayInputMode::KeyboardMouse:
+		return ESlimeResolvedInputMode::KeyboardMouse;
+	case ESlimePlayInputMode::Gamepad:
+		return ESlimeResolvedInputMode::Gamepad;
+	case ESlimePlayInputMode::Touch:
+		return ESlimeResolvedInputMode::Touch;
+	default:
+		break;
+	}
+
+#if PLATFORM_ANDROID || PLATFORM_IOS
+	return ESlimeResolvedInputMode::Touch;
+#else
+	if (LastInputDevice == ESlimeLastInputDevice::Gamepad)
+	{
+		return ESlimeResolvedInputMode::Gamepad;
+	}
+	return ESlimeResolvedInputMode::KeyboardMouse;
+#endif
+}
+
+FText USlimeInputSettings::GetPlayInputModeDisplayName() const
+{
+	switch (PlayInputMode)
+	{
+	case ESlimePlayInputMode::KeyboardMouse:
+		return FText::FromString(TEXT("游玩方式：键鼠"));
+	case ESlimePlayInputMode::Gamepad:
+		return FText::FromString(TEXT("游玩方式：手柄"));
+	case ESlimePlayInputMode::Touch:
+		return FText::FromString(TEXT("游玩方式：触屏"));
+	default:
+		return FText::FromString(TEXT("游玩方式：自动"));
+	}
+}
+
+bool USlimeInputSettings::ShouldReadGamepadAbilityKeys() const
+{
+	return ResolvePlayInputMode() == ESlimeResolvedInputMode::Gamepad;
+}
+
+bool USlimeInputSettings::ShouldUseTouchHud() const
+{
+	// Explicit 键鼠 never shows the phone overlay, even while Pixel Streaming.
+	if (PlayInputMode == ESlimePlayInputMode::KeyboardMouse)
+	{
+		return false;
+	}
+	if (ResolvePlayInputMode() == ESlimeResolvedInputMode::Touch)
+	{
+		return true;
+	}
+	if (PlayInputMode == ESlimePlayInputMode::Auto && ShouldShowPixelStreamPlayHint())
+	{
+		return true;
+	}
+	return false;
+}
+
+bool USlimeInputSettings::ShouldShowPixelStreamPlayHint() const
+{
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const USlimeGraphicsSettings* Graphics = GI->GetSubsystem<USlimeGraphicsSettings>())
+		{
+			return Graphics->IsPixelStreamingEnabled();
+		}
+	}
+	return false;
+}
+
+void USlimeInputSettings::NoteLastInputDevice(ESlimeLastInputDevice Device)
+{
+	if (Device == ESlimeLastInputDevice::None || LastInputDevice == Device)
+	{
+		return;
+	}
+	const ESlimeResolvedInputMode Before = ResolvePlayInputMode();
+	LastInputDevice = Device;
+	if (PlayInputMode == ESlimePlayInputMode::Auto && ResolvePlayInputMode() != Before)
+	{
+		OnPlayInputModeChanged.Broadcast();
+	}
+}
+
+FKey USlimeInputSettings::GetDefaultGamepadKey(ESlimeInputAction Action)
+{
+	switch (Action)
+	{
+	case ESlimeInputAction::Flatten: return EKeys::Gamepad_LeftTrigger;
+	case ESlimeInputAction::Absorb: return EKeys::Gamepad_LeftShoulder;
+	case ESlimeInputAction::ResetBody: return EKeys::Gamepad_DPad_Down;
+	case ESlimeInputAction::Attack: return EKeys::Gamepad_RightTrigger;
+	case ESlimeInputAction::Skill1: return EKeys::Gamepad_RightShoulder;
+	case ESlimeInputAction::LockOn: return EKeys::Gamepad_RightThumbstick;
+	case ESlimeInputAction::Inventory: return EKeys::Gamepad_DPad_Up;
+	case ESlimeInputAction::QuestLog: return EKeys::Gamepad_Special_Left;
+	case ESlimeInputAction::Interact: return EKeys::Gamepad_FaceButton_Left;
+	case ESlimeInputAction::Morph: return EKeys::Gamepad_FaceButton_Top;
+	case ESlimeInputAction::Dodge: return EKeys::Gamepad_FaceButton_Right;
+	case ESlimeInputAction::Sprint: return EKeys::Gamepad_LeftThumbstick;
+	default: return EKeys::Invalid;
+	}
+}
+
+FText USlimeInputSettings::GetGamepadGuideText()
+{
+	return FText::FromString(
+		TEXT("手柄默认（不可重绑）\n")
+		TEXT("左摇杆 移动　L3 冲刺　右摇杆 视角　R3 锁定\n")
+		TEXT("A 跳 / 长按发射　B 闪避　X 交互/吞噬　Y 幻形\n")
+		TEXT("LT 压扁　LB 吸收　RT 攻击　RB 技能1 / 长按幻影轮\n")
+		TEXT("上 背包　下 重置　左右 切换属性　View 史书　Menu 暂停"));
+}
+
+bool USlimeInputSettings::IsGamepadDismissKey(const FKey& Key)
+{
+	return Key == EKeys::Gamepad_FaceButton_Right
+		|| Key == EKeys::Gamepad_Special_Right;
+}
+
+void USlimeInputSettings::SetVirtualActionDown(ESlimeInputAction Action, bool bDown)
+{
+	if (bDown)
+	{
+		if (!VirtualDown.Contains(Action))
+		{
+			VirtualPressFrame.Add(Action, GFrameCounter);
+		}
+		VirtualDown.Add(Action);
+	}
+	else
+	{
+		VirtualDown.Remove(Action);
+	}
+}
+
+void USlimeInputSettings::ClearVirtualActions()
+{
+	VirtualDown.Reset();
+	VirtualPressFrame.Reset();
+	VirtualMoveAxis = FVector2D::ZeroVector;
+	VirtualLookPending = FVector2D::ZeroVector;
+	bTouchPointerBusy = false;
+}
+
+void USlimeInputSettings::SetTouchPointerBusy(bool bBusy)
+{
+	bTouchPointerBusy = bBusy;
+}
+
+void USlimeInputSettings::SetVirtualMoveAxis(FVector2D Axis)
+{
+	if (Axis.SizeSquared() > 1.f)
+	{
+		Axis.Normalize();
+	}
+	VirtualMoveAxis = Axis;
+}
+
+void USlimeInputSettings::AddVirtualLookDelta(FVector2D Delta)
+{
+	VirtualLookPending += Delta;
+}
+
+FVector2D USlimeInputSettings::ConsumeVirtualLookDelta()
+{
+	const FVector2D Out = VirtualLookPending;
+	VirtualLookPending = FVector2D::ZeroVector;
+	return Out;
+}
+
+void USlimeInputSettings::NotifyPixelStreamingChanged()
+{
+	OnPlayInputModeChanged.Broadcast();
+}
+
+bool USlimeInputSettings::IsVirtualActionDown(ESlimeInputAction Action) const
+{
+	return VirtualDown.Contains(Action);
+}
+
+bool USlimeInputSettings::WasVirtualActionPressed(ESlimeInputAction Action) const
+{
+	if (const uint64* Frame = VirtualPressFrame.Find(Action))
+	{
+		return *Frame == GFrameCounter;
+	}
+	return false;
 }

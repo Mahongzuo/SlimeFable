@@ -9,6 +9,7 @@
 class UInputMappingContext;
 class UUserWidget;
 class UPauseMenuWidget;
+class USlimeTouchHUDWidget;
 
 UENUM()
 enum class ESlimeUIInputReason : uint8
@@ -56,6 +57,9 @@ public:
 	void SuspendGameplayMappingContexts();
 	void RestoreGameplayMappingContexts();
 
+	void RequestTogglePauseMenu();
+	void RefreshPlayInputPresentation();
+
 protected:
 
 	/** Input Mapping Contexts */
@@ -89,6 +93,7 @@ protected:
 
 	/** Gameplay initialization */
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PlayerTick(float DeltaTime) override;
 	virtual void SetupInputComponent() override;
 
@@ -99,9 +104,11 @@ protected:
 	void OpenPauseMenu();
 	void ClosePauseMenu();
 	void UpdateAltCursor();
+	void UpdateLastInputDevice();
 	void ApplyTopUIInput();
 	bool IsPauseMenuOpen() const;
 	bool DismissOverlayUI();
+	void SyncTouchHudAndLookContext();
 
 	UFUNCTION()
 	void HandlePauseContinue();
@@ -120,4 +127,6 @@ protected:
 
 	TArray<FSlimeUIInputEntry> UIInputStack;
 	bool bPausedByUIInput = false;
+	bool bGameplayMappingsSuspended = false;
+	FDelegateHandle PlayInputModeHandle;
 };

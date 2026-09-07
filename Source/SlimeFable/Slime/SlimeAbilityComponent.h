@@ -141,6 +141,7 @@ public:
 
 	void CloseFormation();
 	void CloseHotbarConfirm();
+	void TrySwitchOrderedElement(int32 SlotIndex);
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsChargingLaunch() const { return bCharging; }
@@ -181,7 +182,6 @@ private:
 	void CloseWheel(bool bCommit);
 	void OpenFormation();
 	void OpenHotbarConfirm(int32 SlotIndex);
-	void TrySwitchOrderedElement(int32 SlotIndex);
 	void BeginLaunchCharge();
 	void ReleaseLaunchCharge();
 	void AdjustLaunchRange(int32 Step);
@@ -223,6 +223,9 @@ private:
 	bool bPollAbsorbDown = false;
 	bool bPollLaunchDown = false;
 	bool bPollLaunchKey = true;
+	bool bGamepadALaunchArmed = false;
+	float GamepadAHoldSeconds = 0.f;
+	int32 GamepadElementSlot = 0;
 	bool bPollWheelDown = false;
 	bool bPollMorphDown = false;
 	float MorphHoldSeconds = 0.f;

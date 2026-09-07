@@ -73,10 +73,75 @@ TSharedRef<SWidget> USlimeCombatHUDWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
+void USlimeCombatHudClickProxy::HandlePressed()
+{
+	if (Owner && bSkill)
+	{
+		Owner->SetVirtualSkill(Index, true);
+	}
+}
+
+void USlimeCombatHudClickProxy::HandleReleased()
+{
+	if (Owner && bSkill)
+	{
+		Owner->SetVirtualSkill(Index, false);
+	}
+}
+
+void USlimeCombatHudClickProxy::HandleClicked()
+{
+	if (Owner && !bSkill)
+	{
+		Owner->ActivateElementSlot(Index);
+	}
+}
+
+namespace
+{
+	void MakeTransparentHudButton(UButton* Button)
+	{
+		if (!Button)
+		{
+			return;
+		}
+		FButtonStyle Style;
+		FSlateBrush Empty;
+		Empty.DrawAs = ESlateBrushDrawType::NoDrawType;
+		Style.SetNormal(Empty);
+		Style.SetHovered(Empty);
+		Style.SetPressed(Empty);
+		Style.SetDisabled(Empty);
+		Button->SetStyle(Style);
+		PRAGMA_DISABLE_DEPRECATION_WARNINGS
+		Button->IsFocusable = false;
+		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+		Button->SetClickMethod(EButtonClickMethod::MouseDown);
+		Button->SetTouchMethod(EButtonTouchMethod::DownAndUp);
+		Button->SetPressMethod(EButtonPressMethod::ButtonPress);
+		Button->SetNavigationRuleBase(EUINavigation::Next, EUINavigationRule::Escape);
+		Button->SetNavigationRuleBase(EUINavigation::Previous, EUINavigationRule::Escape);
+	}
+
+	USizeBox* FindOwningSizeBox(UWidget* Child)
+	{
+		for (UWidget* Walk = Child; Walk; Walk = Walk->GetParent())
+		{
+			if (USizeBox* Box = Cast<USizeBox>(Walk))
+			{
+				return Box;
+			}
+		}
+		return nullptr;
+	}
+}
+
 void USlimeCombatHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	EnsureClickableSlots();
+	ApplyCombatHudSizes();
 	Refresh();
 }
 
@@ -97,10 +162,15 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
 	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 3 && PlayerHealthBar)
 	{
+		EnsureClickableSlots();
+		ApplyCombatHudSizes();
 		return;
 	}
 
 	bBuiltInCode = true;
+	SkillSlotButtons.Reset();
+	ElementButtons.Reset();
+	ClickProxies.Reset();
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("CombatHudRoot"));
 	Root->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	WidgetTree->RootWidget = Root;
@@ -108,11 +178,11 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("HudStack"));
 	if (UCanvasPanelSlot* StackSlot = Root->AddChildToCanvas(Stack))
 	{
-		// Right-middle, resolution-safe inset from the right edge.
-		StackSlot->SetAnchors(FAnchors(1.f, 0.5f, 1.f, 0.5f));
+		// Inset so the bottom-right 攻/跳 cluster keeps the corner.
+		StackSlot->SetAnchors(FAnchors(1.f, 0.32f, 1.f, 0.32f));
 		StackSlot->SetAlignment(FVector2D(1.f, 0.5f));
 		StackSlot->SetAutoSize(true);
-		StackSlot->SetPosition(FVector2D(-32.f, 40.f));
+		StackSlot->SetPosition(FVector2D(-210.f, 0.f));
 	}
 
 	ComboText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ComboText"));
@@ -134,16 +204,22 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	for (int32 Index = 0; Index < 3; ++Index)
 	{
 		USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("Box%d"), Index));
-		Box->SetWidthOverride(128.f);
-		Box->SetHeightOverride(72.f);
+		Box->SetWidthOverride(176.f);
+		Box->SetHeightOverride(96.f);
 		if (UVerticalBoxSlot* BoxSlot = Stack->AddChildToVerticalBox(Box))
 		{
 			BoxSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
 			BoxSlot->SetHorizontalAlignment(HAlign_Right);
 		}
 
+		UButton* SlotButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), *FString::Printf(TEXT("SlotBtn%d"), Index));
+		MakeTransparentHudButton(SlotButton);
+		Box->AddChild(SlotButton);
+		BindSkillSlot(SlotButton, Index);
+		SkillSlotButtons.Add(SlotButton);
+
 		UOverlay* Cell = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), *FString::Printf(TEXT("Slot%d"), Index));
-		Box->AddChild(Cell);
+		SlotButton->AddChild(Cell);
 
 		UImage* Bg = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), *FString::Printf(TEXT("Bg%d"), Index));
 		if (ButtonMat)
@@ -167,7 +243,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		if (ProgressMat)
 		{
 			FProgressBarStyle Style = Cd->GetWidgetStyle();
-			FSlateBrush Fill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(128.f, 72.f));
+			FSlateBrush Fill = FMenuUIStyle::MakeMaterialBrush(ProgressMat, FVector2D(176.f, 96.f));
 			Fill.TintColor = FSlateColor(FLinearColor(0.92f, 0.78f, 0.48f, 0.9f));
 			Style.SetFillImage(Fill);
 			FSlateBrush Empty;
@@ -359,19 +435,25 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	{
 		HotbarSlot->SetAnchors(FAnchors(0.5f, 1.f));
 		HotbarSlot->SetAlignment(FVector2D(0.5f, 1.f));
-		HotbarSlot->SetPosition(FVector2D(0.f, -28.f));
+		HotbarSlot->SetPosition(FVector2D(0.f, -36.f));
 		HotbarSlot->SetAutoSize(true);
 	}
 	HotbarLabels.Reset();
 	for (int32 Index = 0; Index < 6; ++Index)
 	{
 		USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("HotBox%d"), Index));
-		Box->SetWidthOverride(56.f);
-		Box->SetHeightOverride(56.f);
+		Box->SetWidthOverride(84.f);
+		Box->SetHeightOverride(84.f);
 		HotbarRow->AddChildToHorizontalBox(Box);
 
+		UButton* ElementButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), *FString::Printf(TEXT("HotBtn%d"), Index));
+		MakeTransparentHudButton(ElementButton);
+		Box->AddChild(ElementButton);
+		BindElementSlot(ElementButton, Index);
+		ElementButtons.Add(ElementButton);
+
 		UOverlay* Cell = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), *FString::Printf(TEXT("HotCell%d"), Index));
-		Box->AddChild(Cell);
+		ElementButton->AddChild(Cell);
 
 		UImage* Bg = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), *FString::Printf(TEXT("HotBg%d"), Index));
 		if (ButtonMat)
@@ -567,7 +649,7 @@ void USlimeCombatHUDWidget::Refresh()
 	{
 		if (SlotNames[Index])
 		{
-			FMenuUIStyle::ApplyBrushCJKFont(SlotNames[Index], 15.f, FMenuUIStyle::WarmTextColor());
+			FMenuUIStyle::ApplyBrushCJKFont(SlotNames[Index], 18.f, FMenuUIStyle::WarmTextColor());
 			SlotNames[Index]->SetText(Defs[Index]->DisplayName);
 		}
 		if (SlotKeys[Index])
@@ -586,7 +668,7 @@ void USlimeCombatHUDWidget::Refresh()
 				}
 			}
 			SlotKeys[Index]->SetText(KeyText);
-			FMenuUIStyle::ApplyMarkerFont(SlotKeys[Index], 22.f, FMenuUIStyle::WarmTitleColor());
+			FMenuUIStyle::ApplyMarkerFont(SlotKeys[Index], 26.f, FMenuUIStyle::WarmTitleColor());
 		}
 		if (SlotCds[Index])
 		{
@@ -680,7 +762,7 @@ void USlimeCombatHUDWidget::Refresh()
 		const FLinearColor Color = bCurrent
 			? SlimeCombat::GetElementVfxColor(Ordered)
 			: FMenuUIStyle::WarmMutedTextColor();
-		FMenuUIStyle::ApplyMixedMenuFont(Label, bCurrent ? 16.f : 14.f, Color);
+		FMenuUIStyle::ApplyMixedMenuFont(Label, bCurrent ? 20.f : 18.f, Color);
 	}
 
 	if (InteractPrompt)
@@ -996,6 +1078,171 @@ void USlimeCombatHUDWidget::SetDeathVisible(bool bVisible)
 	{
 		DeathText->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		FMenuUIStyle::ApplyBrushCJKFont(DeathText, 42.f, FMenuUIStyle::WarmTitleColor());
+	}
+}
+
+void USlimeCombatHUDWidget::ApplyCombatHudSizes()
+{
+	for (int32 Index = 0; Index < SlotKeys.Num(); ++Index)
+	{
+		if (USizeBox* Box = FindOwningSizeBox(SlotKeys[Index]))
+		{
+			Box->SetWidthOverride(176.f);
+			Box->SetHeightOverride(96.f);
+		}
+	}
+	for (int32 Index = 0; Index < HotbarLabels.Num(); ++Index)
+	{
+		if (USizeBox* Box = FindOwningSizeBox(HotbarLabels[Index]))
+		{
+			Box->SetWidthOverride(84.f);
+			Box->SetHeightOverride(84.f);
+		}
+	}
+	if (UVerticalBox* Stack = ComboText ? Cast<UVerticalBox>(ComboText->GetParent()) : nullptr)
+	{
+		if (UCanvasPanelSlot* StackSlot = Stack ? Cast<UCanvasPanelSlot>(Stack->Slot) : nullptr)
+		{
+			StackSlot->SetAnchors(FAnchors(1.f, 0.32f, 1.f, 0.32f));
+			StackSlot->SetAlignment(FVector2D(1.f, 0.5f));
+			StackSlot->SetPosition(FVector2D(-210.f, 0.f));
+		}
+	}
+	if (HotbarLabels.Num() > 0)
+	{
+		if (USizeBox* First = FindOwningSizeBox(HotbarLabels[0]))
+		{
+			if (UHorizontalBox* Row = Cast<UHorizontalBox>(First->GetParent()))
+			{
+				if (UCanvasPanelSlot* HotbarSlot = Cast<UCanvasPanelSlot>(Row->Slot))
+				{
+					HotbarSlot->SetPosition(FVector2D(0.f, -36.f));
+				}
+			}
+		}
+	}
+}
+
+void USlimeCombatHUDWidget::BindSkillSlot(UButton* Button, int32 Index)
+{
+	if (!Button)
+	{
+		return;
+	}
+	USlimeCombatHudClickProxy* Proxy = NewObject<USlimeCombatHudClickProxy>(this);
+	Proxy->Owner = this;
+	Proxy->Index = Index;
+	Proxy->bSkill = true;
+	Button->OnPressed.AddUniqueDynamic(Proxy, &USlimeCombatHudClickProxy::HandlePressed);
+	Button->OnReleased.AddUniqueDynamic(Proxy, &USlimeCombatHudClickProxy::HandleReleased);
+	ClickProxies.Add(Proxy);
+}
+
+void USlimeCombatHUDWidget::BindElementSlot(UButton* Button, int32 Index)
+{
+	if (!Button)
+	{
+		return;
+	}
+	USlimeCombatHudClickProxy* Proxy = NewObject<USlimeCombatHudClickProxy>(this);
+	Proxy->Owner = this;
+	Proxy->Index = Index;
+	Proxy->bSkill = false;
+	Button->OnClicked.AddUniqueDynamic(Proxy, &USlimeCombatHudClickProxy::HandleClicked);
+	ClickProxies.Add(Proxy);
+}
+
+void USlimeCombatHUDWidget::SetVirtualSkill(int32 Index, bool bDown)
+{
+	if (Index < 0 || Index > 2)
+	{
+		return;
+	}
+	static const ESlimeInputAction Actions[3] = {
+		ESlimeInputAction::Skill1, ESlimeInputAction::Skill2, ESlimeInputAction::Skill3
+	};
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeInputSettings* Input = GI->GetSubsystem<USlimeInputSettings>())
+		{
+			Input->SetVirtualActionDown(Actions[Index], bDown);
+		}
+	}
+}
+
+void USlimeCombatHUDWidget::ActivateElementSlot(int32 Index)
+{
+	APawn* Pawn = GetOwningPlayerPawn();
+	if (USlimeAbilityComponent* Ability = Pawn ? Pawn->FindComponentByClass<USlimeAbilityComponent>() : nullptr)
+	{
+		Ability->TrySwitchOrderedElement(Index);
+	}
+}
+
+void USlimeCombatHUDWidget::EnsureClickableSlots()
+{
+	auto WrapChildWithButton = [this](USizeBox* Box, bool bSkill, int32 Index) -> UButton*
+	{
+		if (!Box || !WidgetTree)
+		{
+			return nullptr;
+		}
+		if (UButton* Existing = Cast<UButton>(Box->GetChildAt(0)))
+		{
+			if (bSkill)
+			{
+				BindSkillSlot(Existing, Index);
+			}
+			else
+			{
+				BindElementSlot(Existing, Index);
+			}
+			return Existing;
+		}
+		UWidget* Inner = Box->GetChildAt(0);
+		if (!Inner)
+		{
+			return nullptr;
+		}
+		Box->RemoveChild(Inner);
+		UButton* Button = WidgetTree->ConstructWidget<UButton>(
+			UButton::StaticClass(),
+			*FString::Printf(TEXT("%sWrap%d"), bSkill ? TEXT("Skill") : TEXT("Elem"), Index));
+		MakeTransparentHudButton(Button);
+		Box->AddChild(Button);
+		Button->AddChild(Inner);
+		if (bSkill)
+		{
+			BindSkillSlot(Button, Index);
+		}
+		else
+		{
+			BindElementSlot(Button, Index);
+		}
+		return Button;
+	};
+
+	if (SkillSlotButtons.Num() != 3)
+	{
+		SkillSlotButtons.Reset();
+		for (int32 Index = 0; Index < SlotKeys.Num(); ++Index)
+		{
+			if (UButton* Button = WrapChildWithButton(FindOwningSizeBox(SlotKeys[Index]), true, Index))
+			{
+				SkillSlotButtons.Add(Button);
+			}
+		}
+	}
+	if (ElementButtons.Num() != 6)
+	{
+		ElementButtons.Reset();
+		for (int32 Index = 0; Index < HotbarLabels.Num(); ++Index)
+		{
+			if (UButton* Button = WrapChildWithButton(FindOwningSizeBox(HotbarLabels[Index]), false, Index))
+			{
+				ElementButtons.Add(Button);
+			}
+		}
 	}
 }
 

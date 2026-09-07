@@ -44,7 +44,9 @@ public class SlimeFable : ModuleRules
 			"RenderCore",
 			"PixelStreaming2",
 			"DLSSBlueprint",
-			"Landscape"
+			"Landscape",
+			"ApplicationCore",
+			"Sockets"
 		});
 
 		if (Target.bBuildEditor)

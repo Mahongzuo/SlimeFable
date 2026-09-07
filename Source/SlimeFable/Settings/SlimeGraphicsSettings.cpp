@@ -3,6 +3,7 @@
 #include "Settings/SlimeGraphicsSettings.h"
 
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/IConsoleManager.h"
@@ -19,7 +20,14 @@
 #include "IPixelStreaming2Module.h"
 #include "IPixelStreaming2Streamer.h"
 #include "DLSSLibrary.h"
+#include "Settings/SlimeInputSettings.h"
 #include "SlimeFable.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+#include "IPAddress.h"
+#include "Sockets.h"
+#include "SocketSubsystem.h"
 
 namespace SlimeGraphicsPrivate
 {
@@ -30,6 +38,13 @@ namespace SlimeGraphicsPrivate
 	static const TCHAR* KeyHasQuality = TEXT("bHasUserOrAutoQuality");
 	static const TCHAR* KeyPixelStreaming = TEXT("bPixelStreaming");
 	static const TCHAR* KeyPixelStreamingUrl = TEXT("PixelStreamingUrl");
+	static const TCHAR* KeyPixelStreamTarget = TEXT("PixelStreamTarget");
+	static const TCHAR* KeyPixelStreamingPlayToken = TEXT("PixelStreamingPlayToken");
+	static const TCHAR* LanStreamerUrl = TEXT("ws://127.0.0.1:18888");
+	static const TCHAR* DefaultCloudStreamerUrl = TEXT("wss://been.chat/ps/streamer");
+	static const TCHAR* CloudPlayPage = TEXT("https://been.chat/play");
+	static constexpr int32 LanPlayerPort = 18880;
+	static constexpr int32 LanStreamerPort = 18888;
 
 	static bool IsUsableStreamingUrl(const FString& Url)
 	{
@@ -658,7 +673,7 @@ void USlimeGraphicsSettings::ToggleFrameGen()
 
 void USlimeGraphicsSettings::ApplyPixelStreaming() const
 {
-	SetCVarString(TEXT("PixelStreaming2.InputController"), TEXT("Host"));
+	SetCVarString(TEXT("PixelStreaming2.InputController"), TEXT("Any"));
 	if (!bPixelStreaming)
 	{
 		SetCVarInt(TEXT("PixelStreaming2.AutoStartStream"), 0);
@@ -754,6 +769,7 @@ void USlimeGraphicsSettings::StartPixelStreamingNow() const
 bool USlimeGraphicsSettings::TrySetPixelStreaming(bool bEnable, FText& OutError)
 {
 	OutError = FText::GetEmpty();
+	ApplyPixelStreamTargetUrl();
 	if (bEnable && PixelStreamingUrl.IsEmpty())
 	{
 		OutError = FText::FromString(TEXT("未配置推流地址（PixelStreamingUrl）"));
@@ -765,8 +781,20 @@ bool USlimeGraphicsSettings::TrySetPixelStreaming(bool bEnable, FText& OutError)
 		OutError = FText::FromString(TEXT("未启用 PixelStreaming2 插件"));
 		return false;
 	}
+	if (bEnable && PixelStreamTarget == ESlimePixelStreamTarget::Lan)
+	{
+		FText SignallingStatus;
+		EnsureLocalSignalling(SignallingStatus);
+	}
 	bPixelStreaming = bEnable;
 	ApplyPixelStreaming();
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeInputSettings* Input = GI->GetSubsystem<USlimeInputSettings>())
+		{
+			Input->NotifyPixelStreamingChanged();
+		}
+	}
 	Save();
 	return true;
 }
@@ -778,6 +806,302 @@ void USlimeGraphicsSettings::TogglePixelStreaming()
 	{
 		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeGraphics: %s"), *Error.ToString());
 	}
+}
+
+void USlimeGraphicsSettings::ApplyPixelStreamTargetUrl()
+{
+	if (PixelStreamTarget == ESlimePixelStreamTarget::Lan)
+	{
+		PixelStreamingUrl = SlimeGraphicsPrivate::LanStreamerUrl;
+		return;
+	}
+	if (!SlimeGraphicsPrivate::IsUsableStreamingUrl(CloudPixelStreamingUrl))
+	{
+		CloudPixelStreamingUrl = SlimeGraphicsPrivate::DefaultCloudStreamerUrl;
+	}
+	PixelStreamingUrl = CloudPixelStreamingUrl;
+}
+
+FText USlimeGraphicsSettings::GetPixelStreamTargetDisplayName() const
+{
+	return PixelStreamTarget == ESlimePixelStreamTarget::Lan
+		? FText::FromString(TEXT("推流目标：局域网"))
+		: FText::FromString(TEXT("推流目标：云端"));
+}
+
+void USlimeGraphicsSettings::CyclePixelStreamTarget()
+{
+	PixelStreamTarget = PixelStreamTarget == ESlimePixelStreamTarget::Cloud
+		? ESlimePixelStreamTarget::Lan
+		: ESlimePixelStreamTarget::Cloud;
+	ApplyPixelStreamTargetUrl();
+	if (bPixelStreaming && PixelStreamTarget == ESlimePixelStreamTarget::Lan)
+	{
+		FText SignallingStatus;
+		EnsureLocalSignalling(SignallingStatus);
+	}
+	if (bPixelStreaming)
+	{
+		ApplyPixelStreaming();
+	}
+	Save();
+}
+
+void USlimeGraphicsSettings::LoadPlayToken()
+{
+	FString EnvToken = FPlatformMisc::GetEnvironmentVariable(TEXT("SLIME_PLAY_TOKEN"));
+	EnvToken.TrimStartAndEndInline();
+	if (!EnvToken.IsEmpty())
+	{
+		PixelStreamingPlayToken = EnvToken;
+		return;
+	}
+
+	FString SavedToken;
+	if (GConfig && GConfig->GetString(
+		SlimeGraphicsPrivate::ConfigSection,
+		SlimeGraphicsPrivate::KeyPixelStreamingPlayToken,
+		SavedToken,
+		GGameUserSettingsIni))
+	{
+		SavedToken.TrimStartAndEndInline();
+		if (!SavedToken.IsEmpty())
+		{
+			PixelStreamingPlayToken = SavedToken;
+			return;
+		}
+	}
+
+	const FString ConfigPath = FPaths::ProjectDir() / TEXT("Tools/PixelStreaming/worker.config.json");
+	FString Json;
+	if (FFileHelper::LoadFileToString(Json, *ConfigPath))
+	{
+		const FString Key = TEXT("\"token\"");
+		int32 KeyIndex = Json.Find(Key, ESearchCase::IgnoreCase);
+		if (KeyIndex != INDEX_NONE)
+		{
+			const int32 Colon = Json.Find(TEXT(":"), ESearchCase::IgnoreCase, ESearchDir::FromStart, KeyIndex);
+			const int32 FirstQuote = Json.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Colon + 1);
+			const int32 SecondQuote = FirstQuote != INDEX_NONE
+				? Json.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, FirstQuote + 1)
+				: INDEX_NONE;
+			if (FirstQuote != INDEX_NONE && SecondQuote != INDEX_NONE && SecondQuote > FirstQuote + 1)
+			{
+				PixelStreamingPlayToken = Json.Mid(FirstQuote + 1, SecondQuote - FirstQuote - 1);
+			}
+		}
+	}
+}
+
+FString USlimeGraphicsSettings::DetectLanIPv4()
+{
+	ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	if (!Sockets)
+	{
+		return FString();
+	}
+
+	TArray<TSharedPtr<FInternetAddr>> Addresses;
+	if (Sockets->GetLocalAdapterAddresses(Addresses))
+	{
+		for (const TSharedPtr<FInternetAddr>& Addr : Addresses)
+		{
+			if (!Addr.IsValid() || !Addr->IsValid())
+			{
+				continue;
+			}
+			const FString Text = Addr->ToString(false);
+			if (Text.StartsWith(TEXT("127.")) || Text.StartsWith(TEXT("169.254.")) || !Text.Contains(TEXT(".")))
+			{
+				continue;
+			}
+			return Text;
+		}
+	}
+
+	bool bCanBindAll = false;
+	const TSharedRef<FInternetAddr> Local = Sockets->GetLocalHostAddr(*GLog, bCanBindAll);
+	if (Local->IsValid())
+	{
+		const FString Text = Local->ToString(false);
+		if (!Text.StartsWith(TEXT("127.")))
+		{
+			return Text;
+		}
+	}
+	return FString();
+}
+
+bool USlimeGraphicsSettings::IsLocalTcpOpen(int32 Port)
+{
+	ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+	if (!Sockets)
+	{
+		return false;
+	}
+	TSharedRef<FInternetAddr> Addr = Sockets->CreateInternetAddr();
+	bool bIsValid = false;
+	Addr->SetIp(TEXT("127.0.0.1"), bIsValid);
+	if (!bIsValid)
+	{
+		return false;
+	}
+	Addr->SetPort(Port);
+	FSocket* Socket = Sockets->CreateSocket(NAME_Stream, TEXT("SlimeLanProbe"), false);
+	if (!Socket)
+	{
+		return false;
+	}
+	Socket->SetNonBlocking(false);
+	const bool bOk = Socket->Connect(*Addr);
+	Socket->Close();
+	Sockets->DestroySocket(Socket);
+	return bOk;
+}
+
+bool USlimeGraphicsSettings::LaunchLocalSignalling()
+{
+	const FString Script = FPaths::ConvertRelativePathToFull(
+		FPaths::ProjectDir() / TEXT("Tools/PixelStreaming/start_local.py"));
+	if (!FPaths::FileExists(Script))
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeGraphics: missing %s"), *Script);
+		return false;
+	}
+
+	const FString Args = FString::Printf(TEXT("\"%s\" --ensure"), *Script);
+	const FString WorkDir = FPaths::GetPath(Script);
+	const TCHAR* Launchers[] = {
+		TEXT("C:\\Windows\\py.exe"),
+		TEXT("py"),
+		TEXT("python"),
+		TEXT("python3")
+	};
+	for (const TCHAR* Launcher : Launchers)
+	{
+		FProcHandle Proc = FPlatformProcess::CreateProc(
+			Launcher,
+			*Args,
+			true,
+			false,
+			false,
+			nullptr,
+			0,
+			*WorkDir,
+			nullptr);
+		if (Proc.IsValid())
+		{
+			FPlatformProcess::CloseProc(Proc);
+			UE_LOG(LogSlimeFable, Log, TEXT("SlimeGraphics: launched local signalling via %s"), Launcher);
+			return true;
+		}
+	}
+	UE_LOG(LogSlimeFable, Warning, TEXT("SlimeGraphics: could not launch start_local.py (py/python missing)."));
+	return false;
+}
+
+bool USlimeGraphicsSettings::EnsureLocalSignalling(FText& OutStatus)
+{
+	if (IsLocalTcpOpen(SlimeGraphicsPrivate::LanPlayerPort)
+		&& IsLocalTcpOpen(SlimeGraphicsPrivate::LanStreamerPort))
+	{
+		OutStatus = FText::FromString(TEXT("本机播放页已就绪"));
+		return true;
+	}
+
+	const double Now = FPlatformTime::Seconds();
+	if (Now - LastLocalSignallingLaunchSeconds > 12.0)
+	{
+		if (!LaunchLocalSignalling())
+		{
+			OutStatus = FText::FromString(TEXT("无法启动本机播放页（缺少 py 或 start_local.py）"));
+			return false;
+		}
+		LastLocalSignallingLaunchSeconds = Now;
+	}
+
+	for (int32 Attempt = 0; Attempt < 40; ++Attempt)
+	{
+		if (IsLocalTcpOpen(SlimeGraphicsPrivate::LanPlayerPort)
+			&& IsLocalTcpOpen(SlimeGraphicsPrivate::LanStreamerPort))
+		{
+			OutStatus = FText::FromString(TEXT("本机播放页已启动"));
+			return true;
+		}
+		FPlatformProcess::Sleep(0.25f);
+	}
+
+	OutStatus = FText::FromString(TEXT("本机播放页还在启动，稍后再打开复制的链接"));
+	return false;
+}
+
+bool USlimeGraphicsSettings::CopyTextToClipboard(const FString& Text)
+{
+	if (Text.IsEmpty())
+	{
+		return false;
+	}
+	FPlatformApplicationMisc::ClipboardCopy(*Text);
+	return true;
+}
+
+FString USlimeGraphicsSettings::GetCloudPlayUrl() const
+{
+	const FString Token = PixelStreamingPlayToken.IsEmpty() ? TEXT("change-me") : PixelStreamingPlayToken;
+	return FString::Printf(TEXT("%s?k=%s"), SlimeGraphicsPrivate::CloudPlayPage, *Token);
+}
+
+FString USlimeGraphicsSettings::GetLanPlayUrl() const
+{
+	FString Ip = DetectLanIPv4();
+	if (Ip.IsEmpty())
+	{
+		Ip = TEXT("127.0.0.1");
+	}
+	return FString::Printf(
+		TEXT("http://%s:18880/player.html?StreamerId=slime-0&FakeMouseWithTouches=true&AutoConnect=true&AutoPlayVideo=true&WaitForStreamer=true&HideUI=true"),
+		*Ip);
+}
+
+bool USlimeGraphicsSettings::CopyCloudPlayUrl(FText& OutStatus)
+{
+	const FString Url = GetCloudPlayUrl();
+	if (!CopyTextToClipboard(Url))
+	{
+		OutStatus = FText::FromString(TEXT("复制失败"));
+		return false;
+	}
+	OutStatus = FText::FromString(TEXT("已复制云端观看链接（不要打开 /ps/player）"));
+	return true;
+}
+
+bool USlimeGraphicsSettings::CopyLanPlayUrl(FText& OutStatus)
+{
+	PixelStreamTarget = ESlimePixelStreamTarget::Lan;
+	ApplyPixelStreamTargetUrl();
+	FText SignallingStatus;
+	if (!bPixelStreaming)
+	{
+		FText EnableError;
+		TrySetPixelStreaming(true, EnableError);
+	}
+	const bool bReady = EnsureLocalSignalling(SignallingStatus);
+	if (bPixelStreaming)
+	{
+		ApplyPixelStreaming();
+		Save();
+	}
+
+	const FString Url = GetLanPlayUrl();
+	if (!CopyTextToClipboard(Url))
+	{
+		OutStatus = FText::FromString(TEXT("复制失败"));
+		return false;
+	}
+	OutStatus = bReady
+		? FText::FromString(TEXT("已复制局域网链接，手机同一 WiFi 打开即可"))
+		: SignallingStatus;
+	return bReady;
 }
 
 FText USlimeGraphicsSettings::GetUpscalerDisplayName() const
@@ -812,12 +1136,16 @@ FText USlimeGraphicsSettings::GetStatusText() const
 		UpscalerPart += TEXT(" ");
 		UpscalerPart += GetDLSSQualityDisplayName().ToString();
 	}
+	const TCHAR* TargetHint = PixelStreamTarget == ESlimePixelStreamTarget::Lan
+		? TEXT("局域网（先跑 start_local.py）")
+		: TEXT("云端（勿开 /ps/player）");
 	return FText::FromString(FString::Printf(
-		TEXT("当前：%s · 超分：%s · 帧生成%s · 像素流送%s"),
+		TEXT("当前：%s · 超分：%s · 帧生成%s · 像素流送%s · %s"),
 		QualityName,
 		*UpscalerPart,
 		bFrameGen ? TEXT("开") : TEXT("关"),
-		bPixelStreaming ? TEXT("开") : TEXT("关")));
+		bPixelStreaming ? TEXT("开") : TEXT("关"),
+		TargetHint));
 }
 
 void USlimeGraphicsSettings::Save()
@@ -831,7 +1159,12 @@ void USlimeGraphicsSettings::Save()
 	GConfig->SetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyFrameGen, bFrameGen, GGameUserSettingsIni);
 	GConfig->SetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyHasQuality, bHasUserOrAutoQuality, GGameUserSettingsIni);
 	GConfig->SetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreaming, bPixelStreaming, GGameUserSettingsIni);
-	GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingUrl, *PixelStreamingUrl, GGameUserSettingsIni);
+	GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingUrl, *CloudPixelStreamingUrl, GGameUserSettingsIni);
+	GConfig->SetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamTarget, static_cast<int32>(PixelStreamTarget), GGameUserSettingsIni);
+	if (!PixelStreamingPlayToken.IsEmpty())
+	{
+		GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingPlayToken, *PixelStreamingPlayToken, GGameUserSettingsIni);
+	}
 	GConfig->Flush(false, GGameUserSettingsIni);
 }
 
@@ -853,14 +1186,33 @@ void USlimeGraphicsSettings::Load()
 	}
 	GConfig->GetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyFrameGen, bFrameGen, GGameUserSettingsIni);
 	GConfig->GetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyHasQuality, bHasUserOrAutoQuality, GGameUserSettingsIni);
-	GConfig->GetString(TEXT("SlimeGraphics"), SlimeGraphicsPrivate::KeyPixelStreamingUrl, PixelStreamingUrl, GGameIni);
-	PixelStreamingUrl = SlimeGraphicsPrivate::Unquote(PixelStreamingUrl);
+	GConfig->GetString(TEXT("SlimeGraphics"), SlimeGraphicsPrivate::KeyPixelStreamingUrl, CloudPixelStreamingUrl, GGameIni);
+	CloudPixelStreamingUrl = SlimeGraphicsPrivate::Unquote(CloudPixelStreamingUrl);
 	FString SavedUrl;
 	if (GConfig->GetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingUrl, SavedUrl, GGameUserSettingsIni)
 		&& SlimeGraphicsPrivate::IsUsableStreamingUrl(SlimeGraphicsPrivate::Unquote(SavedUrl)))
 	{
-		PixelStreamingUrl = SlimeGraphicsPrivate::Unquote(SavedUrl);
+		SavedUrl = SlimeGraphicsPrivate::Unquote(SavedUrl);
+		if (SavedUrl.Equals(SlimeGraphicsPrivate::LanStreamerUrl, ESearchCase::IgnoreCase))
+		{
+			PixelStreamTarget = ESlimePixelStreamTarget::Lan;
+		}
+		else
+		{
+			CloudPixelStreamingUrl = SavedUrl;
+		}
 	}
+	if (!SlimeGraphicsPrivate::IsUsableStreamingUrl(CloudPixelStreamingUrl))
+	{
+		CloudPixelStreamingUrl = SlimeGraphicsPrivate::DefaultCloudStreamerUrl;
+	}
+	int32 TargetInt = static_cast<int32>(ESlimePixelStreamTarget::Cloud);
+	if (GConfig->GetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamTarget, TargetInt, GGameUserSettingsIni))
+	{
+		PixelStreamTarget = static_cast<ESlimePixelStreamTarget>(
+			FMath::Clamp(TargetInt, 0, static_cast<int32>(ESlimePixelStreamTarget::Lan)));
+	}
+	LoadPlayToken();
 	FString CmdUrl;
 	const bool bParsedCmdUrl =
 		FParse::Value(FCommandLine::Get(), TEXT("PixelStreamingConnectionURL="), CmdUrl)
@@ -869,14 +1221,17 @@ void USlimeGraphicsSettings::Load()
 	if (bParsedCmdUrl && SlimeGraphicsPrivate::IsUsableStreamingUrl(CmdUrl))
 	{
 		PixelStreamingUrl = CmdUrl;
-	}
-	else if (IConsoleVariable* UrlCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("PixelStreaming2.ConnectionURL")))
-	{
-		const FString CVarUrl = SlimeGraphicsPrivate::Unquote(UrlCVar->GetString());
-		if (SlimeGraphicsPrivate::IsUsableStreamingUrl(CVarUrl))
+		PixelStreamTarget = CmdUrl.Equals(SlimeGraphicsPrivate::LanStreamerUrl, ESearchCase::IgnoreCase)
+			? ESlimePixelStreamTarget::Lan
+			: ESlimePixelStreamTarget::Cloud;
+		if (PixelStreamTarget == ESlimePixelStreamTarget::Cloud)
 		{
-			PixelStreamingUrl = CVarUrl;
+			CloudPixelStreamingUrl = CmdUrl;
 		}
+	}
+	else
+	{
+		ApplyPixelStreamTargetUrl();
 	}
 	GConfig->GetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreaming, bPixelStreaming, GGameUserSettingsIni);
 	int32 CmdAutoStart = 0;

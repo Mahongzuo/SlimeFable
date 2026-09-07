@@ -48,6 +48,7 @@ public:
 
 protected:
 	void BuildLayoutIfNeeded();
+	void RefreshDeviceControls();
 	void ApplyLook();
 	USlimeInputSettings* GetInputSettings() const;
 	bool CaptureKey(FKey Key);
@@ -57,6 +58,12 @@ protected:
 
 	UFUNCTION()
 	void OnResetClicked();
+
+	UFUNCTION()
+	void OnPlayModeClicked();
+
+	UFUNCTION()
+	void OnHandednessClicked();
 
 	UPROPERTY()
 	TWeakObjectPtr<UUserWidget> ReturnTarget;
@@ -84,6 +91,18 @@ protected:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BackButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PlayModeButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> HandednessButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> HintText;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> GamepadGuideText;
 
 	UPROPERTY()
 	TArray<TObjectPtr<USlimeKeybindRowProxy>> RowProxies;

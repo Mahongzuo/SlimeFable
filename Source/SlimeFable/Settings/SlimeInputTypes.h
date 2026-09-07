@@ -46,3 +46,35 @@ enum class ESlimeInputAction : uint8
 	Sprint UMETA(DisplayName = "冲刺"),
 	COUNT UMETA(Hidden)
 };
+
+UENUM(BlueprintType)
+enum class ESlimePlayInputMode : uint8
+{
+	Auto UMETA(DisplayName = "自动"),
+	KeyboardMouse UMETA(DisplayName = "键鼠"),
+	Gamepad UMETA(DisplayName = "手柄"),
+	Touch UMETA(DisplayName = "触屏")
+};
+
+UENUM(BlueprintType)
+enum class ESlimeResolvedInputMode : uint8
+{
+	KeyboardMouse UMETA(DisplayName = "键鼠"),
+	Gamepad UMETA(DisplayName = "手柄"),
+	Touch UMETA(DisplayName = "触屏")
+};
+
+UENUM(BlueprintType)
+enum class ESlimeTouchHandedness : uint8
+{
+	Right UMETA(DisplayName = "右手"),
+	Left UMETA(DisplayName = "左手")
+};
+
+UENUM(BlueprintType)
+enum class ESlimeLastInputDevice : uint8
+{
+	None,
+	KeyboardMouse,
+	Gamepad
+};

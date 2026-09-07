@@ -231,6 +231,7 @@ protected:
 
 	/** When move/jump keys are customized, drive CMC from SlimeInputSettings. */
 	void PollCustomMoveKeys(float DeltaSeconds);
+	void PollTouchLocomotion(float DeltaSeconds);
 	void UpdateSprintSpeed();
 
 	void TickFootsteps(float DeltaSeconds);

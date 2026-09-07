@@ -315,6 +315,7 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 	if (IsPlayerControlled())
 	{
 		PollCustomMoveKeys(DeltaSeconds);
+		PollTouchLocomotion(DeltaSeconds);
 		UpdateSprintSpeed();
 	}
 	if (SlimeCling)
@@ -556,6 +557,47 @@ void ASlimeCharacter::PollCustomMoveKeys(float DeltaSeconds)
 		Jump();
 	}
 	if (!InputSettings->IsKeyDown(PC, ESlimeInputAction::Jump))
+	{
+		StopJumping();
+	}
+}
+
+void ASlimeCharacter::PollTouchLocomotion(float DeltaSeconds)
+{
+	(void)DeltaSeconds;
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC || !PC->IsLocalController())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+	USlimeInputSettings* InputSettings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr;
+	if (!InputSettings || !InputSettings->ShouldUseTouchHud())
+	{
+		return;
+	}
+
+	const FVector2D Move = InputSettings->GetVirtualMoveAxis();
+	if (!Move.IsNearlyZero())
+	{
+		DoMove(Move.X, Move.Y);
+	}
+
+	const FVector2D Look = InputSettings->ConsumeVirtualLookDelta();
+	if (!Look.IsNearlyZero())
+	{
+		PC->AddYawInput(Look.X);
+		PC->AddPitchInput(Look.Y);
+	}
+
+	if (InputSettings->WasKeyPressed(PC, ESlimeInputAction::Jump))
+	{
+		Jump();
+	}
+	else if (!InputSettings->IsKeyDown(PC, ESlimeInputAction::Jump))
 	{
 		StopJumping();
 	}

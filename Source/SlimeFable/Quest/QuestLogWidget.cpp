@@ -165,7 +165,9 @@ FReply UQuestLogWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 			CloseKey = InputSettings->GetKey(ESlimeInputAction::QuestLog);
 		}
 	}
-	if (InKeyEvent.GetKey() == CloseKey)
+	if (InKeyEvent.GetKey() == CloseKey
+		|| USlimeInputSettings::IsGamepadDismissKey(InKeyEvent.GetKey())
+		|| InKeyEvent.GetKey() == EKeys::Gamepad_Special_Left)
 	{
 		HandleCloseClicked();
 		return FReply::Handled();

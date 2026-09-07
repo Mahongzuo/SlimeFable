@@ -2,6 +2,7 @@
 
 #include "UI/SlimeHotbarConfirmWidget.h"
 #include "UI/MenuUIStyle.h"
+#include "Settings/SlimeInputSettings.h"
 #include "Slime/SlimeAbilityComponent.h"
 #include "SlimeFablePlayerController.h"
 #include "Inventory/SlimeInventorySubsystem.h"
@@ -236,7 +237,8 @@ void USlimeHotbarConfirmWidget::OnCancelClicked()
 
 FReply USlimeHotbarConfirmWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::Escape)
+	if (InKeyEvent.GetKey() == EKeys::Escape
+		|| USlimeInputSettings::IsGamepadDismissKey(InKeyEvent.GetKey()))
 	{
 		CloseSelf();
 		return FReply::Handled();

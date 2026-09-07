@@ -115,7 +115,7 @@ void USlimeCombatComponent::BeginPlay()
 		if (HUDWidget)
 		{
 			HUDWidget->SetCombat(this);
-			HUDWidget->AddToViewport(20);
+			HUDWidget->AddToViewport(25);
 		}
 	}
 }

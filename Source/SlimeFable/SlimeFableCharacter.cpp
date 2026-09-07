@@ -10,6 +10,8 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "Engine/GameInstance.h"
+#include "Settings/SlimeInputSettings.h"
 #include "SlimeFable.h"
 
 ASlimeFableCharacter::ASlimeFableCharacter(const FObjectInitializer& ObjectInitializer)
@@ -88,10 +90,18 @@ void ASlimeFableCharacter::Move(const FInputActionValue& Value)
 
 void ASlimeFableCharacter::Look(const FInputActionValue& Value)
 {
-	// input is a Vector2D
-	FVector2D LookAxisVector = Value.Get<FVector2D>();
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const USlimeInputSettings* Settings = GI->GetSubsystem<USlimeInputSettings>())
+		{
+			if (Settings->ShouldUseTouchHud())
+			{
+				return;
+			}
+		}
+	}
 
-	// route the input
+	const FVector2D LookAxisVector = Value.Get<FVector2D>();
 	DoLook(LookAxisVector.X, LookAxisVector.Y);
 }
 
