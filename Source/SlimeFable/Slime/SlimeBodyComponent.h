@@ -7,12 +7,16 @@
 #include "SlimeSolver.h"
 #include "SlimeSurfaceBuilder.h"
 #include "SlimeTypes.h"
+#include "Settings/SlimeGraphicsTypes.h"
+#include "RHITypes.h"
 #include "SlimeBodyComponent.generated.h"
 
 class ACharacter;
 class UCapsuleComponent;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UProceduralMeshComponent;
+class UTexture2D;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSlimeSqueezeChanged, float, SqueezeAmount);
 
@@ -33,6 +37,7 @@ public:
 	USlimeBodyComponent();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	// ---- Configuration ---------------------------------------------------------------
@@ -50,6 +55,19 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
 	TSoftObjectPtr<UMaterialInterface> BodyMaterialPath =
 		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeBody.M_SlimeBody")));
+
+	/** Default body material (ESlimeBodySkin::Spectral). Classic falls back to BodyMaterialPath. */
+	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
+	TSoftObjectPtr<UMaterialInterface> SpectralBodyMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeBody_Spectral.M_SlimeBody_Spectral")));
+
+	/**
+	 *  Third skin (ESlimeBodySkin::Volumetric): ray marches the body density field uploaded to
+	 *  DensityAtlas every rebuild. Missing asset falls back to the spectral skin.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
+	TSoftObjectPtr<UMaterialInterface> VolumetricBodyMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeBody_Volumetric.M_SlimeBody_Volumetric")));
 
 	/** Opaque material on the hidden shadow-proxy mesh. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface")
@@ -283,6 +301,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UMaterialInterface* GetResolvedBodyMaterial() const { return ResolvedMaterial; }
 
+	/** Swaps the surface material between the classic / spectral / volumetric skins. Element MID is rebuilt by USlimeElementComponent. */
+	UFUNCTION(BlueprintCallable, Category = "Slime")
+	void ApplyBodySkin(ESlimeBodySkin Skin);
+
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	bool IsVolumetricSkinActive() const { return bVolumetricActive; }
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UMaterialInterface* GetResolvedXRayMaterial() const { return ResolvedXRayMaterial; }
 
@@ -469,7 +494,17 @@ private:
 	void UpdateMeshFollow();
 	void UpdateQuality();
 	void ResolveMaterial();
+	class USlimeGraphicsSettings* GetGraphicsSettings() const;
 	FVector GetFootLocation() const;
+
+	// ---- Volumetric skin: density atlas ---------------------------------------------
+	/** (Re)creates DensityAtlas for the current SurfaceParams.MaxGridDim. No-op when the skin is not volumetric. */
+	void EnsureDensityAtlas();
+	void ReleaseDensityAtlas();
+	/** Copies the body field into the atlas (float -> half, Z slices tiled in 2D) and pushes grid params. */
+	void UploadBodyField();
+	/** Writes DensityAtlas / GridOrigin / GridDims / GridInfo on the surface MID. MeshOffset shifts the grid with the follow slide. */
+	void PushFieldParams(const FVector& MeshOffset);
 
 	FSlimeSolver Solver;
 	FSlimeSurfaceBuilder Surface;
@@ -491,6 +526,36 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ResolvedMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedClassicMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedSpectralMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedVolumetricMaterial;
+
+	/** R16F 2D atlas of the body density grid: TilesX x TilesY tiles of AtlasTileDim^2, one per Z slice. */
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> DensityAtlas;
+
+	FDelegateHandle BodySkinChangedHandle;
+
+	/** Ring of half-float staging buffers so the render thread never reads a buffer being rewritten. */
+	TArray<uint16> AtlasStaging[3];
+	int32 AtlasStagingIndex = 0;
+	FUpdateTextureRegion2D AtlasRegion;
+	int32 AtlasTileDim = 0;
+	int32 AtlasTilesX = 0;
+	int32 AtlasTilesY = 0;
+	bool bVolumetricActive = false;
+	bool bFieldParamsValid = false;
+	TWeakObjectPtr<UMaterialInstanceDynamic> AtlasBoundMid;
+	FVector FieldOrigin = FVector::ZeroVector;
+	FIntVector FieldDims = FIntVector::ZeroValue;
+	float FieldCellSize = 1.f;
+	float FieldIso = 0.2f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ResolvedShadowMaterial;

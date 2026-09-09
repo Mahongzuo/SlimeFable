@@ -31,3 +31,19 @@ enum class ESlimePixelStreamTarget : uint8
 	Cloud UMETA(DisplayName = "云端"),
 	Lan UMETA(DisplayName = "局域网")
 };
+
+/**
+ *  Slime body surface material.
+ *  Classic    = original Fresnel jelly.
+ *  Spectral   = per-channel refraction with an analytic ellipsoid thickness (default).
+ *  Volumetric = ray march through the marching-cubes density field: real thickness, internal
+ *               reflection / TIR, sky reflections. Costs a per-frame density upload.
+ */
+UENUM(BlueprintType)
+enum class ESlimeBodySkin : uint8
+{
+	Classic UMETA(DisplayName = "经典果冻"),
+	Spectral UMETA(DisplayName = "光谱折射"),
+	Volumetric UMETA(DisplayName = "体积折射"),
+	COUNT UMETA(Hidden)
+};

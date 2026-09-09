@@ -6,6 +6,22 @@
 #include "SlimeTypes.h"
 
 /**
+ *  Snapshot of the body cluster density grid taken right after it was triangulated, so the
+ *  volumetric skin can ray march the exact field the mesh came from. World position of sample
+ *  (x, y, z) is Origin + (x, y, z) * CellSize. Dims.X == 0 means no body this frame.
+ */
+struct FSlimeBodyField
+{
+	TArray<float> Density;
+	FIntVector Dims = FIntVector::ZeroValue;
+	FVector Origin = FVector::ZeroVector;
+	float CellSize = 1.f;
+	float Iso = 0.2f;
+
+	bool IsValid() const { return Dims.X > 0 && Density.Num() >= Dims.X * Dims.Y * Dims.Z; }
+};
+
+/**
  *  Turns the particle set into a triangle soup with marching cubes.
  *
  *  Body and ballistic fragments each get their own grid so a distant Q chunk cannot
@@ -52,8 +68,16 @@ public:
 	const FSlimeSurfaceParams& GetParams() const { return Params; }
 	float GetParticleSpacing() const { return ParticleSpacing; }
 
+	/** Off by default: only the volumetric skin pays for the extra density copy. */
+	void SetCaptureBodyField(bool bCapture);
+	bool IsCapturingBodyField() const { return bCaptureBodyField; }
+
+	/** Body density snapshot from the last Build. Check IsValid(); empty when capture is off. */
+	const FSlimeBodyField& GetBodyField() const { return BodyField; }
+
 private:
 	void BuildCluster(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds, uint8 ShotFilter = 0);
+	void CaptureBodyField();
 	void PrepareGrid(const FBox& Bounds, bool bBodyCluster);
 	/** ShotFilter selects one flying shot; MergingShots (when non-null) are included in the body splat. */
 	void SplatDensity(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, uint8 ShotFilter, const TSet<uint8>* MergingShots);
@@ -152,6 +176,9 @@ private:
 
 	int32 LiveVertexCount = 0;
 	bool bTruncated = false;
+
+	FSlimeBodyField BodyField;
+	bool bCaptureBodyField = false;
 
 	static const int32 TriangleTable[256][16];
 	static const int32 EdgeCorners[12][2];

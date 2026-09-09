@@ -23,6 +23,7 @@
 #include "SlimeElementComponent.h"
 #include "SlimeFable.h"
 #include "SlimeMorphComponent.h"
+#include "Settings/SlimeGraphicsSettings.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "UI/SlimeHotbarWheelWidget.h"
@@ -374,6 +375,16 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		if (WasPressed(ESlimeInputAction::ElementFormation, EKeys::L))
 		{
 			OpenFormation();
+		}
+		if (WasPressed(ESlimeInputAction::BodySkin, EKeys::Seven))
+		{
+			if (const UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+			{
+				if (USlimeGraphicsSettings* Graphics = GameInstance->GetSubsystem<USlimeGraphicsSettings>())
+				{
+					Graphics->CycleBodySkin();
+				}
+			}
 		}
 		if (InputSettings && InputSettings->ShouldReadGamepadAbilityKeys())
 		{

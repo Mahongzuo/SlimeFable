@@ -44,6 +44,7 @@ enum class ESlimeInputAction : uint8
 	ElementFormation UMETA(DisplayName = "属性编队"),
 	CheatConsole UMETA(DisplayName = "作弊台"),
 	Sprint UMETA(DisplayName = "冲刺"),
+	BodySkin UMETA(DisplayName = "史莱姆皮肤"),
 	COUNT UMETA(Hidden)
 };
 

@@ -40,6 +40,7 @@ namespace SlimeGraphicsPrivate
 	static const TCHAR* KeyPixelStreamingUrl = TEXT("PixelStreamingUrl");
 	static const TCHAR* KeyPixelStreamTarget = TEXT("PixelStreamTarget");
 	static const TCHAR* KeyPixelStreamingPlayToken = TEXT("PixelStreamingPlayToken");
+	static const TCHAR* KeyBodySkin = TEXT("BodySkin");
 	static const TCHAR* LanStreamerUrl = TEXT("ws://127.0.0.1:18888");
 	static const TCHAR* DefaultCloudStreamerUrl = TEXT("wss://been.chat/ps/streamer");
 	static const TCHAR* CloudPlayPage = TEXT("https://been.chat/play");
@@ -829,6 +830,43 @@ FText USlimeGraphicsSettings::GetPixelStreamTargetDisplayName() const
 		: FText::FromString(TEXT("推流目标：云端"));
 }
 
+FText USlimeGraphicsSettings::GetBodySkinDisplayName() const
+{
+	switch (BodySkin)
+	{
+	case ESlimeBodySkin::Spectral: return FText::FromString(TEXT("史莱姆皮肤：光谱折射"));
+	case ESlimeBodySkin::Volumetric: return FText::FromString(TEXT("史莱姆皮肤：体积折射"));
+	default: return FText::FromString(TEXT("史莱姆皮肤：经典果冻"));
+	}
+}
+
+void USlimeGraphicsSettings::SetBodySkin(ESlimeBodySkin NewSkin)
+{
+	if (NewSkin >= ESlimeBodySkin::COUNT)
+	{
+		NewSkin = ESlimeBodySkin::Spectral;
+	}
+	if (BodySkin == NewSkin)
+	{
+		return;
+	}
+	BodySkin = NewSkin;
+	Save();
+	OnBodySkinChanged.Broadcast(BodySkin);
+	UE_LOG(LogSlimeFable, Log, TEXT("Body skin -> %s"), *GetBodySkinDisplayName().ToString());
+}
+
+void USlimeGraphicsSettings::CycleBodySkin()
+{
+	// Spectral (default) -> Volumetric -> Classic -> Spectral.
+	switch (BodySkin)
+	{
+	case ESlimeBodySkin::Spectral: SetBodySkin(ESlimeBodySkin::Volumetric); break;
+	case ESlimeBodySkin::Volumetric: SetBodySkin(ESlimeBodySkin::Classic); break;
+	default: SetBodySkin(ESlimeBodySkin::Spectral); break;
+	}
+}
+
 void USlimeGraphicsSettings::CyclePixelStreamTarget()
 {
 	PixelStreamTarget = PixelStreamTarget == ESlimePixelStreamTarget::Cloud
@@ -1161,6 +1199,7 @@ void USlimeGraphicsSettings::Save()
 	GConfig->SetBool(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreaming, bPixelStreaming, GGameUserSettingsIni);
 	GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingUrl, *CloudPixelStreamingUrl, GGameUserSettingsIni);
 	GConfig->SetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamTarget, static_cast<int32>(PixelStreamTarget), GGameUserSettingsIni);
+	GConfig->SetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyBodySkin, static_cast<int32>(BodySkin), GGameUserSettingsIni);
 	if (!PixelStreamingPlayToken.IsEmpty())
 	{
 		GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingPlayToken, *PixelStreamingPlayToken, GGameUserSettingsIni);
@@ -1211,6 +1250,12 @@ void USlimeGraphicsSettings::Load()
 	{
 		PixelStreamTarget = static_cast<ESlimePixelStreamTarget>(
 			FMath::Clamp(TargetInt, 0, static_cast<int32>(ESlimePixelStreamTarget::Lan)));
+	}
+	int32 SkinInt = static_cast<int32>(ESlimeBodySkin::Spectral);
+	if (GConfig->GetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyBodySkin, SkinInt, GGameUserSettingsIni))
+	{
+		BodySkin = static_cast<ESlimeBodySkin>(
+			FMath::Clamp(SkinInt, 0, static_cast<int32>(ESlimeBodySkin::COUNT) - 1));
 	}
 	LoadPlayToken();
 	FString CmdUrl;

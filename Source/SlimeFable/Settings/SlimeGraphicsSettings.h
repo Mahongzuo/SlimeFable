@@ -7,6 +7,8 @@
 #include "SlimeGraphicsTypes.h"
 #include "SlimeGraphicsSettings.generated.h"
 
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnSlimeBodySkinChanged, ESlimeBodySkin);
+
 /**
  * GPU probe, first-run quality bucket, and optional DLSS/FSR.
  * DLSS uses the official UDLSSLibrary (screen percentage + EnableDLSS), not NGX headers.
@@ -126,6 +128,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Graphics")
 	void TogglePixelStreaming();
 
+	/** Which body material the slime wears. Persisted; USlimeBodyComponent listens to OnBodySkinChanged. */
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	ESlimeBodySkin GetBodySkin() const { return BodySkin; }
+
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	FText GetBodySkinDisplayName() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	void SetBodySkin(ESlimeBodySkin NewSkin);
+
+	/** Advances Spectral -> Volumetric -> Classic -> Spectral. Bound to the BodySkin input action (default 7). */
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	void CycleBodySkin();
+
+	FOnSlimeBodySkinChanged OnBodySkinChanged;
+
 	void ApplyUpscaler() const;
 	void ApplyPixelStreaming() const;
 	void Save();
@@ -172,6 +190,7 @@ protected:
 	bool bHasUserOrAutoQuality = false;
 	bool bPixelStreaming = false;
 	ESlimePixelStreamTarget PixelStreamTarget = ESlimePixelStreamTarget::Cloud;
+	ESlimeBodySkin BodySkin = ESlimeBodySkin::Spectral;
 	FString PixelStreamingUrl;
 	FString CloudPixelStreamingUrl;
 	FString PixelStreamingPlayToken;

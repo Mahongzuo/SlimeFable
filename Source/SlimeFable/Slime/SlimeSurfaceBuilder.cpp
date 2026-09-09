@@ -353,6 +353,8 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 	LiveVertexCount = 0;
 	bTruncated = false;
+	// Invalidate up front: if no body cluster gets built this frame the GPU must not march a stale grid.
+	BodyField.Dims = FIntVector::ZeroValue;
 	VisualZLift = FMath::Max(InVisualZLift, 0.f);
 	ClipFloorZ = InClipFloorZ;
 	ActiveMergingShots.Reset();
@@ -474,6 +476,38 @@ void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles,
 	BlurDensity();
 	ClipDensityBelowFloor();
 	Triangulate();
+
+	// Fragment clusters reuse the Density buffer, so the body grid has to be copied out here.
+	if (!bBallisticSubset && bCaptureBodyField)
+	{
+		CaptureBodyField();
+	}
+}
+
+void FSlimeSurfaceBuilder::SetCaptureBodyField(bool bCapture)
+{
+	bCaptureBodyField = bCapture;
+	if (!bCapture)
+	{
+		BodyField.Dims = FIntVector::ZeroValue;
+		BodyField.Density.Empty();
+	}
+}
+
+void FSlimeSurfaceBuilder::CaptureBodyField()
+{
+	const int32 NumSamples = Dims.X * Dims.Y * Dims.Z;
+	if (NumSamples <= 0 || NumSamples > Density.Num())
+	{
+		BodyField.Dims = FIntVector::ZeroValue;
+		return;
+	}
+	BodyField.Density.SetNumUninitialized(NumSamples, EAllowShrinking::No);
+	FMemory::Memcpy(BodyField.Density.GetData(), Density.GetData(), NumSamples * sizeof(float));
+	BodyField.Dims = Dims;
+	BodyField.Origin = GridOrigin;
+	BodyField.CellSize = ActiveCellSize;
+	BodyField.Iso = Params.IsoThreshold;
 }
 
 void FSlimeSurfaceBuilder::PrepareGrid(const FBox& Bounds, bool bBodyCluster)

@@ -10,11 +10,16 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Math/Float16.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "ProceduralMeshComponent.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "SlimeFable.h"
+#include "Engine/GameInstance.h"
+#include "Settings/SlimeGraphicsSettings.h"
 #include "SlimeCharacterMovementComponent.h"
 #include "CombatDamageable.h"
 #include "SlimeCharacter.h"
@@ -48,6 +53,12 @@ namespace SlimeBodyPrivate
 	constexpr float SqueezeReportEpsilon = 0.02f;
 
 	constexpr float NoCeilingZ = 1.e9f;
+
+	/** Material parameter names of M_SlimeBody_Volumetric (create_slime_volumetric_material.py). */
+	static const FName ParamDensityAtlas(TEXT("DensityAtlas"));
+	static const FName ParamGridOrigin(TEXT("GridOrigin"));
+	static const FName ParamGridDims(TEXT("GridDims"));
+	static const FName ParamGridInfo(TEXT("GridInfo"));
 
 	bool OwnerLooksLikeNinjaLive(const AActor* Owner)
 	{
@@ -113,6 +124,12 @@ void USlimeBodyComponent::BeginPlay()
 
 	ResolveMaterial();
 
+	if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
+	{
+		ApplyBodySkin(Graphics->GetBodySkin());
+		BodySkinChangedHandle = Graphics->OnBodySkinChanged.AddUObject(this, &USlimeBodyComponent::ApplyBodySkin);
+	}
+
 	if (Quality == ESlimeSimQuality::High)
 	{
 		SurfaceParams.CellSizeMultiplier = 0.64f;
@@ -141,17 +158,265 @@ void USlimeBodyComponent::ApplyParams()
 	bXRayMeshSectionCreated = false;
 }
 
+void USlimeBodyComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (BodySkinChangedHandle.IsValid())
+	{
+		if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
+		{
+			Graphics->OnBodySkinChanged.Remove(BodySkinChangedHandle);
+		}
+		BodySkinChangedHandle.Reset();
+	}
+	ReleaseDensityAtlas();
+	Super::EndPlay(EndPlayReason);
+}
+
+USlimeGraphicsSettings* USlimeBodyComponent::GetGraphicsSettings() const
+{
+	const UWorld* World = GetWorld();
+	const UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	return GameInstance ? GameInstance->GetSubsystem<USlimeGraphicsSettings>() : nullptr;
+}
+
+void USlimeBodyComponent::ApplyBodySkin(ESlimeBodySkin Skin)
+{
+	bool bWantVolumetric = false;
+	if (Skin == ESlimeBodySkin::Volumetric)
+	{
+		if (ResolvedVolumetricMaterial)
+		{
+			bWantVolumetric = true;
+		}
+		else
+		{
+			UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: volumetric body material missing on '%s'; falling back to the spectral skin."), *GetNameSafe(GetOwner()));
+			Skin = ESlimeBodySkin::Spectral;
+		}
+	}
+
+	UMaterialInterface* Wanted = ResolvedClassicMaterial;
+	if (bWantVolumetric)
+	{
+		Wanted = ResolvedVolumetricMaterial;
+	}
+	else if (Skin == ESlimeBodySkin::Spectral)
+	{
+		if (ResolvedSpectralMaterial)
+		{
+			Wanted = ResolvedSpectralMaterial;
+		}
+		else
+		{
+			UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: spectral body material missing on '%s'; staying on the classic skin."), *GetNameSafe(GetOwner()));
+		}
+	}
+	if (!Wanted)
+	{
+		return;
+	}
+
+	// Only the volumetric skin pays for the density snapshot + GPU upload.
+	bVolumetricActive = bWantVolumetric;
+	Surface.SetCaptureBodyField(bVolumetricActive);
+	if (bVolumetricActive)
+	{
+		EnsureDensityAtlas();
+	}
+	else
+	{
+		ReleaseDensityAtlas();
+	}
+
+	ResolvedMaterial = Wanted;
+	if (SurfaceMesh && bMeshSectionCreated)
+	{
+		// The element component detects that slot 0 no longer holds its MID and rebuilds it with the current profile.
+		SurfaceMesh->SetMaterial(0, ResolvedMaterial);
+	}
+}
+
+void USlimeBodyComponent::EnsureDensityAtlas()
+{
+	if (!bVolumetricActive)
+	{
+		return;
+	}
+
+	// Tile edge = the largest grid we may ever be asked to upload. Spread mode can raise the
+	// surface builder's MaxGridDim above SurfaceParams, so also honour the live field.
+	int32 TileDim = FMath::Max(SurfaceParams.MaxGridDim, 4);
+	const FSlimeBodyField& Field = Surface.GetBodyField();
+	if (Field.IsValid())
+	{
+		TileDim = FMath::Max3(TileDim, Field.Dims.GetMax(), 4);
+	}
+	if (DensityAtlas && AtlasTileDim == TileDim)
+	{
+		return;
+	}
+
+	AtlasTileDim = TileDim;
+	AtlasTilesX = FMath::Max(FMath::CeilToInt(FMath::Sqrt(float(TileDim))), 1);
+	AtlasTilesY = FMath::Max(FMath::DivideAndRoundUp(TileDim, AtlasTilesX), 1);
+	const int32 Width = AtlasTileDim * AtlasTilesX;
+	const int32 Height = AtlasTileDim * AtlasTilesY;
+
+	DensityAtlas = UTexture2D::CreateTransient(Width, Height, PF_R16F);
+	if (!DensityAtlas)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: could not create the %dx%d density atlas."), Width, Height);
+		return;
+	}
+	DensityAtlas->SRGB = false;
+	DensityAtlas->Filter = TF_Bilinear;
+	DensityAtlas->AddressX = TA_Clamp;
+	DensityAtlas->AddressY = TA_Clamp;
+	DensityAtlas->CompressionSettings = TC_HDR;
+	DensityAtlas->NeverStream = true;
+	DensityAtlas->UpdateResource();
+
+	AtlasRegion = FUpdateTextureRegion2D(0, 0, 0, 0, Width, Height);
+	for (TArray<uint16>& Staging : AtlasStaging)
+	{
+		Staging.SetNumZeroed(Width * Height);
+	}
+	AtlasBoundMid.Reset();
+	bFieldParamsValid = false;
+
+	UE_LOG(LogSlimeFable, Log, TEXT("SlimeBodyComponent: density atlas %dx%d (tile %d, %dx%d slices)."),
+		Width, Height, AtlasTileDim, AtlasTilesX, AtlasTilesY);
+}
+
+void USlimeBodyComponent::ReleaseDensityAtlas()
+{
+	DensityAtlas = nullptr;
+	for (TArray<uint16>& Staging : AtlasStaging)
+	{
+		Staging.Empty();
+	}
+	AtlasTileDim = 0;
+	AtlasTilesX = 0;
+	AtlasTilesY = 0;
+	AtlasBoundMid.Reset();
+	bFieldParamsValid = false;
+}
+
+void USlimeBodyComponent::UploadBodyField()
+{
+	if (!bVolumetricActive || !SurfaceMesh)
+	{
+		return;
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(SlimeBody_UploadBodyField);
+
+	const FSlimeBodyField& Field = Surface.GetBodyField();
+	if (!Field.IsValid())
+	{
+		// No body cluster this frame: tell the shader to take the no-volume path.
+		bFieldParamsValid = false;
+		PushFieldParams(FVector::ZeroVector);
+		return;
+	}
+
+	EnsureDensityAtlas();
+	if (!DensityAtlas || AtlasStaging[0].Num() == 0)
+	{
+		return;
+	}
+
+	TArray<uint16>& Staging = AtlasStaging[AtlasStagingIndex];
+	AtlasStagingIndex = (AtlasStagingIndex + 1) % UE_ARRAY_COUNT(AtlasStaging);
+
+	const int32 Width = AtlasTileDim * AtlasTilesX;
+	const FIntVector Dims = Field.Dims;
+	const float* Src = Field.Density.GetData();
+	uint16* Dst = Staging.GetData();
+	for (int32 Z = 0; Z < Dims.Z; ++Z)
+	{
+		const int32 TileX = (Z % AtlasTilesX) * AtlasTileDim;
+		const int32 TileY = (Z / AtlasTilesX) * AtlasTileDim;
+		for (int32 Y = 0; Y < Dims.Y; ++Y)
+		{
+			uint16* Row = Dst + (TileY + Y) * Width + TileX;
+			const float* SrcRow = Src + (Z * Dims.Y + Y) * Dims.X;
+			for (int32 X = 0; X < Dims.X; ++X)
+			{
+				Row[X] = FFloat16(SrcRow[X]).Encoded;
+			}
+		}
+	}
+
+	// Staging buffers rotate, so nothing to free once the copy has been consumed.
+	DensityAtlas->UpdateTextureRegions(
+		0, 1, &AtlasRegion,
+		Width * sizeof(uint16), sizeof(uint16),
+		reinterpret_cast<uint8*>(Staging.GetData()),
+		[](uint8*, const FUpdateTextureRegion2D*) {});
+
+	FieldOrigin = Field.Origin;
+	FieldDims = Dims;
+	FieldCellSize = Field.CellSize;
+	FieldIso = Field.Iso;
+	bFieldParamsValid = true;
+	PushFieldParams(FVector::ZeroVector);
+}
+
+void USlimeBodyComponent::PushFieldParams(const FVector& MeshOffset)
+{
+	using namespace SlimeBodyPrivate;
+
+	UMaterialInstanceDynamic* Mid = SurfaceMesh ? Cast<UMaterialInstanceDynamic>(SurfaceMesh->GetMaterial(0)) : nullptr;
+	if (!Mid)
+	{
+		return;
+	}
+
+	if (AtlasBoundMid.Get() != Mid)
+	{
+		// The element component rebuilds its MID on skin / quality changes; rebind the atlas then.
+		if (DensityAtlas)
+		{
+			Mid->SetTextureParameterValue(ParamDensityAtlas, DensityAtlas);
+		}
+		AtlasBoundMid = Mid;
+	}
+
+	if (!bFieldParamsValid)
+	{
+		// GridInfo.x (cell size) == 0 is the shader's "no field" signal.
+		Mid->SetVectorParameterValue(ParamGridInfo, FLinearColor(0.f, 0.f, 0.f, 0.f));
+		return;
+	}
+
+	// The mesh slides by MeshOffset between rebuilds; move the grid with it so world positions still line up.
+	const FVector Origin = FieldOrigin + MeshOffset;
+	Mid->SetVectorParameterValue(ParamGridOrigin, FLinearColor(float(Origin.X), float(Origin.Y), float(Origin.Z), 0.f));
+	Mid->SetVectorParameterValue(ParamGridDims, FLinearColor(float(FieldDims.X), float(FieldDims.Y), float(FieldDims.Z), float(AtlasTileDim)));
+	Mid->SetVectorParameterValue(ParamGridInfo, FLinearColor(FieldCellSize, FieldIso, float(AtlasTilesX), float(AtlasTilesY)));
+}
+
 void USlimeBodyComponent::ResolveMaterial()
 {
-	ResolvedMaterial = BodyMaterial;
-	if (!ResolvedMaterial && !BodyMaterialPath.IsNull())
+	ResolvedClassicMaterial = BodyMaterial;
+	if (!ResolvedClassicMaterial && !BodyMaterialPath.IsNull())
 	{
-		ResolvedMaterial = BodyMaterialPath.LoadSynchronous();
+		ResolvedClassicMaterial = BodyMaterialPath.LoadSynchronous();
 	}
-	if (!ResolvedMaterial)
+	if (!ResolvedClassicMaterial)
 	{
 		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: no body material assigned on '%s'; the surface will use the engine default."), *GetNameSafe(GetOwner()));
 	}
+	if (!SpectralBodyMaterialPath.IsNull())
+	{
+		ResolvedSpectralMaterial = SpectralBodyMaterialPath.LoadSynchronous();
+	}
+	if (!VolumetricBodyMaterialPath.IsNull())
+	{
+		ResolvedVolumetricMaterial = VolumetricBodyMaterialPath.LoadSynchronous();
+	}
+	ResolvedMaterial = ResolvedSpectralMaterial ? ResolvedSpectralMaterial : ResolvedClassicMaterial;
 
 	ResolvedShadowMaterial = ShadowCasterMaterial;
 	if (!ResolvedShadowMaterial && !ShadowCasterMaterialPath.IsNull())
@@ -1436,6 +1701,11 @@ void USlimeBodyComponent::RebuildSurface()
 	}
 
 	PushMeshSection();
+
+	if (bVolumetricActive)
+	{
+		UploadBodyField();
+	}
 }
 
 void USlimeBodyComponent::UpdateMeshFollow()
@@ -1454,6 +1724,10 @@ void USlimeBodyComponent::UpdateMeshFollow()
 	if (XRayMesh)
 	{
 		XRayMesh->SetWorldLocation(Offset);
+	}
+	if (bVolumetricActive && bFieldParamsValid)
+	{
+		PushFieldParams(Offset);
 	}
 }
 

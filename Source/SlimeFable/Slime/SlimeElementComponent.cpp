@@ -25,6 +25,101 @@ namespace SlimeElementParams
 	static const FName RimPower(TEXT("RimPower"));
 	static const FName SqueezeAmount(TEXT("SqueezeAmount"));
 	static const FName XRayColor(TEXT("XRayColor"));
+	static const FName Absorption(TEXT("Absorption"));
+	static const FName Dispersion(TEXT("Dispersion"));
+	static const FName ThicknessScale(TEXT("ThicknessScale"));
+	static const FName MaxThickness(TEXT("MaxThickness"));
+	static const FName DistortionScale(TEXT("DistortionScale"));
+	static const FName CoreAmount(TEXT("CoreAmount"));
+	/** Only on M_SlimeBody_Volumetric; presence identifies the ray-marched skin. */
+	static const FName GridInfo(TEXT("GridInfo"));
+}
+
+namespace SlimeVolumetricLook
+{
+	// Keep in sync with Content/Python/create_slime_volumetric_material.py (VOLUMETRIC_DEFAULTS).
+	// Path lengths are real (cm through the density field), so Absorption is per cm.
+	static constexpr float Absorption = 0.012f;
+	static constexpr float Dispersion = 0.03f;
+	static constexpr float DistortionScale = 0.5f;
+
+	static float OpacityScaleFor(ESlimeElement Element)
+	{
+		switch (Element)
+		{
+		case ESlimeElement::Dark:
+			return 0.6f;
+		default:
+			return 0.45f;
+		}
+	}
+
+	static bool IsVolumetricBody(UMaterialInstanceDynamic* Mid)
+	{
+		FLinearColor Unused;
+		return Mid && Mid->GetVectorParameterValue(SlimeElementParams::GridInfo, Unused);
+	}
+
+	static void Apply(UMaterialInstanceDynamic* Mid, ESlimeElement Element, float BaseOpacity, float HitOpacityScale)
+	{
+		Mid->SetScalarParameterValue(SlimeElementParams::Opacity, BaseOpacity * HitOpacityScale * OpacityScaleFor(Element));
+		Mid->SetScalarParameterValue(SlimeElementParams::Absorption, Absorption);
+		Mid->SetScalarParameterValue(SlimeElementParams::Dispersion, Dispersion);
+		Mid->SetScalarParameterValue(SlimeElementParams::DistortionScale, DistortionScale);
+	}
+}
+
+namespace SlimeSpectralLook
+{
+	// Keep in sync with Content/Python/create_slime_spectral_material.py
+	// Rollback (first ship): Absorption 0.035, Dispersion 0.035, ThicknessScale 1, MaxThickness 120, DistortionScale 0.6, Opacity unscaled.
+	static constexpr float ClearAbsorption = 0.018f;
+	static constexpr float ClearDispersion = 0.035f;
+	static constexpr float ClearThicknessScale = 1.f;
+	static constexpr float ClearMaxThickness = 90.f;
+	static constexpr float ClearDistortionScale = 0.6f;
+
+	static float OpacityScaleFor(ESlimeElement Element)
+	{
+		switch (Element)
+		{
+		case ESlimeElement::Fire:
+		case ESlimeElement::Lightning:
+		case ESlimeElement::Physical:
+			return 0.52f;
+		default:
+			return 0.5f;
+		}
+	}
+
+	static bool IsSpectralBody(UMaterialInstanceDynamic* Mid)
+	{
+		float Unused = 0.f;
+		return Mid && Mid->GetScalarParameterValue(SlimeElementParams::Absorption, Unused);
+	}
+
+	static void Apply(UMaterialInstanceDynamic* Mid, ESlimeElement Element, float BaseOpacity, float HitOpacityScale)
+	{
+		// Volumetric skin shares the Absorption name, so test for it first; the spectral branch below is unchanged.
+		if (SlimeVolumetricLook::IsVolumetricBody(Mid))
+		{
+			SlimeVolumetricLook::Apply(Mid, Element, BaseOpacity, HitOpacityScale);
+			return;
+		}
+		if (!IsSpectralBody(Mid))
+		{
+			Mid->SetScalarParameterValue(SlimeElementParams::Opacity, BaseOpacity * HitOpacityScale);
+			return;
+		}
+
+		Mid->SetScalarParameterValue(SlimeElementParams::Opacity, BaseOpacity * HitOpacityScale * OpacityScaleFor(Element));
+		Mid->SetScalarParameterValue(SlimeElementParams::Absorption, ClearAbsorption);
+		Mid->SetScalarParameterValue(SlimeElementParams::Dispersion, ClearDispersion);
+		Mid->SetScalarParameterValue(SlimeElementParams::ThicknessScale, ClearThicknessScale);
+		Mid->SetScalarParameterValue(SlimeElementParams::MaxThickness, ClearMaxThickness);
+		Mid->SetScalarParameterValue(SlimeElementParams::DistortionScale, ClearDistortionScale);
+		Mid->SetScalarParameterValue(SlimeElementParams::CoreAmount, 0.f);
+	}
 }
 
 namespace SlimeDashNiagaraDefaults
@@ -161,7 +256,7 @@ void USlimeElementComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	}
 	else if (OpacityScale < 1.f && BodyMaterial)
 	{
-		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, TransitionTo.Opacity * OpacityScale);
+		SlimeSpectralLook::Apply(BodyMaterial, TransitionTo.Element, TransitionTo.Opacity, OpacityScale);
 	}
 }
 
@@ -223,7 +318,7 @@ void USlimeElementComponent::ApplyProfileToMaterial(const FSlimeElementProfile& 
 		BodyMaterial->SetVectorParameterValue(SlimeElementParams::EmissiveColor, Profile.EmissiveColor);
 		BodyMaterial->SetVectorParameterValue(SlimeElementParams::RimColor, Profile.RimColor);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::EmissiveIntensity, Profile.EmissiveIntensity);
-		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, Profile.Opacity * OpacityScale);
+		SlimeSpectralLook::Apply(BodyMaterial, Profile.Element, Profile.Opacity, OpacityScale);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Roughness, Profile.Roughness);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Refraction, Profile.Refraction);
 		BodyMaterial->SetScalarParameterValue(SlimeElementParams::FlowSpeed, Profile.FlowSpeed);
@@ -377,7 +472,7 @@ void USlimeElementComponent::SetOpacityScale(float Scale)
 	OpacityScale = FMath::Clamp(Scale, 0.f, 1.f);
 	if (EnsureDynamicMaterial() && BodyMaterial)
 	{
-		BodyMaterial->SetScalarParameterValue(SlimeElementParams::Opacity, TransitionTo.Opacity * OpacityScale);
+		SlimeSpectralLook::Apply(BodyMaterial, TransitionTo.Element, TransitionTo.Opacity, OpacityScale);
 	}
 }
 
