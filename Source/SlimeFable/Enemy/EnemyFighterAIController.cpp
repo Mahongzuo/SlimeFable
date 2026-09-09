@@ -256,6 +256,7 @@ void AEnemyFighterAIController::TickWander(float DeltaSeconds)
 			WanderStuckTime = 0.f;
 		}
 		WanderLastPos = Fighter->GetActorLocation();
+		PlayWalkAnim();
 		return;
 	}
 
@@ -352,6 +353,7 @@ void AEnemyFighterAIController::TickDirectWander()
 	const FVector Dir = To.GetSafeNormal();
 	Fighter->AddMovementInput(Dir, 1.f);
 	Fighter->SetActorRotation(Dir.Rotation());
+	PlayWalkAnim();
 }
 
 void AEnemyFighterAIController::ClearDirectWander()
@@ -362,36 +364,48 @@ void AEnemyFighterAIController::ClearDirectWander()
 	bPlayingRun = false;
 }
 
+bool AEnemyFighterAIController::ShouldPlayMontageLocomotion() const
+{
+	return Fighter && (!Fighter->bABPDrivenLocomotion || Fighter->bUseSingleNodeAnims);
+}
+
 void AEnemyFighterAIController::ApplyLocomotionMaxSpeed(bool bChasing)
 {
-	if (!Fighter || !Fighter->bABPDrivenLocomotion)
+	if (!Fighter)
 	{
 		return;
 	}
+
+	const bool bSingleNode = Fighter->bUseSingleNodeAnims;
+	const bool bAbpOnly = Fighter->bABPDrivenLocomotion && !bSingleNode;
+	if (!bSingleNode && !Fighter->bABPDrivenLocomotion)
+	{
+		return;
+	}
+
 	if (UCharacterMovementComponent* Move = Fighter->GetCharacterMovement())
 	{
 		Move->MaxWalkSpeed = (bChasing ? Fighter->ChaseSpeed : Fighter->WalkSpeed)
 			* (Fighter->GetEnemyStatus() ? Fighter->GetEnemyStatus()->GetMoveSpeedMul() : 1.f);
 	}
-	if (Fighter->bABPDrivenLocomotion)
+	if (bAbpOnly)
 	{
 		return;
 	}
-	// 追逐时切 Run 蒙太奇，闲逛时切 Walk 蒙太奇。
+
 	if (bChasing)
 	{
 		PlayRunAnim();
 	}
-	else if (bPlayingWalk && bPlayingRun)
+	else if (bPlayingRun)
 	{
-		// 从 Run 切回 Walk
 		PlayWalkAnim();
 	}
 }
 
 void AEnemyFighterAIController::UpdateWalkPlayRate()
 {
-	if (!Fighter || Fighter->bABPDrivenLocomotion)
+	if (!ShouldPlayMontageLocomotion())
 	{
 		return;
 	}
@@ -410,7 +424,7 @@ void AEnemyFighterAIController::UpdateWalkPlayRate()
 
 void AEnemyFighterAIController::PlayWalkAnim()
 {
-	if (!Fighter || Fighter->bABPDrivenLocomotion)
+	if (!ShouldPlayMontageLocomotion())
 	{
 		return;
 	}
@@ -429,19 +443,24 @@ void AEnemyFighterAIController::PlayWalkAnim()
 
 void AEnemyFighterAIController::PlayRunAnim()
 {
-	if (!Fighter || Fighter->bABPDrivenLocomotion)
+	if (!ShouldPlayMontageLocomotion())
 	{
 		return;
 	}
-	if (bPlayingWalk)
+	if (bPlayingRun)
 	{
-		UpdateWalkPlayRate();
+		return;
 	}
-	else
+	if (UAnimMontage* Run = Fighter->RunMontage.LoadSynchronous())
 	{
-		PlayWalkAnim();
-		UpdateWalkPlayRate();
+		Fighter->PlayMeshAnimation(Run, true);
+		bPlayingRun = true;
+		bPlayingWalk = false;
+		PlayingIdleMontage.Reset();
+		return;
 	}
+	PlayWalkAnim();
+	UpdateWalkPlayRate();
 }
 
 void AEnemyFighterAIController::StopLocomotionAnim()
@@ -838,17 +857,18 @@ void AEnemyFighterAIController::PlayChaseLocomotionIfMoving()
 	}
 	const UCharacterMovementComponent* Move = Fighter->GetCharacterMovement();
 	const float Speed2D = Move ? Move->Velocity.Size2D() : 0.f;
-	// Avoid in-place run: need actual motion or active short direct-push.
-	if (Speed2D < 20.f && !bDirectChaseFallback)
+	const bool bNavMoving = GetMoveStatus() == EPathFollowingStatus::Moving;
+	// Stop only when truly standing still — keep Run through the first chase frames.
+	if (Speed2D < 20.f && !bDirectChaseFallback && !bNavMoving)
 	{
 		StopLocomotionAnim();
 		return;
 	}
-	if (Fighter->bABPDrivenLocomotion)
+	if (!ShouldPlayMontageLocomotion())
 	{
 		return;
 	}
-	PlayWalkAnim();
+	PlayRunAnim();
 }
 
 void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
@@ -943,6 +963,7 @@ void AEnemyFighterAIController::RequestMoveToPreferred(float Dist)
 		&& PathRefreshRemaining > 0.f
 		&& GetMoveStatus() == EPathFollowingStatus::Moving)
 	{
+		PlayChaseLocomotionIfMoving();
 		return;
 	}
 	PathRefreshRemaining = PathRefreshInterval;

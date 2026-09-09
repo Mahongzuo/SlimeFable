@@ -60,6 +60,8 @@ protected:
 	void ClearDirectWander();
 	void ApplyLocomotionMaxSpeed(bool bChasing);
 	void UpdateWalkPlayRate();
+	/** Single-Node 蒙太奇 locomotion；ABP-only 敌人（Phoebe）不走这条。 */
+	bool ShouldPlayMontageLocomotion() const;
 	void TickCombat(float DeltaSeconds, float Dist);
 	void EnterTelegraph(int32 MoveIndex);
 	void TickTelegraph(float DeltaSeconds);

@@ -104,7 +104,7 @@ public:
 	TArray<TSoftObjectPtr<UAnimMontage>> IdleMontages;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
-		meta = (ToolTip = "勾选后用单节点播动画，不依赖 AnimBP 的 DefaultSlot。看门狗勾上。"))
+		meta = (ToolTip = "勾选后用单节点播 Idle/Walk/Run 蒙太奇，不依赖 AnimBP。看门狗勾上。与 bABPDrivenLocomotion 互斥；两者都勾时仍播蒙太奇。"))
 	bool bUseSingleNodeAnims = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
@@ -112,7 +112,7 @@ public:
 	TSoftObjectPtr<UAnimMontage> WalkMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
-		meta = (ToolTip = "追逐时循环播（bABPDrivenLocomotion / 幻形冲刺）。看门狗绑跑步（Run_F_IP）。空则回退 WalkMontage 加速。"))
+		meta = (ToolTip = "追逐时循环播。看门狗绑跑步（Run_F_IP）。空则回退 WalkMontage 并按 ChaseSpeed/WalkSpeed 加速。"))
 	TSoftObjectPtr<UAnimMontage> RunMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
@@ -120,11 +120,11 @@ public:
 	TSoftObjectPtr<UAnimMontage> JumpMontage;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
-		meta = (ToolTip = "勾选后按 MaxWalkSpeed/WalkSpeed 匹配 Walk 蒙太奇 PlayRate（高速加速=跑），并在追逐时把 MaxWalkSpeed 提到 ChaseSpeed。看门狗勾上。"))
+		meta = (ToolTip = "勾选后只改 MaxWalkSpeed，由 AnimBP 读速度切步态。仅 Phoebe 等真 AnimBP 勾上。看门狗不要勾。"))
 	bool bABPDrivenLocomotion = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
-		meta = (ClampMin = "100.0", ToolTip = "追逐玩家时的 MaxWalkSpeed，配合 ABP RunThreshold 触发跑步。仅 bABPDrivenLocomotion 生效。默认 600。"))
+		meta = (ClampMin = "100.0", ToolTip = "追逐玩家时的 MaxWalkSpeed。Single-Node 与 ABP 驱动都会用。默认 600。"))
 	float ChaseSpeed = 600.f;
 
 	const TArray<FEnemyMoveDef>& GetMoves() const { return Moves; }
