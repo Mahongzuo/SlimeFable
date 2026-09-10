@@ -133,7 +133,7 @@ public:
 	virtual bool UsesSingleNodeAnims() const override { return bUseSingleNodeAnims; }
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
-	void EnsureMoveKit();
+	virtual void EnsureMoveKit();
 
 	TArray<float> DifficultyBaseDamages;
 	TArray<float> DifficultyBaseRecoveries;

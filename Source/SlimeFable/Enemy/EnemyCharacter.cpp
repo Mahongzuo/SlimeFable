@@ -169,6 +169,10 @@ void AEnemyCharacter::EnsureDefaultDisplayName()
 	{
 		DisplayName = FText::FromString(TEXT("看门狗"));
 	}
+	else if (ClassName.Contains(TEXT("Pig")))
+	{
+		DisplayName = FText::FromString(TEXT("猪"));
+	}
 	else if (ClassName.Contains(TEXT("Samurai")))
 	{
 		DisplayName = FText::FromString(TEXT("武士"));
@@ -495,7 +499,7 @@ void AEnemyCharacter::BeginPlay()
 {
 	SpawnTransform = GetActorTransform();
 	const FString RuntimeClassName = GetClass()->GetName();
-	if (RuntimeClassName.Contains(TEXT("Watchdog")))
+	if (RuntimeClassName.Contains(TEXT("Watchdog")) || RuntimeClassName.Contains(TEXT("Pig")))
 	{
 		CombatRole = EEnemyCombatRole::Chaser;
 	}

@@ -883,3 +883,82 @@ void EnemyCombat::FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves)
 		OutMoves.Add(Move);
 	}
 }
+
+void EnemyCombat::FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves)
+{
+	OutMoves.Reset();
+
+	{
+		FEnemyMoveDef Move;
+		Move.MoveId = TEXT("TuskSmash");
+		Move.Skill.DisplayName = FText::FromString(TEXT("拱撞"));
+		Move.Skill.Exec = EEnemySkillExec::Melee;
+		Move.Skill.Windup = 0.1f;
+		Move.Skill.HitStart = 0.16f;
+		Move.Skill.HitEnd = 0.28f;
+		Move.Skill.Recovery = 0.28f;
+		Move.Skill.Damage = 10.f;
+		Move.Skill.Knockback = 240.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
+		Move.Skill.Hit.Radius = 90.f;
+		Move.Skill.Hit.Range = 145.f;
+		Move.Skill.Hit.OriginForwardOffset = 55.f;
+		Move.Skill.Hit.OriginZOffset = -35.f;
+		Move.MinRange = 0.f;
+		Move.MaxRange = 200.f;
+		Move.Weight = 1.5f;
+		Move.TelegraphTime = 0.12f;
+		Move.Cooldown = 0.7f;
+		OutMoves.Add(Move);
+	}
+
+	{
+		FEnemyMoveDef Move;
+		Move.MoveId = TEXT("TuskCombo");
+		Move.Skill.DisplayName = FText::FromString(TEXT("连拱"));
+		Move.Skill.Exec = EEnemySkillExec::Melee;
+		Move.Skill.Windup = 0.14f;
+		Move.Skill.HitStart = 0.2f;
+		Move.Skill.HitEnd = 0.5f;
+		Move.Skill.Recovery = 0.4f;
+		Move.Skill.Damage = 12.f;
+		Move.Skill.Knockback = 300.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
+		Move.Skill.Hit.Radius = 90.f;
+		Move.Skill.Hit.Range = 160.f;
+		Move.Skill.Hit.OriginForwardOffset = 60.f;
+		Move.Skill.Hit.OriginZOffset = -35.f;
+		Move.MinRange = 0.f;
+		Move.MaxRange = 200.f;
+		Move.Weight = 1.1f;
+		Move.TelegraphTime = 0.16f;
+		Move.Cooldown = 1.1f;
+		OutMoves.Add(Move);
+	}
+
+	{
+		FEnemyMoveDef Move;
+		Move.MoveId = TEXT("TuskLunge");
+		Move.Skill.DisplayName = FText::FromString(TEXT("扑撞"));
+		Move.Skill.Exec = EEnemySkillExec::Dash;
+		Move.Skill.DashDistance = 180.f;
+		Move.Skill.Windup = 0.16f;
+		Move.Skill.HitStart = 0.22f;
+		Move.Skill.HitEnd = 0.45f;
+		Move.Skill.Recovery = 0.45f;
+		Move.Skill.Damage = 14.f;
+		Move.Skill.Knockback = 360.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Capsule;
+		Move.Skill.Hit.Radius = 80.f;
+		Move.Skill.Hit.Range = 210.f;
+		Move.Skill.Hit.OriginForwardOffset = 65.f;
+		Move.Skill.Hit.OriginZOffset = -25.f;
+		Move.MinRange = 80.f;
+		Move.MaxRange = 320.f;
+		Move.Weight = 0.9f;
+		Move.TelegraphTime = 0.2f;
+		Move.Cooldown = 1.6f;
+		Move.bGapCloser = true;
+		OutMoves.Add(Move);
+	}
+}

@@ -66,6 +66,7 @@ public class SlimeFable : ModuleRules
 			"SlimeFable/DayLevel",
 			"SlimeFable/Editor",
 			"SlimeFable/PCG",
+			"SlimeFable/WFC",
 			"SlimeFable/Quest",
 			"SlimeFable/Slime",
 			"SlimeFable/Combat",

@@ -253,6 +253,8 @@ namespace EnemyCombat
 	SLIMEFABLE_API FSlimeSkillDef ToSlimeHitSkill(const FEnemySkillDef& Def);
 	SLIMEFABLE_API void FillDefaultFighterMoves(TArray<FEnemyMoveDef>& OutMoves);
 	SLIMEFABLE_API void FillWatchdogBiteMoves(TArray<FEnemyMoveDef>& OutMoves);
+	/** Pig Chaser: tusk smash / combo / lunge (same role as watchdog bites). */
+	SLIMEFABLE_API void FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves);
 	/** GASP / Mover enemies: melee-only kit (no Dash — CMC LaunchCharacter unavailable). */
 	SLIMEFABLE_API void FillDefaultGaspMoves(TArray<FEnemyMoveDef>& OutMoves);
 	/** Strip ragdoll / movement-mode notifies from our GASP combat montage copies. */
