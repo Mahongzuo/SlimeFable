@@ -4,6 +4,7 @@
 
 #include "AbilitySystemComponent.h"
 #include "AIController.h"
+#include "Animation/AnimClassInterface.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimationAsset.h"
@@ -33,6 +34,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/PlayerController.h"
 #include "GaspEnemyAIController.h"
+#include "Kismet/GameplayStatics.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -200,25 +202,28 @@ void UGaspMoverInputBridge::ProduceInput_Implementation(int32 SimTimeMs, FMoverI
 		FVector WorldIntent = FVector::ZeroVector;
 		if (!bCombatLocked)
 		{
-			if (UNavMoverComponent* Nav = Owner->GetNavMoverComponent())
-			{
-				FVector NavIntent = FVector::ZeroVector;
-				FVector NavVelocity = FVector::ZeroVector;
-				if (Nav->ConsumeNavMovementData(NavIntent, NavVelocity))
-				{
-					if (!NavIntent.IsNearlyZero())
-					{
-						WorldIntent = NavIntent.GetSafeNormal2D();
-					}
-					else if (!NavVelocity.IsNearlyZero())
-					{
-						WorldIntent = NavVelocity.GetSafeNormal2D();
-					}
-				}
-			}
-			if (WorldIntent.IsNearlyZero() && !Owner->GetAiMoveIntent().IsNearlyZero())
+			if (!Owner->GetAiMoveIntent().IsNearlyZero())
 			{
 				WorldIntent = Owner->GetAiMoveIntent().GetSafeNormal2D();
+			}
+			else if (!Owner->GetAiMoveDest().IsNearlyZero())
+			{
+				if (UNavMoverComponent* Nav = Owner->GetNavMoverComponent())
+				{
+					FVector NavIntent = FVector::ZeroVector;
+					FVector NavVelocity = FVector::ZeroVector;
+					if (Nav->ConsumeNavMovementData(NavIntent, NavVelocity))
+					{
+						if (!NavIntent.IsNearlyZero())
+						{
+							WorldIntent = NavIntent.GetSafeNormal2D();
+						}
+						else if (!NavVelocity.IsNearlyZero())
+						{
+							WorldIntent = NavVelocity.GetSafeNormal2D();
+						}
+					}
+				}
 			}
 		}
 		Inputs.SetMoveInput(EMoveInputType::DirectionalIntent, WorldIntent);
@@ -416,6 +421,16 @@ void AGaspSandboxPawn::EnsureMoveKit()
 	{
 		EnemyCombat::FillDefaultGaspMoves(Moves);
 	}
+	EnemyCombat::AppendCostumeSkills(Moves, CostumeKind);
+	if (DisplayName.IsEmpty() && CostumeKind != EGaspCostumeKind::None)
+	{
+		DisplayName = EnemyCombat::CostumeDisplayName(CostumeKind);
+	}
+	if (Combat && CostumeKind != EGaspCostumeKind::None)
+	{
+		Combat->AttackSwingSound = TSoftObjectPtr<USoundBase>(
+			FSoftObjectPath(EnemyCombat::CostumeAttackSoundPath(CostumeKind)));
+	}
 }
 
 void AGaspSandboxPawn::EnsureCapsuleIsRoot()
@@ -491,7 +506,7 @@ void AGaspSandboxPawn::AttachHealthBarToCapsule()
 		HealthBar = NewObject<UWidgetComponent>(this, TEXT("HealthBar"), RF_Transient | RF_TextExportTransient);
 		HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
 		HealthBar->SetDrawAtDesiredSize(false);
-		HealthBar->SetDrawSize(FVector2D(110.f, 14.f));
+		HealthBar->SetDrawSize(FVector2D(72.f, 8.f));
 		HealthBar->SetPivot(FVector2D(0.5f, 1.f));
 		HealthBar->SetWidgetClass(USlimeWorldHealthBar::StaticClass());
 		HealthBar->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -509,9 +524,29 @@ void AGaspSandboxPawn::RefreshWorldHealthBarVisibility()
 	{
 		return;
 	}
-	const bool bHide = bMorphTarget || IsPlayerControlled() || bDevourLocked || bDevouredDeath || bDeathSequence;
-	HealthBar->SetHiddenInGame(bHide);
-	HealthBar->SetVisibility(!bHide);
+	bool bShow = Health && Health->IsAlive()
+		&& !bMorphTarget && !IsPlayerControlled() && !bDevourLocked && !bDevouredDeath && !bDeathSequence;
+	if (bShow)
+	{
+		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			if (const USlimeLockOnComponent* Lock = Player->FindComponentByClass<USlimeLockOnComponent>())
+			{
+				bShow = Lock->GetLockedTarget() != this;
+			}
+			if (bShow && !Health->IsWorldHealthBarRevealed())
+			{
+				bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
+					<= FMath::Square(HealthBarVisibleRange);
+			}
+		}
+		else
+		{
+			bShow = false;
+		}
+	}
+	HealthBar->SetHiddenInGame(!bShow);
+	HealthBar->SetVisibility(bShow);
 }
 
 void AGaspSandboxPawn::BindWorldHealthBar()
@@ -521,11 +556,24 @@ void AGaspSandboxPawn::BindWorldHealthBar()
 		return;
 	}
 	HealthBar->InitWidget();
+	HealthBar->SetDrawSize(FVector2D(72.f, 8.f));
 	if (USlimeWorldHealthBar* Bar = Cast<USlimeWorldHealthBar>(HealthBar->GetWidget()))
 	{
 		Bar->SetHealth(Health);
 	}
 	RefreshWorldHealthBarVisibility();
+}
+
+void AGaspSandboxPawn::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	if (CostumeKind == EGaspCostumeKind::None)
+	{
+		return;
+	}
+	ResolveBlueprintComponents();
+	ApplyCostumeVisualClass();
+	ApplyActiveVisualOnly();
 }
 
 void AGaspSandboxPawn::PostInitializeComponents()
@@ -551,6 +599,8 @@ void AGaspSandboxPawn::PostInitializeComponents()
 		CachedMover->SetUpdatedComponent(CachedCapsule);
 	}
 	EnsureMoverModes();
+	ApplyCostumeVisualClass();
+	ApplyActiveVisualOnly();
 }
 
 void AGaspSandboxPawn::BeginPlay()
@@ -560,8 +610,10 @@ void AGaspSandboxPawn::BeginPlay()
 	EnsureMoveKit();
 	EnsureInputBridge();
 	AttachHealthBarToCapsule();
+	ApplyCostumeVisualClass();
 	ApplyActiveVisualOnly();
 	Super::BeginPlay();
+	ApplyCostumeRetargeter();
 	EnsureMoverModes();
 	SpawnOrigin = GetActorLocation();
 	BindWorldHealthBar();
@@ -574,10 +626,15 @@ void AGaspSandboxPawn::BeginPlay()
 	{
 		Health->OnDied.AddDynamic(this, &AGaspSandboxPawn::HandleDied);
 		Health->MaxHP = FMath::Max(MaxHP, 1.f);
-		if (DebugStartHealthPercent > KINDA_SMALL_NUMBER)
+		if (bMorphTarget)
+		{
+			Health->ResetHP();
+		}
+		else if (DebugStartHealthPercent > KINDA_SMALL_NUMBER)
 		{
 			Health->CurrentHP = Health->MaxHP * FMath::Clamp(DebugStartHealthPercent, 0.01f, 1.f);
 		}
+		Health->OnHealthChanged.Broadcast(Health->CurrentHP, Health->MaxHP);
 	}
 }
 
@@ -653,15 +710,55 @@ void AGaspSandboxPawn::Tick(float DeltaSeconds)
 		AIC->DriveCombatAI(DeltaSeconds);
 	}
 	// Keep NavMover fed when AI sets a direct intent (official ProduceInput consumes it).
-	if (CachedNavMover && !AiMoveIntent.IsNearlyZero() && Cast<APlayerController>(GetController()) == nullptr)
+	if (CachedNavMover && !AiMoveDest.IsNearlyZero() && Cast<APlayerController>(GetController()) == nullptr)
 	{
-		CachedNavMover->RequestPathMove(AiMoveIntent.GetSafeNormal2D());
+		CachedNavMover->RequestPathMove(AiMoveDest);
 	}
 	RestoreUnexpectedRagdoll();
+	SuppressCostumeInputRagdoll();
 	TickCombatKnockdown();
 	ConfirmDeathRagdollThenStopAI();
 	KeepDeathRagdollPhysics();
 	TickMorphTrace(DeltaSeconds);
+	RefreshWorldHealthBarVisibility();
+	StripXiguaOutlineOverlay();
+}
+
+void AGaspSandboxPawn::CancelInputRagdoll()
+{
+	if (bDeathSequence || bCombatKnockdown || bDeathRagdollArmed)
+	{
+		return;
+	}
+	bPendingRagdoll = false;
+	if (CachedMover && CachedMover->FindMovementModeByName(FName(TEXT("Walking"))))
+	{
+		CachedMover->QueueNextMode(FName(TEXT("Walking")), true);
+	}
+	bForceWalkingAfterRagdollRestore = true;
+}
+
+void AGaspSandboxPawn::SuppressCostumeInputRagdoll()
+{
+	if (bDeathSequence || bCombatKnockdown || bDeathRagdollArmed || CostumeKind == EGaspCostumeKind::None)
+	{
+		return;
+	}
+	if (!Combat || !Combat->IsPlayerMorphed())
+	{
+		return;
+	}
+	if (!EnemyCombat::FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillR))
+	{
+		return;
+	}
+	const bool bInRagdoll = CachedMover
+		&& CachedMover->GetMovementModeName() == FName(TEXT("Ragdoll"));
+	if (!bInRagdoll && !bPendingRagdoll)
+	{
+		return;
+	}
+	CancelInputRagdoll();
 }
 
 void AGaspSandboxPawn::RestoreUnexpectedRagdoll()
@@ -764,18 +861,20 @@ void AGaspSandboxPawn::SetSmartObjectPlayerLogic(bool bEnable)
 	}
 }
 
-void AGaspSandboxPawn::SetAiMoveIntent(const FVector& WorldIntent)
+void AGaspSandboxPawn::SetAiMoveIntent(const FVector& WorldIntent, const FVector& WorldDest)
 {
 	AiMoveIntent = WorldIntent;
-	if (CachedNavMover && !WorldIntent.IsNearlyZero())
+	AiMoveDest = WorldDest;
+	if (CachedNavMover && !WorldDest.IsNearlyZero())
 	{
-		CachedNavMover->RequestPathMove(WorldIntent.GetSafeNormal2D());
+		CachedNavMover->RequestPathMove(WorldDest);
 	}
 }
 
 void AGaspSandboxPawn::ClearAiMoveIntent()
 {
 	AiMoveIntent = FVector::ZeroVector;
+	AiMoveDest = FVector::ZeroVector;
 }
 
 bool AGaspSandboxPawn::IsCameraAttachedMesh(const UMeshComponent* Mesh)
@@ -811,6 +910,10 @@ USkeletalMeshComponent* AGaspSandboxPawn::FindChildActorVisualMesh() const
 	for (USkeletalMeshComponent* Mesh : Meshes)
 	{
 		if (!Mesh || !Mesh->GetSkeletalMeshAsset() || Mesh->IsVisualizationComponent() || IsCameraAttachedMesh(Mesh))
+		{
+			continue;
+		}
+		if (Mesh->GetName().Contains(TEXT("Hair")))
 		{
 			continue;
 		}
@@ -868,11 +971,219 @@ void AGaspSandboxPawn::ForEachVisualMesh(TFunctionRef<void(UMeshComponent*)> Fn)
 void AGaspSandboxPawn::ApplyActiveVisualOnly()
 {
 	USkeletalMeshComponent* OverrideMesh = FindChildActorVisualMesh();
-	if (OverrideMesh && CachedSkeletalMesh && CachedSkeletalMesh != OverrideMesh)
+	if (!CachedSkeletalMesh || CachedSkeletalMesh == OverrideMesh)
 	{
-		CachedSkeletalMesh->SetHiddenInGame(true, false);
-		OverrideMesh->SetHiddenInGame(false, false);
+		return;
 	}
+	if (!OverrideMesh)
+	{
+		CachedSkeletalMesh->SetHiddenInGame(false, false);
+		CachedSkeletalMesh->SetVisibility(true, false);
+		return;
+	}
+
+	// VisualOverride hangs under the UEFN source mesh. Never propagate hide.
+	// Source must keep ticking: ABP_GenericRetarget reads ParentSkeletalMeshComponent pose.
+	CachedSkeletalMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	CachedSkeletalMesh->bEnableUpdateRateOptimizations = false;
+	CachedSkeletalMesh->SetHiddenInGame(true, false);
+	CachedSkeletalMesh->SetVisibility(false, false);
+
+	if (CachedVisualOverride)
+	{
+		CachedVisualOverride->SetHiddenInGame(false, false);
+		CachedVisualOverride->SetVisibility(true, false);
+		if (AActor* ChildActor = CachedVisualOverride->GetChildActor())
+		{
+			ChildActor->SetActorHiddenInGame(false);
+		}
+	}
+
+	if (OverrideMesh->LeaderPoseComponent.Get())
+	{
+		OverrideMesh->SetLeaderPoseComponent(nullptr);
+	}
+	OverrideMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	OverrideMesh->SetHiddenInGame(false, false);
+	OverrideMesh->SetVisibility(true, false);
+
+	if (AActor* Child = CachedVisualOverride ? CachedVisualOverride->GetChildActor() : nullptr)
+	{
+		TArray<USkeletalMeshComponent*> Meshes;
+		Child->GetComponents<USkeletalMeshComponent>(Meshes);
+		for (USkeletalMeshComponent* Mesh : Meshes)
+		{
+			if (!Mesh || Mesh == OverrideMesh)
+			{
+				continue;
+			}
+			const bool bHair = Mesh->GetName().Contains(TEXT("Hair"));
+			Mesh->SetHiddenInGame(bHair, false);
+			Mesh->SetVisibility(!bHair, false);
+		}
+	}
+}
+
+void AGaspSandboxPawn::ApplyCostumeVisualClass()
+{
+	const TCHAR* Path = EnemyCombat::CostumeVisualClassPath(CostumeKind);
+	if (!Path)
+	{
+		return;
+	}
+	if (!CachedVisualOverride)
+	{
+		ResolveBlueprintComponents();
+	}
+	if (!CachedVisualOverride)
+	{
+		return;
+	}
+	UClass* VisualClass = LoadClass<AActor>(nullptr, Path);
+	if (!VisualClass)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("GaspSandboxPawn %s: missing costume visual %s"), *GetName(), Path);
+		return;
+	}
+	if (CachedVisualOverride->GetChildActorClass() != VisualClass)
+	{
+		CachedVisualOverride->SetChildActorClass(VisualClass);
+	}
+
+	AActor* Child = CachedVisualOverride->GetChildActor();
+	if (!Child)
+	{
+		return;
+	}
+	const FName Tag = EnemyCombat::CostumeRetargeterTag(CostumeKind);
+	TArray<USkeletalMeshComponent*> Meshes;
+	Child->GetComponents<USkeletalMeshComponent>(Meshes);
+	for (USkeletalMeshComponent* Mesh : Meshes)
+	{
+		if (!Mesh)
+		{
+			continue;
+		}
+		const FString MeshName = Mesh->GetName();
+		if (MeshName.Contains(TEXT("Hair")))
+		{
+			Mesh->SetAnimInstanceClass(nullptr);
+			Mesh->SetHiddenInGame(true, false);
+			Mesh->SetVisibility(false, false);
+			Mesh->ComponentTags.Reset();
+			continue;
+		}
+		Mesh->ComponentTags.Reset();
+		if (!Tag.IsNone())
+		{
+			Mesh->ComponentTags.Add(Tag);
+		}
+		if (CostumeKind == EGaspCostumeKind::Xigua)
+		{
+			Mesh->SetOverlayMaterial(nullptr);
+			Mesh->SetRenderCustomDepth(false);
+		}
+	}
+	StripXiguaOutlineOverlay();
+}
+
+void AGaspSandboxPawn::StripXiguaOutlineOverlay()
+{
+	if (CostumeKind != EGaspCostumeKind::Xigua)
+	{
+		return;
+	}
+	ForEachVisualMesh([](UMeshComponent* Mesh)
+	{
+		if (!IsValid(Mesh))
+		{
+			return;
+		}
+		Mesh->SetRenderCustomDepth(false);
+		if (UMaterialInterface* Overlay = Mesh->GetOverlayMaterial())
+		{
+			const FString Name = Overlay->GetName();
+			if (Name.Contains(TEXT("Outline")) || Name.Contains(TEXT("PhoebeOutline")))
+			{
+				Mesh->SetOverlayMaterial(nullptr);
+			}
+		}
+	});
+}
+
+void AGaspSandboxPawn::ApplyCostumeRetargeter()
+{
+	const TCHAR* Path = EnemyCombat::CostumeRetargeterPath(CostumeKind);
+	if (!Path)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Visual = FindChildActorVisualMesh();
+	if (!Visual)
+	{
+		return;
+	}
+	UObject* Retargeter = StaticLoadObject(UObject::StaticClass(), nullptr, Path);
+	if (!Retargeter)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("GaspSandboxPawn %s: missing costume RTG %s"), *GetName(), Path);
+		return;
+	}
+
+	auto AssignOnObject = [Retargeter](UObject* Target) -> int32
+	{
+		if (!Target)
+		{
+			return 0;
+		}
+		int32 Assigned = 0;
+		for (TFieldIterator<FObjectProperty> It(Target->GetClass()); It; ++It)
+		{
+			if (It->PropertyClass && Retargeter->IsA(It->PropertyClass))
+			{
+				It->SetObjectPropertyValue_InContainer(Target, Retargeter);
+				++Assigned;
+			}
+		}
+		return Assigned;
+	};
+	auto AssignOnStruct = [Retargeter](void* Container, UScriptStruct* Struct) -> int32
+	{
+		if (!Container || !Struct)
+		{
+			return 0;
+		}
+		int32 Assigned = 0;
+		for (TFieldIterator<FObjectProperty> It(Struct); It; ++It)
+		{
+			if (It->PropertyClass && Retargeter->IsA(It->PropertyClass))
+			{
+				It->SetObjectPropertyValue_InContainer(Container, Retargeter);
+				++Assigned;
+			}
+		}
+		return Assigned;
+	};
+
+	int32 Assigned = 0;
+	if (UAnimInstance* Anim = Visual->GetAnimInstance())
+	{
+		Assigned += AssignOnObject(Anim);
+		if (IAnimClassInterface* AnimClass = IAnimClassInterface::GetFromClass(Anim->GetClass()))
+		{
+			for (FStructProperty* NodeProp : AnimClass->GetAnimNodeProperties())
+			{
+				if (!NodeProp)
+				{
+					continue;
+				}
+				void* Node = NodeProp->ContainerPtrToValuePtr<void>(Anim);
+				Assigned += AssignOnStruct(Node, NodeProp->Struct);
+			}
+		}
+	}
+	UE_LOG(LogSlimeFable, Log, TEXT("GaspSandboxPawn %s: costume RTG %s assigned %d field(s)"),
+		*GetName(), Path, Assigned);
 }
 
 FText AGaspSandboxPawn::GetResolvedDisplayName() const
@@ -967,7 +1278,9 @@ void AGaspSandboxPawn::InitAsMorphTarget(AActor* Master)
 		Health->bDestroyOnDeath = false;
 	}
 	ResolveBlueprintComponents();
+	ApplyCostumeVisualClass();
 	ApplyActiveVisualOnly();
+	ApplyCostumeRetargeter();
 	if (!MorphLockOn)
 	{
 		MorphLockOn = NewObject<USlimeLockOnComponent>(this, TEXT("MorphLockOn"));
@@ -999,6 +1312,11 @@ void AGaspSandboxPawn::InitAsPhantom(float LifeSeconds, AActor* Master)
 	bDevourable = false;
 	MorphMaster = Master;
 	(void)LifeSeconds;
+	if (Health)
+	{
+		Health->Team = ESlimeTeam::Player;
+		Health->bDestroyOnDeath = false;
+	}
 }
 
 void AGaspSandboxPawn::BeginDevouredDeath(AActor* Devourer)

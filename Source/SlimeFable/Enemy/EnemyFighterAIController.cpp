@@ -572,9 +572,10 @@ void AEnemyFighterAIController::TickCombat(float DeltaSeconds, float Dist)
 			{
 				const FEnemyMoveDef& NextMove = Fighter->GetMoves()[Next];
 				const bool bNextOk = IsRangedProjectileMove(NextMove)
-					|| (IsMeleeEngageMove(NextMove) && Dist <= MeleeEngageDistance
+					|| (IsMeleeEngageMove(NextMove) && Dist <= ResolveMeleeEngageDistance()
 						&& Dist >= NextMove.MinRange && Dist <= NextMove.MaxRange)
-					|| (IsGapCloserDashMove(NextMove) && Dist > MeleeEngageDistance && Dist <= 350.f
+					|| (IsGapCloserDashMove(NextMove) && Dist > ResolveMeleeEngageDistance()
+						&& Dist <= NextMove.MaxRange
 						&& Dist >= NextMove.MinRange && Dist <= NextMove.MaxRange);
 				if (bNextOk)
 				{
@@ -658,7 +659,7 @@ void AEnemyFighterAIController::BeginExecute()
 	const float Dist2D = FVector::Dist2D(Fighter->GetActorLocation(), Focus->GetActorLocation());
 	if (IsMeleeEngageMove(Move))
 	{
-		const float Cap = FMath::Min(MeleeEngageDistance, Move.MaxRange);
+		const float Cap = FMath::Min(ResolveMeleeEngageDistance(), Move.MaxRange);
 		if (Dist2D > Cap)
 		{
 			ActiveMoveIndex = INDEX_NONE;
@@ -667,7 +668,7 @@ void AEnemyFighterAIController::BeginExecute()
 			return;
 		}
 	}
-	else if (IsGapCloserDashMove(Move) && Dist2D > 350.f)
+	else if (IsGapCloserDashMove(Move) && Dist2D > Move.MaxRange)
 	{
 		ActiveMoveIndex = INDEX_NONE;
 		State = EEnemyFighterState::Combat;
@@ -752,7 +753,7 @@ int32 AEnemyFighterAIController::SelectMove(float Dist) const
 		Candidates.Add(Index);
 	};
 
-	if (Dist <= MeleeEngageDistance)
+	if (Dist <= ResolveMeleeEngageDistance())
 	{
 		for (int32 Index = 0; Index < Moves.Num(); ++Index)
 		{
@@ -772,11 +773,11 @@ int32 AEnemyFighterAIController::SelectMove(float Dist) const
 			}
 		}
 		// Dash only as short gap-closer near melee gate — never a far slash substitute.
-		if (Candidates.Num() == 0 && Dist <= 350.f)
+		if (Candidates.Num() == 0)
 		{
 			for (int32 Index = 0; Index < Moves.Num(); ++Index)
 			{
-				if (IsGapCloserDashMove(Moves[Index]))
+				if (IsGapCloserDashMove(Moves[Index]) && Dist <= Moves[Index].MaxRange)
 				{
 					TryAdd(Index);
 				}
@@ -799,6 +800,11 @@ int32 AEnemyFighterAIController::SelectMove(float Dist) const
 		}
 	}
 	return Candidates.Last();
+}
+
+float AEnemyFighterAIController::ResolveMeleeEngageDistance() const
+{
+	return Fighter ? Fighter->MeleeEngageDistance : MeleeEngageDistance;
 }
 
 bool AEnemyFighterAIController::IsMeleeEngageMove(const FEnemyMoveDef& Move) const

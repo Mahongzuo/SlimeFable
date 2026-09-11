@@ -23,6 +23,7 @@
 #include "SlimeBodyComponent.h"
 #include "SlimeCharacter.h"
 #include "SlimeDevourComponent.h"
+#include "SlimeHealthComponent.h"
 #include "SlimeDodgeComponent.h"
 #include "SlimeElementComponent.h"
 #include "SlimeElementTypes.h"
@@ -691,6 +692,14 @@ void USlimeMorphComponent::SpawnMorphTarget()
 		Target->InitAsMorphTarget(Slime);
 	}
 	Enemy->FinishSpawning(SpawnXform);
+	if (Capture.SavedMorphHP > 0.f)
+	{
+		if (USlimeHealthComponent* MorphHealth = Enemy->FindComponentByClass<USlimeHealthComponent>())
+		{
+			MorphHealth->CurrentHP = FMath::Clamp(Capture.SavedMorphHP, 1.f, MorphHealth->MaxHP);
+			MorphHealth->OnHealthChanged.Broadcast(MorphHealth->CurrentHP, MorphHealth->MaxHP);
+		}
+	}
 
 	// FinishSpawning may resize the capsule from the actual mesh. Align using that final
 	// half-height so the target's feet stay on the slime's ground plane instead of floating.
@@ -933,6 +942,13 @@ void USlimeMorphComponent::DestroyMorphTarget()
 {
 	if (MorphTarget)
 	{
+		if (Devour && Devour->GetPhantomSlots().IsValidIndex(MorphedSlotIndex))
+		{
+			if (const USlimeHealthComponent* MorphHealth = MorphTarget->FindComponentByClass<USlimeHealthComponent>())
+			{
+				Devour->SetPhantomSlotMorphHP(MorphedSlotIndex, MorphHealth->IsAlive() ? MorphHealth->CurrentHP : -1.f);
+			}
+		}
 		ClearMorphDodge();
 
 		// Drop the shell and restore the real materials so the enemy can dissolve properly.

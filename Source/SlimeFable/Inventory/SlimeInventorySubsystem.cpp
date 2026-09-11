@@ -7,6 +7,7 @@
 #include "SlimePlacementComponent.h"
 #include "Combat/SlimeCombatComponent.h"
 #include "Combat/SlimeHealthComponent.h"
+#include "EnemyCombatComponent.h"
 #include "SlimeFablePlayerController.h"
 #include "UI/SlimeSouvenirViewerWidget.h"
 #include "GameFramework/Pawn.h"
@@ -370,6 +371,13 @@ bool USlimeInventorySubsystem::UseConsumable(FName ItemId, APawn* User)
 		if (Def->BuffDuration > 0.f && !FMath::IsNearlyEqual(Def->DamageBonusMul, 1.f))
 		{
 			Combat->ApplyOutgoingDamageMul(Def->DamageBonusMul, Def->BuffDuration);
+		}
+	}
+	else if (UEnemyCombatComponent* EnemyCombat = User->FindComponentByClass<UEnemyCombatComponent>())
+	{
+		if (Def->BuffDuration > 0.f && !FMath::IsNearlyEqual(Def->DamageBonusMul, 1.f))
+		{
+			EnemyCombat->ApplyOutgoingDamageMul(Def->DamageBonusMul, Def->BuffDuration);
 		}
 	}
 

@@ -237,6 +237,11 @@ public:
 			ToolTip = "血条在胶囊顶上方的额外厘米。默认 12。"))
 	float HealthBarZOffset = 12.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD",
+		meta = (ClampMin = "100.0", Units = "cm",
+			ToolTip = "超过这个距离不显示头顶血条。默认 500（5 米）。"))
+	float HealthBarVisibleRange = 500.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Camera",
 		meta = (ClampMin = "0.0", Units = "cm",
 			ToolTip = "幻形后最近 SpringArm 臂长。默认 90。"))
@@ -326,6 +331,7 @@ protected:
 	void SnapSourceMeshToCapsule();
 	void SnapVisualMeshToSource(USkeletalMeshComponent* Mesh);
 	void BindWorldHealthBar();
+	void RefreshWorldHealthBarVisibility();
 	void BindMorphInput(UEnhancedInputComponent* EnhancedInput);
 	void MorphMove(const FInputActionValue& Value);
 	void MorphMoveStopped(const FInputActionValue& Value);

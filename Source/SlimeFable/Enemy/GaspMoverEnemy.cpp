@@ -115,7 +115,7 @@ AGaspMoverEnemy::AGaspMoverEnemy()
 	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
 	HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
 	HealthBar->SetDrawAtDesiredSize(false);
-	HealthBar->SetDrawSize(FVector2D(110.f, 14.f));
+	HealthBar->SetDrawSize(FVector2D(72.f, 8.f));
 	HealthBar->SetPivot(FVector2D(0.5f, 1.f));
 	HealthBar->SetWidgetClass(USlimeWorldHealthBar::StaticClass());
 	HealthBar->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -284,7 +284,7 @@ void AGaspMoverEnemy::BeginPlay()
 	Super::BeginPlay();
 	Health->MaxHP = MaxHP;
 	Health->ResetHP();
-	if (DebugStartHealthPercent > KINDA_SMALL_NUMBER)
+	if (!bMorphTarget && DebugStartHealthPercent > KINDA_SMALL_NUMBER)
 	{
 		Health->CurrentHP = MaxHP * DebugStartHealthPercent;
 	}
@@ -344,6 +344,38 @@ void AGaspMoverEnemy::BindWorldHealthBar()
 	{
 		Bar->SetHealth(Health);
 	}
+	RefreshWorldHealthBarVisibility();
+}
+
+void AGaspMoverEnemy::RefreshWorldHealthBarVisibility()
+{
+	if (!HealthBar)
+	{
+		return;
+	}
+	bool bShow = Health && Health->IsAlive()
+		&& !bMorphTarget && !IsPlayerControlled() && !bDeathSequence;
+	if (bShow)
+	{
+		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			if (const USlimeLockOnComponent* Lock = Player->FindComponentByClass<USlimeLockOnComponent>())
+			{
+				bShow = Lock->GetLockedTarget() != this;
+			}
+			if (bShow && !(Health && Health->IsWorldHealthBarRevealed()))
+			{
+				bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
+					<= FMath::Square(HealthBarVisibleRange);
+			}
+		}
+		else
+		{
+			bShow = false;
+		}
+	}
+	HealthBar->SetHiddenInGame(!bShow);
+	HealthBar->SetVisibility(bShow);
 }
 
 void AGaspMoverEnemy::UpdateAnimMotionState(float DeltaSeconds)
@@ -411,6 +443,7 @@ void AGaspMoverEnemy::Tick(float DeltaSeconds)
 		// Controllers sometimes stay dormant under -game/nullrhi; drive AI from the pawn tick.
 		AIC->DriveCombatAI(DeltaSeconds);
 	}
+	RefreshWorldHealthBarVisibility();
 	TickCombatKnockdown();
 	ConfirmDeathRagdollThenStopAI();
 	if (!bDeathSequence && !bMoverFrozen && !bCombatKnockdown
@@ -676,9 +709,14 @@ void AGaspMoverEnemy::BindMorphInput(UEnhancedInputComponent* EnhancedInput)
 	{
 		EnhancedInput->BindAction(Takedown, ETriggerEvent::Started, this, &AGaspMoverEnemy::MorphTakedownStarted);
 	}
-	if (UInputAction* Ragdoll = LoadSoftAction(TriggerRagdollAction))
+	const bool bRIsCostumeSkill = EnemyCombat::FindMoveByPlayerSlot(
+		GetEnemyMoves(), EEnemyPlayerSkillSlot::SkillR) != nullptr;
+	if (!bRIsCostumeSkill)
 	{
-		EnhancedInput->BindAction(Ragdoll, ETriggerEvent::Started, this, &AGaspMoverEnemy::MorphTriggerRagdollStarted);
+		if (UInputAction* Ragdoll = LoadSoftAction(TriggerRagdollAction))
+		{
+			EnhancedInput->BindAction(Ragdoll, ETriggerEvent::Started, this, &AGaspMoverEnemy::MorphTriggerRagdollStarted);
+		}
 	}
 	if (UInputAction* Crouch = LoadSoftAction(CrouchAction))
 	{
@@ -750,6 +788,10 @@ void AGaspMoverEnemy::MorphTakedownStarted()
 
 void AGaspMoverEnemy::MorphTriggerRagdollStarted()
 {
+	if (EnemyCombat::FindMoveByPlayerSlot(GetEnemyMoves(), EEnemyPlayerSkillSlot::SkillR))
+	{
+		return;
+	}
 	TriggerSandboxRagdoll();
 }
 

@@ -315,8 +315,9 @@ public:
 		ToolTip = "血条在网格顶上方的额外厘米。默认 12。网格用参考姿势包围盒，不跟动画抖。没网格时退回胶囊顶。"))
 	float HealthBarZOffset = 12.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "100.0", Units = "cm"))
-	float HealthBarVisibleRange = 1000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "100.0", Units = "cm",
+		ToolTip = "超过这个距离不显示头顶血条。默认 500（5 米）。"))
+	float HealthBarVisibleRange = 500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Presence")
 	bool bAllowDespawn = false;

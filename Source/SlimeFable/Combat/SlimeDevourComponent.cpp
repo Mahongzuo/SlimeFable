@@ -1630,6 +1630,14 @@ bool USlimeDevourComponent::BuildCaptureFromMesh(USkeletalMeshComponent* Skel, U
 	return false;
 }
 
+void USlimeDevourComponent::SetPhantomSlotMorphHP(int32 Slot, float HP)
+{
+	if (PhantomSlots.IsValidIndex(Slot))
+	{
+		PhantomSlots[Slot].SavedMorphHP = HP;
+	}
+}
+
 void USlimeDevourComponent::PushPhantomSlot(const FSlimeDevourCapture& Capture)
 {
 	if (!Capture.IsValidCapture())

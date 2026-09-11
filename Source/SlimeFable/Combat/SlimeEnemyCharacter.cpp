@@ -23,7 +23,7 @@ ASlimeEnemyCharacter::ASlimeEnemyCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 	HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
 	HealthBar->SetDrawAtDesiredSize(false);
-	HealthBar->SetDrawSize(FVector2D(96.f, 12.f));
+	HealthBar->SetDrawSize(FVector2D(72.f, 8.f));
 	HealthBar->SetPivot(FVector2D(0.5f, 1.f));
 	HealthBar->SetWidgetClass(USlimeWorldHealthBar::StaticClass());
 	HealthBar->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -59,8 +59,10 @@ void ASlimeEnemyCharacter::RefreshWorldHealthBarVisibility()
 	{
 		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
 		{
-			bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
-				<= FMath::Square(HealthBarVisibleRange);
+			const bool bRevealed = Health && Health->IsWorldHealthBarRevealed();
+			bShow = bRevealed
+				|| FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
+					<= FMath::Square(HealthBarVisibleRange);
 		}
 		else
 		{

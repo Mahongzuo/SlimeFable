@@ -9,6 +9,7 @@
 
 class UAnimInstance;
 class UAnimMontage;
+class UNiagaraComponent;
 class UNiagaraSystem;
 class UEnemySkillAbility;
 class USoundBase;
@@ -22,6 +23,7 @@ public:
 	UEnemyCombatComponent();
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
 	bool TryExecute(const FEnemySkillDef& Def);
@@ -59,6 +61,7 @@ public:
 	/** When true, Tick polls player combat keys instead of waiting for AI. Set by the morph system. */
 	void SetPlayerMorphed(bool bIn) { bPlayerMorphed = bIn; }
 	bool IsPlayerMorphed() const { return bPlayerMorphed; }
+	void ApplyOutgoingDamageMul(float Mul, float DurationSeconds);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Combat", meta = (ClampMin = "0.0"))
 	float AttackPower = 12.f;
@@ -93,7 +96,21 @@ protected:
 	void FireHit();
 	float GetHitFireTime() const;
 	void ExecuteDash(const FEnemySkillDef& Def, const FVector& Forward);
+	void ApplyDashVelocity(const FVector& Forward, float Speed, bool bAirDash);
+	void TickGapCloserDash();
+	AActor* ResolveAimTarget() const;
+	AActor* FindNearestHostile(float MaxRange) const;
 	void ExecuteProjectile(const FEnemySkillDef& Def, const FVector& Forward);
+	void ExecuteSummon(const FEnemySkillDef& Def);
+	void ConfigureSummonedAlly(AActor* Spawned);
+	void ExecuteWatermelonRain(const FEnemySkillDef& Def);
+	void TickWatermelonRain(float DeltaTime);
+	void SpawnOneRainWatermelon();
+	void BeginBeamLane(const FEnemySkillDef& Def, const FVector& Forward);
+	void SpawnBeamLaneVfx(const FEnemySkillDef& Def, const FVector& Forward);
+	void TickBeamLane(float DeltaTime);
+	void FireBeamLaneHit();
+	void StopBeamLane();
 	void SpawnVfx(const TSoftObjectPtr<UNiagaraSystem>& SoftSystem, const FVector& Location) const;
 	FVector GetAimForward() const;
 	FVector GetMuzzleLocation() const;
@@ -102,6 +119,9 @@ protected:
 
 	/** AnimInstance for montage play/stop: EnemyCharacter mesh, else ISlimeDevourTarget primary, else Character mesh. */
 	UAnimInstance* ResolveOwnerAnimInstance() const;
+	UAnimInstance* ResolveOwnerAnimInstance(const UAnimMontage* Montage) const;
+	bool PlayOwnerAttackMontage(UAnimMontage* Montage);
+	void RestoreCostumeVisualAnim();
 
 	/** Player combat key polling while morphed (mirrors USlimeCombatComponent::PollCombatKeys). */
 	void PollPlayerCombatKeys(float DeltaTime);
@@ -131,6 +151,10 @@ protected:
 	TWeakObjectPtr<UEnemySkillAbility> ActiveGasAbility;
 	float AttackLockRemaining = 0.f;
 	TWeakObjectPtr<UAnimMontage> ActiveActionMontage;
+	TWeakObjectPtr<USkeletalMeshComponent> CostumeVisualMesh;
+	TSubclassOf<UAnimInstance> CostumeVisualAnimClass;
+	bool bCostumeVisualSingleNode = false;
+	float CostumeVisualPlayLength = 0.f;
 	TWeakObjectPtr<UAnimMontage> AirAttackStartMontage;
 	TWeakObjectPtr<UAnimMontage> AirAttackLoopMontage;
 	TWeakObjectPtr<UAnimMontage> AirAttackEndMontage;
@@ -140,4 +164,18 @@ protected:
 	bool bAirAttacking = false;
 	bool bAirAttackLoopStarted = false;
 	bool bPhoebeTimedMoveLock = false;
+	float OutgoingDamageMul = 1.f;
+	float DamageBuffRemaining = 0.f;
+
+	TWeakObjectPtr<UNiagaraComponent> ActiveBeamFx;
+	FEnemySkillDef BeamDef;
+	FVector BeamOrigin = FVector::ZeroVector;
+	FVector BeamForward = FVector::ForwardVector;
+	float BeamRemaining = 0.f;
+	float BeamTickAccum = 0.f;
+
+	int32 PendingRainCount = 0;
+	float PendingRainDelay = 0.f;
+	FEnemySkillDef PendingRainDef;
+	FVector PendingRainCenter = FVector::ZeroVector;
 };

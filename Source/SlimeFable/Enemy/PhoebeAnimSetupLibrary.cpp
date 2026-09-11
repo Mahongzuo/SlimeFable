@@ -1614,27 +1614,141 @@ bool UPhoebeAnimSetupLibrary::PrepareInPlaceLoopSequence(UAnimSequence* Sequence
 	return true;
 }
 
+bool UPhoebeAnimSetupLibrary::LockMixamoTravelBoneToFirstFrame(UAnimSequence* Sequence)
+{
+#if WITH_EDITOR
+	if (!Sequence)
+	{
+		return false;
+	}
+	const IAnimationDataModel* Model = Sequence->GetDataModel();
+	if (!Model)
+	{
+		return false;
+	}
+
+	static const FName Candidates[] = {
+		FName(TEXT("Hips")),
+		FName(TEXT("mixamorig:Hips")),
+		FName(TEXT("mixamorig_Hips")),
+		FName(TEXT("pelvis")),
+		FName(TEXT("Pelvis")),
+	};
+	FName Found = NAME_None;
+	for (const FName Candidate : Candidates)
+	{
+		if (Model->IsValidBoneTrackName(Candidate))
+		{
+			Found = Candidate;
+			break;
+		}
+	}
+	if (Found.IsNone())
+	{
+		TArray<FName> Names;
+		Model->GetBoneTrackNames(Names);
+		for (const FName& Name : Names)
+		{
+			const FString Text = Name.ToString();
+			if (!Text.Equals(TEXT("root"), ESearchCase::IgnoreCase) && Text.Contains(TEXT("Hip")))
+			{
+				Found = Name;
+				break;
+			}
+		}
+	}
+	if (Found.IsNone())
+	{
+		return false;
+	}
+
+	TArray<FTransform> Keys;
+	Model->GetBoneTrackTransforms(Found, Keys);
+	if (Keys.Num() < 2)
+	{
+		return false;
+	}
+
+	const FVector FirstLoc = Keys[0].GetLocation();
+	bool bMoved = false;
+	for (FTransform& Key : Keys)
+	{
+		const FVector Loc = Key.GetLocation();
+		if (!FMath::IsNearlyEqual(Loc.X, FirstLoc.X, 0.05f) || !FMath::IsNearlyEqual(Loc.Y, FirstLoc.Y, 0.05f))
+		{
+			bMoved = true;
+			Key.SetLocation(FVector(FirstLoc.X, FirstLoc.Y, Loc.Z));
+		}
+	}
+	if (!bMoved)
+	{
+		return false;
+	}
+
+	TArray<FVector3f> PosKeys;
+	TArray<FQuat4f> RotKeys;
+	TArray<FVector3f> ScaleKeys;
+	PosKeys.Reserve(Keys.Num());
+	RotKeys.Reserve(Keys.Num());
+	ScaleKeys.Reserve(Keys.Num());
+	for (const FTransform& Key : Keys)
+	{
+		PosKeys.Add(FVector3f(Key.GetLocation()));
+		RotKeys.Add(FQuat4f(Key.GetRotation()));
+		ScaleKeys.Add(FVector3f(Key.GetScale3D()));
+	}
+
+	Sequence->Modify();
+	IAnimationDataController& Controller = Sequence->GetController();
+	{
+		IAnimationDataController::FScopedBracket Bracket(
+			Controller, NSLOCTEXT("PhoebeAnim", "LockMixamoHips", "Lock Mixamo hips translation"), false);
+		if (!Model->IsValidBoneTrackName(Found))
+		{
+			Controller.AddBoneCurve(Found, false);
+		}
+		Controller.SetBoneTrackKeys(Found, PosKeys, RotKeys, ScaleKeys, false);
+		Controller.NotifyPopulated();
+	}
+	Sequence->PostEditChange();
+	Sequence->MarkPackageDirty();
+	return true;
+#else
+	(void)Sequence;
+	return false;
+#endif
+}
+
 bool UPhoebeAnimSetupLibrary::PrepareInPlaceCombatMontage(UAnimMontage* Montage)
 {
-	if (!ApplyInPlaceRootLockToMontage(Montage))
+	if (!Montage)
 	{
 		return false;
 	}
 #if WITH_EDITOR
 	Montage->Modify();
+	auto PrepareSeq = [](UAnimSequence* Seq)
+	{
+		if (!Seq)
+		{
+			return;
+		}
+		Seq->Modify();
+		Seq->bEnableRootMotion = false;
+		Seq->bForceRootLock = false;
+		Seq->AdditiveAnimType = AAT_None;
+		UPhoebeAnimSetupLibrary::LockMixamoTravelBoneToFirstFrame(Seq);
+		Seq->PostEditChange();
+		Seq->MarkPackageDirty();
+	};
 	for (const FSlotAnimationTrack& Slot : Montage->SlotAnimTracks)
 	{
 		for (const FAnimSegment& Segment : Slot.AnimTrack.AnimSegments)
 		{
-			if (UAnimSequence* Seq = Cast<UAnimSequence>(Segment.GetAnimReference()))
-			{
-				Seq->Modify();
-				Seq->AdditiveAnimType = AAT_None;
-				Seq->PostEditChange();
-				Seq->MarkPackageDirty();
-			}
+			PrepareSeq(Cast<UAnimSequence>(Segment.GetAnimReference()));
 		}
 	}
+	PrepareSeq(Cast<UAnimSequence>(Montage->GetFirstAnimReference()));
 	Montage->PostEditChange();
 	Montage->MarkPackageDirty();
 #endif

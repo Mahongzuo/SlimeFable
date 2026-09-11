@@ -6,13 +6,15 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "SlimeCombatMusicSubsystem.generated.h"
 
+class APawn;
+class APlayerController;
 class UAudioComponent;
 class USoundBase;
 class USlimeAudioSettings;
 
 /**
  * Plays looping combat BGM while any local enemy is engaged or the player is locked on.
- * Stops (with fade) when combat clears. Does not run in menu worlds without a gameplay PC.
+ * Uses the slime's CombatBgm component (2D). Skips menu Spectator worlds.
  */
 UCLASS()
 class SLIMEFABLE_API USlimeCombatMusicSubsystem : public UTickableWorldSubsystem
@@ -36,6 +38,9 @@ protected:
 	void StopCombatMusic();
 	void RefreshVolume();
 	USoundBase* LoadCombatMusic() const;
+	UAudioComponent* ResolveCombatBgmComponent() const;
+	bool ShouldDriveCombatMusic(APlayerController* PC) const;
+	bool IsCombatMusicHealthy() const;
 
 	UFUNCTION()
 	void HandleVolumesChanged();

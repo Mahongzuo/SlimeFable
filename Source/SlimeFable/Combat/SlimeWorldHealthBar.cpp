@@ -16,8 +16,8 @@ TSharedRef<SWidget> USlimeWorldHealthBar::RebuildWidget()
 		Bar = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("HealthBar"));
 		WidgetTree->RootWidget = Bar;
 		BarMID = FMenuUIStyle::CreateHealthBarMID(this);
-		FMenuUIStyle::ApplyHealthBarImage(Bar, BarMID, FVector2D(110.f, 14.f));
-		FMenuUIStyle::SetHealthBarValues(BarMID, 1.f, 1.f, 0.f, 110.f / 14.f);
+		FMenuUIStyle::ApplyHealthBarImage(Bar, BarMID, FVector2D(72.f, 8.f));
+		FMenuUIStyle::SetHealthBarValues(BarMID, 1.f, 1.f, 0.f, 72.f / 8.f);
 	}
 	return Super::RebuildWidget();
 }
@@ -37,6 +37,6 @@ void USlimeWorldHealthBar::NativeTick(const FGeometry& MyGeometry, float InDelta
 
 	const float Percent = Health->GetHealthPercent();
 	const FVector2D Size = MyGeometry.GetLocalSize();
-	const float Aspect = (Size.Y > 1.f) ? (Size.X / Size.Y) : (110.f / 14.f);
+	const float Aspect = (Size.Y > 1.f) ? (Size.X / Size.Y) : (72.f / 8.f);
 	FMenuUIStyle::SetHealthBarValues(BarMID, Percent, Percent, 0.f, Aspect);
 }

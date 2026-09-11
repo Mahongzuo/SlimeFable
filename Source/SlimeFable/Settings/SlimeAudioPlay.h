@@ -36,4 +36,13 @@ namespace SlimeAudioPlay
 		UGameplayStatics::PlaySoundAtLocation(
 			WorldContext, Sound, Location, SfxMul(WorldContext));
 	}
+
+	inline void PlaySfx2D(const UObject* WorldContext, USoundBase* Sound)
+	{
+		if (!WorldContext || !Sound)
+		{
+			return;
+		}
+		UGameplayStatics::PlaySound2D(WorldContext, Sound, SfxMul(WorldContext));
+	}
 }

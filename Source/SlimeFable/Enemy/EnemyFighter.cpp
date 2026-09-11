@@ -123,11 +123,15 @@ void AEnemyFighter::BeginPlay()
 
 bool AEnemyFighter::IsInCombat() const
 {
+	if (Super::IsInCombat())
+	{
+		return true;
+	}
 	if (const AEnemyFighterAIController* AI = Cast<AEnemyFighterAIController>(GetController()))
 	{
 		return AI->IsEngaged();
 	}
-	return Super::IsInCombat();
+	return false;
 }
 
 void AEnemyFighter::OnRestoredToSpawn()

@@ -4,8 +4,15 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimSequenceBase.h"
+#include "SlimeFable.h"
+#include "EnemyAllyAIController.h"
 #include "EnemyCharacter.h"
 #include "Combat/SlimeDevourTarget.h"
+#include "Combat/SlimeFallingWatermelon.h"
+#include "EngineUtils.h"
+#include "SlimeLockOnComponent.h"
+#include "SlimeHealthComponent.h"
 #include "Abilities/EnemySkillAbility.h"
 #include "EnemyGameplayEffects.h"
 #include "EnemyFighter.h"
@@ -13,10 +20,15 @@
 #include "PhoebeEnemy.h"
 #include "PhoebeAnimSetupLibrary.h"
 #include "EnemyProjectile.h"
+#include "PigEnemy.h"
 #include "AbilitySystemComponent.h"
+#include "Animation/Skeleton.h"
 #include "Components/CapsuleComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "DefaultMovementSet/InstantMovementEffects/BasicInstantMovementEffects.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "MoverComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
@@ -50,6 +62,14 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			{
 				InterruptCombat();
 			}
+			else if (BeamRemaining > 0.f)
+			{
+				StopBeamLane();
+			}
+			if (PendingRainCount > 0)
+			{
+				TickWatermelonRain(DeltaTime);
+			}
 			return;
 		}
 	}
@@ -75,6 +95,15 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 	}
 
+	if (DamageBuffRemaining > 0.f)
+	{
+		DamageBuffRemaining = FMath::Max(DamageBuffRemaining - DeltaTime, 0.f);
+		if (DamageBuffRemaining <= 0.f)
+		{
+			OutgoingDamageMul = 1.f;
+		}
+	}
+
 	// Player morph path: poll combat keys instead of waiting for AI.
 	if (bPlayerMorphed)
 	{
@@ -85,6 +114,22 @@ void UEnemyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		TickAction(DeltaTime);
 	}
+
+	if (BeamRemaining > 0.f)
+	{
+		TickBeamLane(DeltaTime);
+	}
+
+	if (PendingRainCount > 0)
+	{
+		TickWatermelonRain(DeltaTime);
+	}
+}
+
+void UEnemyCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	StopBeamLane();
+	Super::EndPlay(EndPlayReason);
 }
 
 bool UEnemyCombatComponent::IsMovementLocked() const
@@ -166,13 +211,15 @@ void UEnemyCombatComponent::InterruptCombat()
 	{
 		Enemy->StopMeshAnimation();
 	}
-	else if (UAnimInstance* Anim = ResolveOwnerAnimInstance())
+	else if (UAnimInstance* Anim = ResolveOwnerAnimInstance(ActiveActionMontage.Get()))
 	{
 		Anim->StopAllMontages(0.1f);
 	}
+	RestoreCostumeVisualAnim();
 	ActiveActionMontage.Reset();
 	RestoreAirAttackMovement();
 	ClearActionState(true);
+	StopBeamLane();
 }
 
 void UEnemyCombatComponent::InterruptForMovement()
@@ -204,7 +251,14 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 	bHitFired = false;
 	AlreadyHit.Reset();
 
-	SpawnVfx(Def.CastNiagara, GetOwner()->GetActorLocation());
+	if (Def.Exec == EEnemySkillExec::BeamLane)
+	{
+		SpawnBeamLaneVfx(Def, ActiveForward);
+	}
+	else
+	{
+		SpawnVfx(Def.CastNiagara, GetOwner()->GetActorLocation());
+	}
 
 	if (Def.Exec != EEnemySkillExec::Dash)
 	{
@@ -239,9 +293,9 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 				bActionAnimationStarted = true;
 			}
 		}
-		else if (UAnimInstance* Anim = ResolveOwnerAnimInstance())
+		else
 		{
-			bActionAnimationStarted = Anim->Montage_Play(Montage) > 0.f;
+			bActionAnimationStarted = PlayOwnerAttackMontage(Montage);
 		}
 	}
 	else
@@ -271,8 +325,7 @@ bool UEnemyCombatComponent::StartAction(const FEnemySkillDef& Def)
 
 bool UEnemyCombatComponent::PlayTrackedMontage(UAnimMontage* Montage)
 {
-	UAnimInstance* Anim = ResolveOwnerAnimInstance();
-	if (!Anim || !Montage)
+	if (!Montage)
 	{
 		return false;
 	}
@@ -280,7 +333,7 @@ bool UEnemyCombatComponent::PlayTrackedMontage(UAnimMontage* Montage)
 	{
 		UPhoebeAnimSetupLibrary::ApplyInPlaceRootLockToMontage(Montage);
 	}
-	const bool bPlayed = Anim->Montage_Play(Montage) > 0.f;
+	const bool bPlayed = PlayOwnerAttackMontage(Montage);
 	if (bPlayed)
 	{
 		ActiveActionMontage = Montage;
@@ -375,6 +428,11 @@ void UEnemyCombatComponent::TickAction(float DeltaTime)
 
 	ActionElapsed += DeltaTime;
 
+	if (ActiveDef.Exec == EEnemySkillExec::Dash && ActiveDef.DashDistance > 0.f && !bHitFired)
+	{
+		TickGapCloserDash();
+	}
+
 	const float HitTime = GetHitFireTime();
 	if (bActionAnimationStarted && !bHitFired && ActionElapsed >= HitTime)
 	{
@@ -382,7 +440,11 @@ void UEnemyCombatComponent::TickAction(float DeltaTime)
 		FireHit();
 	}
 
-	const float EndTime = HitTime + ActiveDef.Recovery;
+	float EndTime = HitTime + ActiveDef.Recovery;
+	if (CostumeVisualPlayLength > 0.f)
+	{
+		EndTime = FMath::Max(EndTime, CostumeVisualPlayLength);
+	}
 	if (ActionElapsed >= EndTime)
 	{
 		FinishAction();
@@ -491,6 +553,7 @@ void UEnemyCombatComponent::FinishAction()
 	bHitFired = false;
 	bActionAnimationStarted = false;
 	AlreadyHit.Reset();
+	RestoreCostumeVisualAnim();
 	if (bPhoebeTimedMoveLock)
 	{
 		if (AttackLockRemaining <= 0.f)
@@ -516,37 +579,185 @@ void UEnemyCombatComponent::StopActiveActionMontage(float BlendOutTime)
 	UAnimMontage* Montage = ActiveActionMontage.Get();
 	if (Montage)
 	{
-		if (UAnimInstance* Anim = ResolveOwnerAnimInstance())
+		if (UAnimInstance* Anim = ResolveOwnerAnimInstance(Montage))
 		{
 			Anim->Montage_Stop(BlendOutTime, Montage);
 		}
 	}
+	RestoreCostumeVisualAnim();
 	ActiveActionMontage.Reset();
 }
 
 UAnimInstance* UEnemyCombatComponent::ResolveOwnerAnimInstance() const
+{
+	return ResolveOwnerAnimInstance(nullptr);
+}
+
+UAnimInstance* UEnemyCombatComponent::ResolveOwnerAnimInstance(const UAnimMontage* Montage) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
 	{
 		return nullptr;
 	}
+
+	auto AnimFromMesh = [](USkeletalMeshComponent* Mesh) -> UAnimInstance*
+	{
+		return Mesh ? Mesh->GetAnimInstance() : nullptr;
+	};
+	auto SkeletonOf = [](const USkeletalMeshComponent* Mesh) -> const USkeleton*
+	{
+		const USkeletalMesh* SkelMesh = Mesh ? Mesh->GetSkeletalMeshAsset() : nullptr;
+		return SkelMesh ? SkelMesh->GetSkeleton() : nullptr;
+	};
+
+	if (AGaspSandboxPawn* Gasp = Cast<AGaspSandboxPawn>(Owner))
+	{
+		USkeletalMeshComponent* Visual = Gasp->GetVisualSkeletalMesh();
+		USkeletalMeshComponent* Source = Gasp->GetPrimarySkeletalMesh();
+		if (Montage)
+		{
+			if (Visual && Montage->GetSkeleton() && Montage->GetSkeleton() == SkeletonOf(Visual))
+			{
+				if (UAnimInstance* Anim = AnimFromMesh(Visual))
+				{
+					return Anim;
+				}
+			}
+			if (Source && Montage->GetSkeleton() && Montage->GetSkeleton() == SkeletonOf(Source))
+			{
+				if (UAnimInstance* Anim = AnimFromMesh(Source))
+				{
+					return Anim;
+				}
+			}
+		}
+		if (UAnimInstance* Anim = AnimFromMesh(Source))
+		{
+			return Anim;
+		}
+		return AnimFromMesh(Visual);
+	}
 	if (AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(Owner))
 	{
-		return Enemy->GetMesh() ? Enemy->GetMesh()->GetAnimInstance() : nullptr;
+		return AnimFromMesh(Enemy->GetMesh());
 	}
 	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Owner))
 	{
 		if (USkeletalMeshComponent* Mesh = Target->GetPrimarySkeletalMesh())
 		{
-			return Mesh->GetAnimInstance();
+			return AnimFromMesh(Mesh);
 		}
 	}
 	if (ACharacter* Character = Cast<ACharacter>(Owner))
 	{
-		return Character->GetMesh() ? Character->GetMesh()->GetAnimInstance() : nullptr;
+		return AnimFromMesh(Character->GetMesh());
 	}
 	return nullptr;
+}
+
+bool UEnemyCombatComponent::PlayOwnerAttackMontage(UAnimMontage* Montage)
+{
+	if (!Montage)
+	{
+		return false;
+	}
+	CostumeVisualPlayLength = 0.f;
+
+	auto PlayOnInstance = [Montage](USkeletalMeshComponent* Mesh) -> bool
+	{
+		UAnimInstance* Anim = Mesh ? Mesh->GetAnimInstance() : nullptr;
+		return Anim && Anim->Montage_Play(Montage) > 0.f;
+	};
+	auto SequenceOf = [](const UAnimMontage* InMontage) -> UAnimSequenceBase*
+	{
+		if (!InMontage || InMontage->SlotAnimTracks.Num() == 0)
+		{
+			return nullptr;
+		}
+		const TArray<FAnimSegment>& Segs = InMontage->SlotAnimTracks[0].AnimTrack.AnimSegments;
+		return Segs.Num() > 0 ? Segs[0].GetAnimReference() : nullptr;
+	};
+
+	if (AGaspSandboxPawn* Gasp = Cast<AGaspSandboxPawn>(GetOwner()))
+	{
+		USkeletalMeshComponent* Visual = Gasp->GetVisualSkeletalMesh();
+		USkeletalMeshComponent* Source = Gasp->GetPrimarySkeletalMesh();
+		const FString MontPath = Montage->GetPathName();
+		const bool bCostumeMontage = MontPath.Contains(TEXT("/_Slime/Enemies/Costume/Montages/"));
+		if (bCostumeMontage && Visual)
+		{
+			Gasp->CancelInputRagdoll();
+			RestoreCostumeVisualAnim();
+			auto DisableRootMotionOnly = [](UAnimSequence* LockedSeq)
+			{
+				if (LockedSeq)
+				{
+					LockedSeq->bEnableRootMotion = false;
+				}
+			};
+			if (UAnimSequence* First = Cast<UAnimSequence>(Montage->GetFirstAnimReference()))
+			{
+				DisableRootMotionOnly(First);
+			}
+			CostumeVisualMesh = Visual;
+			CostumeVisualAnimClass = Visual->GetAnimClass();
+			UAnimSequenceBase* Seq = SequenceOf(Montage);
+			if (UAnimSequence* LockedSeq = Cast<UAnimSequence>(Seq))
+			{
+				DisableRootMotionOnly(LockedSeq);
+			}
+			UAnimationAsset* Playable = Seq ? static_cast<UAnimationAsset*>(Seq) : static_cast<UAnimationAsset*>(Montage);
+			Visual->bPauseAnims = false;
+			Visual->SetComponentTickEnabled(true);
+			Visual->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+			Visual->SetAnimInstanceClass(nullptr);
+			Visual->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			Visual->PlayAnimation(Playable, false);
+			bCostumeVisualSingleNode = true;
+			const float FullLen = Seq ? Seq->GetPlayLength() : Montage->GetPlayLength();
+			constexpr float XiguaQMaxSeconds = 1.5f;
+			CostumeVisualPlayLength = MontPath.Contains(TEXT("AM_Xigua_Surprise"))
+				? FMath::Min(FullLen, XiguaQMaxSeconds)
+				: FullLen;
+			UE_LOG(LogSlimeFable, Log,
+				TEXT("EnemyCombat %s: costume skill %s on %s len=%.2f"),
+				*GetNameSafe(Gasp), *GetNameSafe(Playable), *GetNameSafe(Visual), CostumeVisualPlayLength);
+			return CostumeVisualPlayLength > 0.f;
+		}
+		if (Source && PlayOnInstance(Source))
+		{
+			return true;
+		}
+	}
+
+	if (UAnimInstance* Anim = ResolveOwnerAnimInstance(Montage))
+	{
+		return Anim->Montage_Play(Montage) > 0.f;
+	}
+	return false;
+}
+
+void UEnemyCombatComponent::RestoreCostumeVisualAnim()
+{
+	if (!bCostumeVisualSingleNode)
+	{
+		CostumeVisualPlayLength = 0.f;
+		return;
+	}
+	if (USkeletalMeshComponent* Visual = CostumeVisualMesh.Get())
+	{
+		Visual->Stop();
+		Visual->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+		if (CostumeVisualAnimClass)
+		{
+			Visual->SetAnimInstanceClass(CostumeVisualAnimClass);
+		}
+	}
+	CostumeVisualMesh.Reset();
+	CostumeVisualAnimClass = nullptr;
+	bCostumeVisualSingleNode = false;
+	CostumeVisualPlayLength = 0.f;
 }
 
 void UEnemyCombatComponent::RestoreAirAttackMovement()
@@ -690,6 +901,21 @@ void UEnemyCombatComponent::FireHit()
 		ExecuteProjectile(ActiveDef, Forward);
 		return;
 	}
+	if (ActiveDef.Exec == EEnemySkillExec::Summon)
+	{
+		ExecuteSummon(ActiveDef);
+		return;
+	}
+	if (ActiveDef.Exec == EEnemySkillExec::BeamLane)
+	{
+		BeginBeamLane(ActiveDef, Forward);
+		return;
+	}
+	if (ActiveDef.Exec == EEnemySkillExec::WatermelonRain)
+	{
+		ExecuteWatermelonRain(ActiveDef);
+		return;
+	}
 
 	// Hard gate: melee / AoE / Dash must not damage when Dist2D exceeds engage + reach.
 	if (ActiveDef.Exec == EEnemySkillExec::Melee
@@ -701,15 +927,7 @@ void UEnemyCombatComponent::FireHit()
 			const float Dist2D = FVector::Dist2D(Owner->GetActorLocation(), Player->GetActorLocation());
 			const float Reach =
 				ActiveDef.Hit.Radius + ActiveDef.Hit.Range + ActiveDef.Hit.OriginForwardOffset;
-			float Cap = MaxMeleeHitDistance;
-			if (ActiveDef.Exec == EEnemySkillExec::Dash)
-			{
-				Cap = FMath::Min(250.f, FMath::Max(MaxMeleeHitDistance, Reach));
-			}
-			else if (ActiveDef.Exec == EEnemySkillExec::AoE)
-			{
-				Cap = FMath::Min(250.f, FMath::Max(MaxMeleeHitDistance, Reach));
-			}
+			const float Cap = FMath::Max(MaxMeleeHitDistance, Reach);
 			if (Dist2D > Cap)
 			{
 				return;
@@ -754,13 +972,7 @@ void UEnemyCombatComponent::FireHit()
 
 void UEnemyCombatComponent::ExecuteDash(const FEnemySkillDef& Def, const FVector& Forward)
 {
-	ACharacter* Character = Cast<ACharacter>(GetOwner());
-	if (!Character || Def.DashDistance <= 0.f)
-	{
-		return;
-	}
-	UCharacterMovementComponent* Move = Character->GetCharacterMovement();
-	if (!Move)
+	if (Def.DashDistance <= 0.f)
 	{
 		return;
 	}
@@ -770,30 +982,96 @@ void UEnemyCombatComponent::ExecuteDash(const FEnemySkillDef& Def, const FVector
 		return;
 	}
 
-	const float Duration = FMath::Max(Def.HitEnd - Def.HitStart, 0.08f);
+	const float Duration = FMath::Max(GetHitFireTime(), 0.08f);
 	const float DesiredSpeed = Def.DashDistance / Duration;
-	const float MaxDashSpeed = FMath::Max(Move->MaxWalkSpeed * 2.5f, 900.f);
-	const float Speed = FMath::Min(DesiredSpeed, MaxDashSpeed);
+	ApplyDashVelocity(Dir, DesiredSpeed, Def.bAirDash);
+}
 
-	if (Def.bAirDash)
+void UEnemyCombatComponent::ApplyDashVelocity(const FVector& Forward, float Speed, bool bAirDash)
+{
+	const FVector Dir = Forward.GetSafeNormal2D();
+	if (Dir.IsNearlyZero())
 	{
-		Character->LaunchCharacter(Dir * Speed, true, false);
 		return;
 	}
 
-	if (Move->IsFalling())
+	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 	{
-		FVector Vel = Move->Velocity;
-		Vel.X = Dir.X * Speed;
-		Vel.Y = Dir.Y * Speed;
+		UCharacterMovementComponent* Move = Character->GetCharacterMovement();
+		if (!Move)
+		{
+			return;
+		}
+		const float MaxDashSpeed = FMath::Max(Move->MaxWalkSpeed * 2.5f, 900.f);
+		const float Clamped = FMath::Min(Speed, MaxDashSpeed);
+
+		if (bAirDash)
+		{
+			Character->LaunchCharacter(Dir * Clamped, true, false);
+			return;
+		}
+
+		if (Move->IsFalling())
+		{
+			FVector Vel = Move->Velocity;
+			Vel.X = Dir.X * Clamped;
+			Vel.Y = Dir.Y * Clamped;
+			Move->Velocity = Vel;
+			return;
+		}
+
+		Move->SetMovementMode(MOVE_Walking);
+		FVector Vel = Dir * Clamped;
+		Vel.Z = Move->Velocity.Z;
 		Move->Velocity = Vel;
 		return;
 	}
 
-	Move->SetMovementMode(MOVE_Walking);
-	FVector Vel = Dir * Speed;
-	Vel.Z = Move->Velocity.Z;
-	Move->Velocity = Vel;
+	AActor* Owner = GetOwner();
+	if (UMoverComponent* Mover = Owner ? Owner->FindComponentByClass<UMoverComponent>() : nullptr)
+	{
+		const float Clamped = FMath::Min(Speed, 1400.f);
+		TSharedPtr<FApplyVelocityEffect> Effect = MakeShared<FApplyVelocityEffect>();
+		Effect->VelocityToApply = Dir * Clamped + FVector(0.f, 0.f, bAirDash ? 80.f : 0.f);
+		Effect->bAdditiveVelocity = false;
+		Mover->QueueInstantMovementEffect(Effect);
+	}
+}
+
+void UEnemyCombatComponent::TickGapCloserDash()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	ActiveForward = GetAimForward();
+	if (AGaspSandboxPawn* Gasp = Cast<AGaspSandboxPawn>(Owner))
+	{
+		Gasp->SetAiFaceIntent(ActiveForward);
+	}
+	else
+	{
+		Owner->SetActorRotation(FRotator(0.f, ActiveForward.Rotation().Yaw, 0.f));
+	}
+
+	float Dist2D = ActiveDef.DashDistance;
+	FVector Dir = ActiveForward;
+	if (const AActor* Target = ResolveAimTarget())
+	{
+		FVector To = Target->GetActorLocation() - Owner->GetActorLocation();
+		To.Z = 0.f;
+		Dist2D = To.Size2D();
+		if (!To.IsNearlyZero())
+		{
+			Dir = To.GetSafeNormal();
+			ActiveForward = Dir;
+		}
+	}
+
+	const float Remain = FMath::Max(GetHitFireTime() - ActionElapsed, 0.08f);
+	ApplyDashVelocity(Dir, Dist2D / Remain, ActiveDef.bAirDash);
 }
 
 void UEnemyCombatComponent::ExecuteProjectile(const FEnemySkillDef& Def, const FVector& Forward)
@@ -823,6 +1101,284 @@ void UEnemyCombatComponent::ExecuteProjectile(const FEnemySkillDef& Def, const F
 	SpawnVfx(Def.CastNiagara, Origin);
 }
 
+void UEnemyCombatComponent::ExecuteSummon(const FEnemySkillDef& Def)
+{
+	UWorld* World = GetWorld();
+	AActor* Owner = GetOwner();
+	if (!World || !Owner)
+	{
+		return;
+	}
+
+	TSubclassOf<AActor> Class = Def.SummonClass;
+	if (!Class)
+	{
+		Class = LoadClass<AActor>(nullptr, TEXT("/Game/_Slime/Enemies/Pig/BP_PigEnemy.BP_PigEnemy_C"));
+	}
+	if (!Class)
+	{
+		Class = APigEnemy::StaticClass();
+	}
+	if (!Class)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("EnemyCombat %s: summon class missing"), *GetNameSafe(Owner));
+		return;
+	}
+
+	const FVector Forward = ActiveForward.GetSafeNormal2D();
+	const float Offset = Def.SummonForwardOffset > 0.f ? Def.SummonForwardOffset : 300.f;
+	const FVector Location = Owner->GetActorLocation() + Forward * Offset;
+	const FRotator Rotation = Forward.IsNearlyZero() ? Owner->GetActorRotation() : Forward.Rotation();
+
+	FActorSpawnParameters Params;
+	Params.Owner = Owner;
+	Params.Instigator = Cast<APawn>(Owner);
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	AActor* Spawned = World->SpawnActor<AActor>(Class, Location, Rotation, Params);
+	if (!Spawned)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("EnemyCombat %s: failed to spawn %s"),
+			*GetNameSafe(Owner), *GetNameSafe(Class.Get()));
+		return;
+	}
+
+	const APawn* OwnerPawn = Cast<APawn>(Owner);
+	const bool bPlayerSide = (OwnerPawn && OwnerPawn->IsPlayerControlled())
+		|| USlimeHitProbe::GetTeam(Owner) == ESlimeTeam::Player;
+	if (bPlayerSide)
+	{
+		ConfigureSummonedAlly(Spawned);
+	}
+}
+
+void UEnemyCombatComponent::ExecuteWatermelonRain(const FEnemySkillDef& Def)
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	PendingRainDef = Def;
+	PendingRainCenter = Owner->GetActorLocation();
+	PendingRainCount = FMath::Max(Def.RainCount, 1);
+	PendingRainDelay = 0.f;
+	SpawnOneRainWatermelon();
+	PendingRainCount = FMath::Max(PendingRainCount - 1, 0);
+}
+
+void UEnemyCombatComponent::TickWatermelonRain(float DeltaTime)
+{
+	if (PendingRainCount <= 0)
+	{
+		return;
+	}
+
+	PendingRainDelay -= DeltaTime;
+	while (PendingRainCount > 0 && PendingRainDelay <= 0.f)
+	{
+		SpawnOneRainWatermelon();
+		--PendingRainCount;
+		PendingRainDelay += 0.02f;
+	}
+}
+
+void UEnemyCombatComponent::SpawnOneRainWatermelon()
+{
+	UWorld* World = GetWorld();
+	AActor* Owner = GetOwner();
+	if (!World || !Owner)
+	{
+		return;
+	}
+
+	const float Angle = FMath::FRandRange(0.f, 2.f * PI);
+	const float Dist = FMath::Sqrt(FMath::FRand()) * FMath::Max(PendingRainDef.RainRadius, 1.f);
+	const FVector Location = PendingRainCenter + FVector(
+		FMath::Cos(Angle) * Dist,
+		FMath::Sin(Angle) * Dist,
+		FMath::Max(PendingRainDef.RainDropHeight, 50.f));
+
+	FActorSpawnParameters Params;
+	Params.Owner = Owner;
+	Params.Instigator = Cast<APawn>(Owner);
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	if (ASlimeFallingWatermelon* Melon = World->SpawnActor<ASlimeFallingWatermelon>(
+		ASlimeFallingWatermelon::StaticClass(), Location, FRotator::ZeroRotator, Params))
+	{
+		Melon->InitFalling(Owner, ResolveDamage(PendingRainDef), PendingRainDef.RainLifeAfterBreak);
+	}
+}
+
+void UEnemyCombatComponent::ConfigureSummonedAlly(AActor* Spawned)
+{
+	AActor* Master = GetOwner();
+	if (!Spawned || !Master)
+	{
+		return;
+	}
+
+	if (AEnemyCharacter* Character = Cast<AEnemyCharacter>(Spawned))
+	{
+		Character->InitAsPhantom(0.f, Master);
+		if (AController* Old = Character->GetController())
+		{
+			Old->UnPossess();
+			Old->Destroy();
+		}
+		Character->AIControllerClass = AEnemyAllyAIController::StaticClass();
+		Character->SpawnDefaultController();
+		if (AEnemyAllyAIController* Ally = Cast<AEnemyAllyAIController>(Character->GetController()))
+		{
+			Ally->SetMaster(Master);
+		}
+		return;
+	}
+
+	if (AGaspSandboxPawn* Gasp = Cast<AGaspSandboxPawn>(Spawned))
+	{
+		Gasp->InitAsPhantom(0.f, Master);
+	}
+}
+
+void UEnemyCombatComponent::BeginBeamLane(const FEnemySkillDef& Def, const FVector& Forward)
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	BeamDef = Def;
+	BeamForward = Forward.GetSafeNormal2D();
+	if (BeamForward.IsNearlyZero())
+	{
+		BeamForward = Owner->GetActorForwardVector().GetSafeNormal2D();
+	}
+	BeamOrigin = Owner->GetActorLocation();
+	BeamRemaining = Def.BeamDuration > 0.f ? Def.BeamDuration : 2.f;
+	BeamTickAccum = 0.f;
+	if (!ActiveBeamFx.IsValid())
+	{
+		SpawnBeamLaneVfx(Def, BeamForward);
+	}
+	FireBeamLaneHit();
+}
+
+void UEnemyCombatComponent::SpawnBeamLaneVfx(const FEnemySkillDef& Def, const FVector& Forward)
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	TSoftObjectPtr<UNiagaraSystem> Soft = !Def.HitNiagara.IsNull() ? Def.HitNiagara : Def.CastNiagara;
+	UNiagaraSystem* System = Soft.LoadSynchronous();
+	if (!System)
+	{
+		System = LoadObject<UNiagaraSystem>(
+			nullptr, TEXT("/Game/RPGEffects/ParticlesNiagara/Priest/Beam/NS_Priest_Beam.NS_Priest_Beam"));
+	}
+	if (!System)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("EnemyCombat %s: missing wind R beam Niagara"), *GetNameSafe(Owner));
+		return;
+	}
+
+	FVector Dir = Forward.GetSafeNormal2D();
+	if (Dir.IsNearlyZero())
+	{
+		Dir = Owner->GetActorForwardVector().GetSafeNormal2D();
+	}
+	const FRotator Rotation = Dir.Rotation();
+	const FVector Location = Owner->GetActorLocation() + Dir * 80.f + FVector(0.f, 0.f, 10.f);
+
+	if (UNiagaraComponent* Existing = ActiveBeamFx.Get())
+	{
+		Existing->DeactivateImmediate();
+		Existing->DestroyComponent();
+		ActiveBeamFx.Reset();
+	}
+
+	UNiagaraComponent* FX = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		Owner, System, Location, Rotation, FVector(0.9f), true, true);
+	if (!FX)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("EnemyCombat %s: failed to spawn wind R beam"), *GetNameSafe(Owner));
+		return;
+	}
+
+	FX->SetAutoDestroy(false);
+	const FLinearColor WindColor = SlimeCombat::GetElementVfxColor(ESlimeElement::Wind);
+	FX->SetVariableLinearColor(TEXT("User.Color"), WindColor);
+	FX->SetVariableLinearColor(TEXT("User.Tint"), WindColor);
+	FX->SetVariableLinearColor(TEXT("User.ElementColor"), WindColor);
+	ActiveBeamFx = FX;
+}
+
+void UEnemyCombatComponent::TickBeamLane(float DeltaTime)
+{
+	if (BeamRemaining <= 0.f)
+	{
+		return;
+	}
+
+	BeamRemaining = FMath::Max(0.f, BeamRemaining - DeltaTime);
+	const float Interval = BeamDef.BeamTickInterval > 0.f ? BeamDef.BeamTickInterval : 0.5f;
+	BeamTickAccum += DeltaTime;
+	while (BeamRemaining > 0.f && BeamTickAccum >= Interval)
+	{
+		BeamTickAccum -= Interval;
+		FireBeamLaneHit();
+	}
+
+	if (BeamRemaining <= 0.f)
+	{
+		StopBeamLane();
+	}
+}
+
+void UEnemyCombatComponent::FireBeamLaneHit()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return;
+	}
+
+	FSlimeSkillDef HitSkill = EnemyCombat::ToSlimeHitSkill(BeamDef);
+	HitSkill.Damage = ResolveDamage(BeamDef);
+	HitSkill.Hit.Shape = ESlimeHitShape::Capsule;
+	HitSkill.Hit.Range = BeamDef.Hit.Range > 0.f ? BeamDef.Hit.Range : 1000.f;
+	HitSkill.Hit.Radius = BeamDef.Hit.Radius > 0.f ? BeamDef.Hit.Radius : 100.f;
+	HitSkill.Hit.OriginForwardOffset = 0.f;
+
+	TSet<TWeakObjectPtr<AActor>> WaveHits;
+	const int32 HitCount = USlimeHitProbe::PerformHit(Owner, HitSkill, BeamOrigin, BeamForward, WaveHits);
+	if (HitCount > 0)
+	{
+		if (USoundBase* Impact = AttackImpactSound.LoadSynchronous())
+		{
+			SlimeAudioPlay::PlaySfxAt(this, Impact, BeamOrigin);
+		}
+	}
+}
+
+void UEnemyCombatComponent::StopBeamLane()
+{
+	BeamRemaining = 0.f;
+	BeamTickAccum = 0.f;
+	if (UNiagaraComponent* Fx = ActiveBeamFx.Get())
+	{
+		Fx->DeactivateImmediate();
+		Fx->DestroyComponent();
+	}
+	ActiveBeamFx.Reset();
+}
+
 void UEnemyCombatComponent::SpawnVfx(const TSoftObjectPtr<UNiagaraSystem>& SoftSystem, const FVector& Location) const
 {
 	if (SoftSystem.IsNull())
@@ -849,12 +1405,82 @@ void UEnemyCombatComponent::SpawnVfx(const TSoftObjectPtr<UNiagaraSystem>& SoftS
 	}
 }
 
+AActor* UEnemyCombatComponent::FindNearestHostile(float MaxRange) const
+{
+	AActor* Owner = GetOwner();
+	UWorld* World = GetWorld();
+	if (!Owner || !World)
+	{
+		return nullptr;
+	}
+
+	AActor* Best = nullptr;
+	float BestDistSq = FMath::Square(MaxRange);
+	for (TActorIterator<APawn> It(World); It; ++It)
+	{
+		APawn* Other = *It;
+		if (!Other || Other == Owner)
+		{
+			continue;
+		}
+		if (!USlimeHitProbe::IsHostile(Owner, Other) || !USlimeHitProbe::IsValidDamageTarget(Other))
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(Owner->GetActorLocation(), Other->GetActorLocation());
+		if (DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = Other;
+		}
+	}
+	return Best;
+}
+
+AActor* UEnemyCombatComponent::ResolveAimTarget() const
+{
+	AActor* Owner = GetOwner();
+	if (!Owner)
+	{
+		return nullptr;
+	}
+
+	const APawn* OwnerPawn = Cast<APawn>(Owner);
+	const bool bPlayerSide = (OwnerPawn && OwnerPawn->IsPlayerControlled())
+		|| USlimeHitProbe::GetTeam(Owner) == ESlimeTeam::Player;
+	if (bPlayerSide)
+	{
+		if (const USlimeLockOnComponent* Lock = Owner->FindComponentByClass<USlimeLockOnComponent>())
+		{
+			if (AActor* Locked = Lock->GetLockedTarget())
+			{
+				if (USlimeHitProbe::IsHostile(Owner, Locked) && USlimeHitProbe::IsValidDamageTarget(Locked))
+				{
+					return Locked;
+				}
+			}
+		}
+		return FindNearestHostile(2500.f);
+	}
+
+	return UGameplayStatics::GetPlayerPawn(this, 0);
+}
+
 FVector UEnemyCombatComponent::GetAimForward() const
 {
 	const AActor* Owner = GetOwner();
 	if (!Owner)
 	{
 		return FVector::ForwardVector;
+	}
+	if (const AActor* Target = ResolveAimTarget())
+	{
+		FVector To = Target->GetActorLocation() - Owner->GetActorLocation();
+		To.Z = 0.f;
+		if (!To.IsNearlyZero())
+		{
+			return To.GetSafeNormal();
+		}
 	}
 	FVector Forward = Owner->GetActorForwardVector();
 	Forward.Z = 0.f;
@@ -894,7 +1520,17 @@ float UEnemyCombatComponent::ResolveDamage(const FEnemySkillDef& Skill) const
 			Damage *= Status->GetOutgoingDamageMul();
 		}
 	}
-	return Damage;
+	return Damage * FMath::Max(OutgoingDamageMul, 0.f);
+}
+
+void UEnemyCombatComponent::ApplyOutgoingDamageMul(float Mul, float DurationSeconds)
+{
+	OutgoingDamageMul = FMath::Max(Mul, 0.f);
+	DamageBuffRemaining = FMath::Max(DurationSeconds, 0.f);
+	if (DamageBuffRemaining <= 0.f)
+	{
+		OutgoingDamageMul = 1.f;
+	}
 }
 
 float UEnemyCombatComponent::GetAuraAttackIntervalMul() const
@@ -1004,10 +1640,60 @@ void UEnemyCombatComponent::PollPlayerCombatKeys(float DeltaTime)
 			}
 		}
 
-		// Cycle Shove → Tackle → Shove L → Shove R → Takedown …
-		const int32 Idx = PlayerAttackCycleIndex % Moves.Num();
-		PlayerAttackCycleIndex = (PlayerAttackCycleIndex + 1) % Moves.Num();
+		// LMB cycles unslotted combo moves only; Q/E/R own PlayerSkillSlot entries.
+		TArray<int32> ComboIndices;
+		ComboIndices.Reserve(Moves.Num());
+		for (int32 MoveIndex = 0; MoveIndex < Moves.Num(); ++MoveIndex)
+		{
+			if (Moves[MoveIndex].PlayerSkillSlot == EEnemyPlayerSkillSlot::None)
+			{
+				ComboIndices.Add(MoveIndex);
+			}
+		}
+		if (ComboIndices.Num() == 0)
+		{
+			return;
+		}
+		const int32 Idx = ComboIndices[PlayerAttackCycleIndex % ComboIndices.Num()];
+		PlayerAttackCycleIndex = (PlayerAttackCycleIndex + 1) % ComboIndices.Num();
 		TryExecute(Moves[Idx].Skill);
+		return;
+	}
+
+	if (EnemyCombat::HasPlayerSkillSlots(Moves))
+	{
+		if (WasPressed(ESlimeInputAction::Skill1, EKeys::Q))
+		{
+			if (const FEnemyMoveDef* Move = EnemyCombat::FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillQ))
+			{
+				TryExecute(Move->Skill);
+			}
+			return;
+		}
+		if (WasPressed(ESlimeInputAction::Skill2, EKeys::E))
+		{
+			if (const FEnemyMoveDef* Move = EnemyCombat::FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillE))
+			{
+				TryExecute(Move->Skill);
+			}
+			return;
+		}
+		if (WasPressed(ESlimeInputAction::Skill3, EKeys::R))
+		{
+			if (const FEnemyMoveDef* Move = EnemyCombat::FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillR))
+			{
+				TryExecute(Move->Skill);
+			}
+			return;
+		}
+		if (WasPressed(ESlimeInputAction::ResetBody, EKeys::T))
+		{
+			if (const FEnemyMoveDef* Move = EnemyCombat::FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillT))
+			{
+				TryExecute(Move->Skill);
+			}
+			return;
+		}
 		return;
 	}
 

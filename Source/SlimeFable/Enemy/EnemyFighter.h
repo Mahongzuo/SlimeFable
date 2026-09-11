@@ -61,6 +61,11 @@ public:
 
 	float PreferredDistance = 160.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter",
+		meta = (ClampMin = "50.0", Units = "cm",
+			ToolTip = "水平距离 ≤ 此值才选近战。AI 读这个，不读 Controller 默认。默认 200；猪 360。"))
+	float MeleeEngageDistance = 200.f;
+
 
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Fighter")

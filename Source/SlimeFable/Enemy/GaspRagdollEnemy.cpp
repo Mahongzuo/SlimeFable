@@ -143,6 +143,16 @@ void AGaspRagdollEnemy::EnsureEchoFollowsSource()
 	{
 		return;
 	}
+	if (CostumeKind != EGaspCostumeKind::None)
+	{
+		if (Echo->LeaderPoseComponent.Get())
+		{
+			Echo->SetLeaderPoseComponent(nullptr);
+			UE_LOG(LogSlimeFable, Log, TEXT("GaspRagdollEnemy %s: costume cleared LeaderPose on %s"),
+				*GetName(), *Echo->GetName());
+		}
+		return;
+	}
 	if (Echo->LeaderPoseComponent.Get() != Source)
 	{
 		Echo->SetLeaderPoseComponent(Source);
@@ -177,6 +187,13 @@ void AGaspRagdollEnemy::TriggerOfficialRagdoll(FName InjuryEntry)
 {
 	if (!bEnableRagdollKit)
 	{
+		return;
+	}
+	if (!bDeathSequence && !bCombatKnockdown
+		&& Combat && Combat->IsPlayerMorphed()
+		&& EnemyCombat::FindMoveByPlayerSlot(GetEnemyMoves(), EEnemyPlayerSkillSlot::SkillR))
+	{
+		UE_LOG(LogSlimeFable, Log, TEXT("GaspRagdollEnemy %s: skip input ragdoll — R is a costume skill"), *GetName());
 		return;
 	}
 	SetInjuryState(InjuryEntry);

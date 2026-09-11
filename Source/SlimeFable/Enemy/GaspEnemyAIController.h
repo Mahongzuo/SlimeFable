@@ -37,6 +37,8 @@ public:
 	/** Run one AI decision frame (also callable from pawn if controller tick is dormant). */
 	void DriveCombatAI(float DeltaSeconds);
 
+	bool IsEngaged() const { return State != EGaspEnemyAIState::Idle; }
+
 protected:
 	void ReturnToIdle();
 	APawn* FindCombatFocus() const;
@@ -52,7 +54,6 @@ protected:
 	int32 SelectMove(float Dist2D) const;
 	void FacePlayer();
 	void DriveTowardPlayer(float Preferred);
-	bool HasRecastNavMesh() const;
 	void StopPathIfMoving();
 
 	UPROPERTY()

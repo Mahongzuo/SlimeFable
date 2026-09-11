@@ -67,6 +67,7 @@ protected:
 	void RefreshLockOnBar(float DeltaTime);
 	void ApplyProgressBarFill(UProgressBar* Bar, const FLinearColor& Fill);
 	FLinearColor GetSlimeHudTint() const;
+	void ApplyDeathBoxBlur(bool bVisible);
 
 	UFUNCTION()
 	void HandleUnstuckClicked();
@@ -97,6 +98,9 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DeathText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> DeathBlurMID;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> WeekText;

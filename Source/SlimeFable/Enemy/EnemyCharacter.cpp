@@ -124,7 +124,7 @@ AEnemyCharacter::AEnemyCharacter()
 	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, HealthBarZOffset));
 	HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
 	HealthBar->SetDrawAtDesiredSize(false);
-	HealthBar->SetDrawSize(FVector2D(110.f, 14.f));
+	HealthBar->SetDrawSize(FVector2D(72.f, 8.f));
 	HealthBar->SetPivot(FVector2D(0.5f, 1.f));
 	HealthBar->SetWidgetClass(USlimeWorldHealthBar::StaticClass());
 	HealthBar->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -278,8 +278,10 @@ void AEnemyCharacter::RefreshWorldHealthBarVisibility(const APawn* Player, const
 	{
 		if (Player)
 		{
-			bShow = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
-				<= FMath::Square(HealthBarVisibleRange);
+			const bool bRevealed = Health && Health->IsWorldHealthBarRevealed();
+			bShow = bRevealed
+				|| FVector::DistSquared(Player->GetActorLocation(), GetActorLocation())
+					<= FMath::Square(HealthBarVisibleRange);
 		}
 		else
 		{

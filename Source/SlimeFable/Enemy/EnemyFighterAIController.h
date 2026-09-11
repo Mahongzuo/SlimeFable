@@ -81,6 +81,7 @@ protected:
 	bool IsMeleeEngageMove(const FEnemyMoveDef& Move) const;
 	bool IsRangedProjectileMove(const FEnemyMoveDef& Move) const;
 	bool IsGapCloserDashMove(const FEnemyMoveDef& Move) const;
+	float ResolveMeleeEngageDistance() const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Combat", meta = (ClampMin = "50.0", Units = "cm",
 		ToolTip = "水平距离 ≤ 此值才可选近战/近距 AoE；更远仅远程（CD 好），否则只追击。默认 200。"))

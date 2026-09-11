@@ -154,6 +154,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime|Morph")
 	USlimeMorphComponent* GetSlimeMorph() const { return SlimeMorph; }
 
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	UAudioComponent* GetCombatBgm() const { return CombatBgm; }
+
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	USlimePathSwordComponent* GetPathSword() const { return PathSword; }
 
@@ -218,6 +221,7 @@ public:
 	virtual void HandleDeath() override;
 
 	void FinishPlayerDeathReload();
+	void TickFatalFall();
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual void ApplyHealing(float Healing, AActor* Healer) override;
 	UFUNCTION(BlueprintCallable, Category = "Combat")
@@ -309,6 +313,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Morph")
 	TObjectPtr<USlimeMorphComponent> SlimeMorph;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Audio")
+	TObjectPtr<UAudioComponent> CombatBgm;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<USlimePathSwordComponent> PathSword;
 
@@ -342,4 +349,10 @@ protected:
 
 	bool bPlayerDead = false;
 	FTimerHandle PlayerDeathReloadTimer;
+
+	/** Last standable Z of the pawn currently tracked for fatal fall (slime or morph). */
+	float LastGroundedZ = 0.f;
+	bool bHasLastGroundedZ = false;
+	TWeakObjectPtr<AActor> FallTrackActor;
+	static constexpr float FatalFallDistance = 3000.f;
 };

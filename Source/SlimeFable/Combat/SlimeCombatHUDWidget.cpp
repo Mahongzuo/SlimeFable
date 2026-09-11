@@ -3,6 +3,7 @@
 #include "SlimeCombatHUDWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Camera/CameraComponent.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -19,6 +20,8 @@
 #include "Components/Widget.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeAbilityComponent.h"
 #include "SlimeCharacter.h"
@@ -29,6 +32,7 @@
 #include "EnemyCharacter.h"
 #include "SlimeEnemyCharacter.h"
 #include "Combat/SlimeDevourTarget.h"
+#include "Enemy/EnemyCombatTypes.h"
 #include "Components/Border.h"
 #include "Inventory/SlimeInventorySubsystem.h"
 #include "Inventory/SlimeItemDefinition.h"
@@ -160,7 +164,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 3 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 3 && PlayerHealthBar)
+	if (SlotKeys.Num() == 4 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 4 && PlayerHealthBar && DeathText)
 	{
 		EnsureClickableSlots();
 		ApplyCombatHudSizes();
@@ -201,7 +205,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	UMaterialInterface* ButtonMat = FMenuUIStyle::LoadButtonMaterial();
 	UMaterialInterface* ProgressMat = LoadProgressBarMaterial();
 
-	for (int32 Index = 0; Index < 3; ++Index)
+	for (int32 Index = 0; Index < 4; ++Index)
 	{
 		USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("Box%d"), Index));
 		Box->SetWidthOverride(176.f);
@@ -595,7 +599,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	}
 
 	DeathText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DeathText"));
-	DeathText->SetText(FText::FromString(TEXT("被击倒")));
+	DeathText->SetText(FText::FromString(TEXT("你已阵亡")));
 	DeathText->SetVisibility(ESlateVisibility::Collapsed);
 	if (UCanvasPanelSlot* DeathSlot = Root->AddChildToCanvas(DeathText))
 	{
@@ -641,16 +645,71 @@ void USlimeCombatHUDWidget::Refresh()
 		return;
 	}
 
+	const ISlimeDevourTarget* MorphPawn = nullptr;
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(Pawn))
+			{
+				if (Target->IsMorphTarget())
+				{
+					MorphPawn = Target;
+				}
+			}
+		}
+	}
+
 	const FSlimeElementKitData Kit = Combat->GetCurrentKit();
 	const ESlimeSkillSlot Slots[3] = { ESlimeSkillSlot::Skill1, ESlimeSkillSlot::Skill2, ESlimeSkillSlot::Skill3 };
 	const FSlimeSkillDef* Defs[3] = { &Kit.Skill1, &Kit.Skill2, &Kit.Skill3 };
+	const EEnemyPlayerSkillSlot MorphSlots[4] = {
+		EEnemyPlayerSkillSlot::SkillQ,
+		EEnemyPlayerSkillSlot::SkillE,
+		EEnemyPlayerSkillSlot::SkillR,
+		EEnemyPlayerSkillSlot::SkillT
+	};
+	const ESlimeInputAction SlotActions[4] = {
+		ESlimeInputAction::Skill1,
+		ESlimeInputAction::Skill2,
+		ESlimeInputAction::Skill3,
+		ESlimeInputAction::ResetBody
+	};
 
-	for (int32 Index = 0; Index < 3 && Index < SlotNames.Num(); ++Index)
+	for (int32 Index = 0; Index < SlotNames.Num() && Index < 4; ++Index)
 	{
+		const FEnemyMoveDef* MorphMove = MorphPawn
+			? EnemyCombat::FindMoveByPlayerSlot(MorphPawn->GetEnemyMoves(), MorphSlots[Index])
+			: nullptr;
+		UWidget* SlotRoot = SkillSlotButtons.IsValidIndex(Index) ? Cast<UWidget>(SkillSlotButtons[Index]->GetParent()) : nullptr;
+		const bool bHasSlimeSlot = Index < 3;
+		if (MorphPawn && !MorphMove)
+		{
+			if (SlotRoot)
+			{
+				SlotRoot->SetVisibility(ESlateVisibility::Collapsed);
+			}
+			continue;
+		}
+		if (!MorphPawn && !bHasSlimeSlot)
+		{
+			if (SlotRoot)
+			{
+				SlotRoot->SetVisibility(ESlateVisibility::Collapsed);
+			}
+			continue;
+		}
+		if (SlotRoot)
+		{
+			SlotRoot->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+		const FText SlotTitle = MorphMove
+			? MorphMove->Skill.DisplayName
+			: (bHasSlimeSlot ? Defs[Index]->DisplayName : FText::GetEmpty());
 		if (SlotNames[Index])
 		{
 			FMenuUIStyle::ApplyBrushCJKFont(SlotNames[Index], 18.f, FMenuUIStyle::WarmTextColor());
-			SlotNames[Index]->SetText(Defs[Index]->DisplayName);
+			SlotNames[Index]->SetText(SlotTitle);
 		}
 		if (SlotKeys[Index])
 		{
@@ -659,24 +718,23 @@ void USlimeCombatHUDWidget::Refresh()
 			{
 				if (const USlimeInputSettings* InputSettings = GI->GetSubsystem<USlimeInputSettings>())
 				{
-					const ESlimeInputAction Actions[3] = {
-						ESlimeInputAction::Skill1,
-						ESlimeInputAction::Skill2,
-						ESlimeInputAction::Skill3
-					};
-					KeyText = InputSettings->GetKeyDisplayName(Actions[Index]);
+					KeyText = InputSettings->GetKeyDisplayName(SlotActions[Index]);
 				}
 			}
 			SlotKeys[Index]->SetText(KeyText);
 			FMenuUIStyle::ApplyMarkerFont(SlotKeys[Index], 26.f, FMenuUIStyle::WarmTitleColor());
 		}
-		if (SlotCds[Index])
+		if (bHasSlimeSlot && SlotCds[Index])
 		{
 			const float Remaining = Combat->GetSkillCooldownRemaining(Slots[Index]);
 			const float MaxCd = FMath::Max(Defs[Index]->Cooldown, 0.01f);
 			SlotCds[Index]->SetPercent(Remaining <= 0.f ? 1.f : 1.f - Remaining / MaxCd);
 		}
-		if (SlotCdTexts.IsValidIndex(Index) && SlotCdTexts[Index])
+		else if (SlotCds.IsValidIndex(Index) && SlotCds[Index])
+		{
+			SlotCds[Index]->SetPercent(1.f);
+		}
+		if (bHasSlimeSlot && SlotCdTexts.IsValidIndex(Index) && SlotCdTexts[Index])
 		{
 			const float Remaining = Combat->GetSkillCooldownRemaining(Slots[Index]);
 			if (Remaining > 0.f)
@@ -688,6 +746,10 @@ void USlimeCombatHUDWidget::Refresh()
 			{
 				SlotCdTexts[Index]->SetText(FText::GetEmpty());
 			}
+		}
+		else if (SlotCdTexts.IsValidIndex(Index) && SlotCdTexts[Index])
+		{
+			SlotCdTexts[Index]->SetText(FText::GetEmpty());
 		}
 	}
 
@@ -1074,11 +1136,110 @@ void USlimeCombatHUDWidget::RefreshLockOnBar(float DeltaTime)
 
 void USlimeCombatHUDWidget::SetDeathVisible(bool bVisible)
 {
+	const ESlateVisibility Vis = bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed;
 	if (DeathText)
 	{
-		DeathText->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		DeathText->SetText(FText::FromString(TEXT("你已阵亡")));
+		DeathText->SetVisibility(Vis);
 		FMenuUIStyle::ApplyBrushCJKFont(DeathText, 42.f, FMenuUIStyle::WarmTitleColor());
 	}
+	ApplyDeathBoxBlur(bVisible);
+}
+
+void USlimeCombatHUDWidget::ApplyDeathBoxBlur(bool bVisible)
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return;
+	}
+
+	UCameraComponent* Camera = nullptr;
+	if (AActor* ViewTarget = PC->GetViewTarget())
+	{
+		Camera = ViewTarget->FindComponentByClass<UCameraComponent>();
+	}
+	if (!Camera)
+	{
+		if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(PC->GetPawn()))
+		{
+			Camera = Slime->GetFollowCamera();
+		}
+		else if (APawn* Pawn = PC->GetPawn())
+		{
+			Camera = Pawn->FindComponentByClass<UCameraComponent>();
+		}
+	}
+
+	if (!bVisible)
+	{
+		if (Camera && DeathBlurMID)
+		{
+			Camera->RemoveBlendable(DeathBlurMID);
+		}
+		if (Camera)
+		{
+			Camera->PostProcessSettings.bOverride_SceneColorTint = false;
+			Camera->PostProcessSettings.SceneColorTint = FLinearColor::White;
+		}
+		return;
+	}
+
+	if (!DeathBlurMID)
+	{
+		UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr,
+			TEXT("/Game/ArtOfShader/FilmAndSpecialEffects/MaterialInstances/MI_BoxBlur.MI_BoxBlur"));
+		if (Base)
+		{
+			DeathBlurMID = UMaterialInstanceDynamic::Create(Base, this);
+		}
+	}
+	if (!DeathBlurMID)
+	{
+		return;
+	}
+
+	const FLinearColor DeathRed(0.42f, 0.06f, 0.06f, 1.f);
+	DeathBlurMID->SetScalarParameterValue(TEXT("BoxRadius"), 0.035f);
+	DeathBlurMID->SetScalarParameterValue(TEXT("Samples"), 4.f);
+	DeathBlurMID->SetScalarParameterValue(TEXT("PostProcessBlend"), 1.f);
+	DeathBlurMID->SetScalarParameterValue(TEXT("DistortionBlend"), 0.f);
+	DeathBlurMID->SetScalarParameterValue(TEXT("PostProcessMultiplyBlend"), 0.45f);
+	DeathBlurMID->SetScalarParameterValue(TEXT("PostProcessOverlayBlend"), 0.55f);
+	DeathBlurMID->SetVectorParameterValue(TEXT("CustomSceneColor"), DeathRed);
+	DeathBlurMID->SetVectorParameterValue(TEXT("InitialColor"), DeathRed);
+	DeathBlurMID->SetVectorParameterValue(TEXT("Color"), DeathRed);
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UMaterialParameterCollection* FseMpc = LoadObject<UMaterialParameterCollection>(nullptr,
+			TEXT("/Game/ArtOfShader/FilmAndSpecialEffects/ParameterCollections/MPC_FilmAndSpecialEffects.MPC_FilmAndSpecialEffects")))
+		{
+			if (UMaterialParameterCollectionInstance* Inst = World->GetParameterCollectionInstance(FseMpc))
+			{
+				Inst->SetScalarParameterValue(TEXT("BoxBlurBlend"), 1.f);
+			}
+		}
+		if (UMaterialParameterCollection* BlendMpc = LoadObject<UMaterialParameterCollection>(nullptr,
+			TEXT("/Game/ArtOfShader/Common/ParameterCollections/MPC_PPBlending.MPC_PPBlending")))
+		{
+			if (UMaterialParameterCollectionInstance* Inst = World->GetParameterCollectionInstance(BlendMpc))
+			{
+				Inst->SetScalarParameterValue(TEXT("PostProcessBlend"), 1.f);
+				Inst->SetScalarParameterValue(TEXT("DistortionBlend"), 0.f);
+			}
+		}
+	}
+
+	if (!Camera)
+	{
+		return;
+	}
+
+	Camera->AddOrUpdateBlendable(DeathBlurMID, 1.f);
+	Camera->PostProcessSettings.bOverride_SceneColorTint = true;
+	Camera->PostProcessSettings.SceneColorTint = DeathRed;
+	Camera->PostProcessBlendWeight = 1.f;
 }
 
 void USlimeCombatHUDWidget::ApplyCombatHudSizes()
@@ -1154,12 +1315,13 @@ void USlimeCombatHUDWidget::BindElementSlot(UButton* Button, int32 Index)
 
 void USlimeCombatHUDWidget::SetVirtualSkill(int32 Index, bool bDown)
 {
-	if (Index < 0 || Index > 2)
+	if (Index < 0 || Index > 3)
 	{
 		return;
 	}
-	static const ESlimeInputAction Actions[3] = {
-		ESlimeInputAction::Skill1, ESlimeInputAction::Skill2, ESlimeInputAction::Skill3
+	static const ESlimeInputAction Actions[4] = {
+		ESlimeInputAction::Skill1, ESlimeInputAction::Skill2, ESlimeInputAction::Skill3,
+		ESlimeInputAction::ResetBody
 	};
 	if (UGameInstance* GI = GetGameInstance())
 	{

@@ -2,8 +2,13 @@
 
 #include "GaspEnemyAIController.h"
 
+#include "Components/CapsuleComponent.h"
+#include "CollisionQueryParams.h"
 #include "EnemyCombatComponent.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GaspSandboxPawn.h"
+#include "SlimeCombatTypes.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavMesh/RecastNavMesh.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -11,6 +16,69 @@
 #include "SlimeFable.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
+
+namespace
+{
+constexpr float GaspFloorStepCm = 90.f;
+
+float CapsuleHalfHeight(const AGaspSandboxPawn* Enemy)
+{
+	if (const UCapsuleComponent* Cap = Enemy ? Enemy->GetDevourCapsule() : nullptr)
+	{
+		return Cap->GetScaledCapsuleHalfHeight();
+	}
+	return 88.f;
+}
+
+bool IsFloorWalkable(UWorld* World, const AActor* Ignore, const FVector& Location, float HalfHeight)
+{
+	if (!World)
+	{
+		return false;
+	}
+	const FVector Start = Location + FVector(0.f, 0.f, 40.f);
+	const FVector End = Location - FVector(0.f, 0.f, HalfHeight + 80.f);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(GaspFloorWalkable), false, Ignore);
+	FHitResult Hit;
+	if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params) && Hit.bBlockingHit)
+	{
+		return true;
+	}
+	if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Pawn, Params) && Hit.bBlockingHit)
+	{
+		return true;
+	}
+	FCollisionObjectQueryParams Objects;
+	Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	return World->LineTraceSingleByObjectType(Hit, Start, End, Objects, Params);
+}
+
+bool StandingFloorTrusted(UWorld* World, const AGaspSandboxPawn* Enemy)
+{
+	if (!World || !Enemy)
+	{
+		return false;
+	}
+	return IsFloorWalkable(World, Enemy, Enemy->GetActorLocation(), CapsuleHalfHeight(Enemy));
+}
+
+bool NextStepWalkable(UWorld* World, const AGaspSandboxPawn* Enemy, const FVector& Dir)
+{
+	if (!Enemy || Dir.IsNearlyZero())
+	{
+		return false;
+	}
+	// Backrooms / custom collision often fail the probe underfoot. If we cannot
+	// see our own floor, the probe is untrusted — allow the old straight walk.
+	if (!StandingFloorTrusted(World, Enemy))
+	{
+		return true;
+	}
+	const FVector Next = Enemy->GetActorLocation() + Dir.GetSafeNormal2D() * GaspFloorStepCm;
+	return IsFloorWalkable(World, Enemy, Next, CapsuleHalfHeight(Enemy));
+}
+}
 
 AGaspEnemyAIController::AGaspEnemyAIController()
 {
@@ -63,6 +131,41 @@ void AGaspEnemyAIController::ReturnToIdle()
 
 APawn* AGaspEnemyAIController::FindCombatFocus() const
 {
+	APawn* Self = GetPawn();
+	if (Self && USlimeHitProbe::GetTeam(Self) == ESlimeTeam::Player)
+	{
+		APawn* Best = nullptr;
+		float BestDistSq = FMath::Square(2000.f);
+		if (UWorld* World = GetWorld())
+		{
+			for (TActorIterator<APawn> It(World); It; ++It)
+			{
+				APawn* Other = *It;
+				if (!Other || Other == Self)
+				{
+					continue;
+				}
+				if (!USlimeHitProbe::IsHostile(Self, Other))
+				{
+					continue;
+				}
+				if (const USlimeHealthComponent* Health = Other->FindComponentByClass<USlimeHealthComponent>())
+				{
+					if (!Health->IsAlive())
+					{
+						continue;
+					}
+				}
+				const float DistSq = FVector::DistSquared(Self->GetActorLocation(), Other->GetActorLocation());
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					Best = Other;
+				}
+			}
+		}
+		return Best;
+	}
 	return UGameplayStatics::GetPlayerPawn(this, 0);
 }
 
@@ -173,8 +276,7 @@ void AGaspEnemyAIController::TickIdle(float DeltaSeconds, float Dist)
 		}
 		return;
 	}
-	const bool bPlayerFocus = Cast<APlayerController>(Focus->GetController()) != nullptr;
-	const bool bHostile = USlimeHitProbe::IsHostile(Enemy, Focus) || bPlayerFocus;
+	const bool bHostile = USlimeHitProbe::IsHostile(Enemy, Focus);
 	if (bHostile && Dist <= Enemy->DetectRange)
 	{
 		StopMovement();
@@ -245,7 +347,8 @@ void AGaspEnemyAIController::TickWander(float DeltaSeconds)
 		{
 			FVector To = WanderDest - Enemy->GetActorLocation();
 			To.Z = 0.f;
-			if (To.SizeSquared2D() < FMath::Square(80.f))
+			const FVector Dir = To.GetSafeNormal();
+			if (To.SizeSquared2D() < FMath::Square(80.f) || !NextStepWalkable(GetWorld(), Enemy, Dir))
 			{
 				Enemy->ClearAiMoveIntent();
 				bWasWanderMoving = false;
@@ -253,8 +356,8 @@ void AGaspEnemyAIController::TickWander(float DeltaSeconds)
 			}
 			else
 			{
-				Enemy->SetAiMoveIntent(To.GetSafeNormal());
-				Enemy->SetAiFaceIntent(To.GetSafeNormal());
+				Enemy->SetAiMoveIntent(Dir);
+				Enemy->SetAiFaceIntent(Dir);
 			}
 		}
 		return;
@@ -283,17 +386,6 @@ void AGaspEnemyAIController::TickWander(float DeltaSeconds)
 	StartWanderTo(Dest);
 }
 
-bool AGaspEnemyAIController::HasRecastNavMesh() const
-{
-	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-	if (!NavSys)
-	{
-		return false;
-	}
-	const ANavigationData* NavData = NavSys->GetDefaultNavDataInstance(FNavigationSystem::DontCreate);
-	return NavData && NavData->IsA<ARecastNavMesh>();
-}
-
 void AGaspEnemyAIController::StopPathIfMoving()
 {
 	if (GetMoveStatus() != EPathFollowingStatus::Idle)
@@ -304,28 +396,19 @@ void AGaspEnemyAIController::StopPathIfMoving()
 
 void AGaspEnemyAIController::StartWanderTo(const FVector& Dest)
 {
-	WanderDest = Dest;
-	WanderLastPos = Enemy->GetActorLocation();
-	WanderStuckTime = 0.f;
-
 	FVector To = Dest - Enemy->GetActorLocation();
 	To.Z = 0.f;
 	const FVector Dir = To.GetSafeNormal();
-
-	if (HasRecastNavMesh())
+	if (Dir.IsNearlyZero() || !NextStepWalkable(GetWorld(), Enemy, Dir))
 	{
-		const EPathFollowingRequestResult::Type Result = MoveToLocation(Dest);
-		if (Result == EPathFollowingRequestResult::RequestSuccessful)
-		{
-			bWasWanderMoving = true;
-			Enemy->SetAiMoveIntent(Dir);
-			Enemy->SetAiFaceIntent(Dir);
-			return;
-		}
+		WanderPauseRemaining = FMath::FRandRange(Enemy->WanderPauseMin, Enemy->WanderPauseMax);
+		return;
 	}
 
-	// FeatureLab often has no Recast NavMesh — drive Mover via ProduceInput intent.
 	StopPathIfMoving();
+	WanderDest = Dest;
+	WanderLastPos = Enemy->GetActorLocation();
+	WanderStuckTime = 0.f;
 	Enemy->SetAiMoveIntent(Dir);
 	Enemy->SetAiFaceIntent(Dir);
 	bWasWanderMoving = true;
@@ -340,9 +423,7 @@ void AGaspEnemyAIController::DriveTowardPlayer(float Preferred)
 	}
 
 	const float Dist2D = FVector::Dist2D(Enemy->GetActorLocation(), Player->GetActorLocation());
-	const bool bTooFar = Dist2D > Preferred * 1.1f;
-	const bool bTooClose = Dist2D < Preferred * 0.55f;
-	if (!bTooFar && !bTooClose)
+	if (Dist2D <= Preferred * 1.1f)
 	{
 		StopPathIfMoving();
 		Enemy->ClearAiMoveIntent();
@@ -351,10 +432,6 @@ void AGaspEnemyAIController::DriveTowardPlayer(float Preferred)
 
 	FVector To = Player->GetActorLocation() - Enemy->GetActorLocation();
 	To.Z = 0.f;
-	if (bTooClose)
-	{
-		To = -To;
-	}
 	if (To.IsNearlyZero())
 	{
 		Enemy->ClearAiMoveIntent();
@@ -362,31 +439,16 @@ void AGaspEnemyAIController::DriveTowardPlayer(float Preferred)
 	}
 
 	const FVector Dir = To.GetSafeNormal();
-	Enemy->SetAiMoveIntent(Dir);
-
-	if (!HasRecastNavMesh())
-	{
-		return;
-	}
-
-	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-	const FVector Goal = Player->GetActorLocation();
-	const bool bNeedNewRequest = GetMoveStatus() == EPathFollowingStatus::Idle
-		|| FVector::DistSquared2D(Goal, LastNavGoal) > FMath::Square(150.f)
-		|| (Now - LastNavRequestTime) > 0.5f;
-	if (!bNeedNewRequest)
-	{
-		return;
-	}
-
-	LastNavRequestTime = Now;
-	LastNavGoal = Goal;
-	const EPathFollowingRequestResult::Type NavResult = MoveToActor(Player, Preferred * 0.85f);
-	if (NavResult == EPathFollowingRequestResult::Failed
-		|| NavResult == EPathFollowingRequestResult::AlreadyAtGoal)
+	if (!NextStepWalkable(GetWorld(), Enemy, Dir))
 	{
 		StopPathIfMoving();
+		Enemy->ClearAiMoveIntent();
+		return;
 	}
+
+	StopPathIfMoving();
+	Enemy->SetAiMoveIntent(Dir);
+	Enemy->SetAiFaceIntent(Dir);
 }
 
 void AGaspEnemyAIController::TickChase(float DeltaSeconds, float Dist2D)
@@ -394,6 +456,9 @@ void AGaspEnemyAIController::TickChase(float DeltaSeconds, float Dist2D)
 	(void)DeltaSeconds;
 	FacePlayer();
 	DriveTowardPlayer(Enemy->PreferredDistance);
+
+	const bool bMoving = !Enemy->GetAiMoveIntent().IsNearlyZero();
+	Enemy->SetWantChaseGait(bMoving);
 
 	if (Combat->IsAttacking())
 	{
@@ -418,6 +483,7 @@ void AGaspEnemyAIController::EnterTelegraph(int32 MoveIndex)
 	StateTime = 0.f;
 	StopMovement();
 	Enemy->ClearAiMoveIntent();
+	Enemy->SetWantChaseGait(false);
 	FacePlayer();
 	UE_LOG(LogSlimeFable, Verbose, TEXT("GaspAI %s -> Telegraph move=%d"), *GetNameSafe(Enemy), MoveIndex);
 }
@@ -509,7 +575,7 @@ int32 AGaspEnemyAIController::SelectMove(float Dist2D) const
 	for (int32 Index = 0; Index < Moves.Num(); ++Index)
 	{
 		const FEnemyMoveDef& Move = Moves[Index];
-		if (Move.Skill.Exec == EEnemySkillExec::Dash)
+		if (Move.Weight <= 0.f)
 		{
 			continue;
 		}
@@ -521,7 +587,7 @@ int32 AGaspEnemyAIController::SelectMove(float Dist2D) const
 		{
 			continue;
 		}
-		TotalWeight += FMath::Max(Move.Weight, 0.01f);
+		TotalWeight += Move.Weight;
 		Candidates.Add(Index);
 	}
 	if (Candidates.Num() == 0 || TotalWeight <= 0.f)
@@ -531,7 +597,7 @@ int32 AGaspEnemyAIController::SelectMove(float Dist2D) const
 	float Roll = FMath::FRandRange(0.f, TotalWeight);
 	for (int32 Index : Candidates)
 	{
-		Roll -= FMath::Max(Moves[Index].Weight, 0.01f);
+		Roll -= Moves[Index].Weight;
 		if (Roll <= 0.f)
 		{
 			return Index;

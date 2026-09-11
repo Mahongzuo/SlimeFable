@@ -138,6 +138,10 @@ public:
 		meta = (DisplayName = "应用灯光"))
 	void ApplyLights();
 
+	UFUNCTION(BlueprintCallable, Category = "Audio",
+		meta = (ToolTip = "战斗时淡出探索 BGM；脱战后淡回。暂停时不切下一首。"))
+	void SetExploreBgmDucked(bool bDucked);
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Z_Components", meta = (AdvancedDisplay))
 	TObjectPtr<UAudioComponent> BgmComponent;
@@ -152,6 +156,7 @@ protected:
 
 	FWfcSolver Solver;
 	int32 BgmIndex = 0;
+	bool bExploreBgmDucked = false;
 
 	UWfcTileSet* ResolveTileSet();
 	FIntPoint WorldToCell(const FVector& Location) const;

@@ -72,6 +72,10 @@ struct SLIMEFABLE_API FSlimeDevourCapture
 	UPROPERTY(BlueprintReadOnly, Category = "Slime|Devour")
 	TArray<TObjectPtr<UMaterialInterface>> StaticMaterials;
 
+	/** Last morph-body HP. Negative = next morph starts full. */
+	UPROPERTY(BlueprintReadOnly, Category = "Slime|Devour")
+	float SavedMorphHP = -1.f;
+
 	bool IsValidCapture() const { return EnemyClass.Get() != nullptr; }
 };
 
@@ -112,6 +116,7 @@ public:
 	int32 GetPhantomSlotCapacity() const { return PhantomSlotCapacity; }
 
 	const TArray<FSlimeDevourCapture>& GetPhantomSlots() const { return PhantomSlots; }
+	void SetPhantomSlotMorphHP(int32 Slot, float HP);
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Devour")
 	int32 GetSelectedPhantomSlot() const { return SelectedPhantomSlot; }

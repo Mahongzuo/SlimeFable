@@ -7,7 +7,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EnhancedInputComponent.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "ProceduralMeshComponent.h"
 #include "SlimeAbilityComponent.h"
@@ -47,6 +49,7 @@
 #include "Sound/SoundBase.h"
 #include "Components/AudioComponent.h"
 #include "Settings/SlimeAudioPlay.h"
+#include "Enemy/EnemyCombatTypes.h"
 
 namespace SlimeMoveAudio
 {
@@ -202,6 +205,11 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SlimeDevour = CreateDefaultSubobject<USlimeDevourComponent>(TEXT("SlimeDevour"));
 	SlimeVehicle = CreateDefaultSubobject<USlimeVehicleComponent>(TEXT("SlimeVehicle"));
 	SlimeMorph = CreateDefaultSubobject<USlimeMorphComponent>(TEXT("SlimeMorph"));
+	CombatBgm = CreateDefaultSubobject<UAudioComponent>(TEXT("CombatBgm"));
+	CombatBgm->SetupAttachment(RootComponent);
+	CombatBgm->bAutoActivate = false;
+	CombatBgm->bAllowSpatialization = false;
+	CombatBgm->bIsUISound = false;
 	PathSword = CreateDefaultSubobject<USlimePathSwordComponent>(TEXT("PathSword"));
 	SlimeFluidNinjaContact = CreateDefaultSubobject<USlimeFluidNinjaContactComponent>(TEXT("SlimeFluidNinjaContact"));
 	SlimeFoliageInteract = CreateDefaultSubobject<USlimeFoliageInteractComponent>(TEXT("SlimeFoliageInteract"));
@@ -323,6 +331,7 @@ void ASlimeCharacter::Tick(float DeltaSeconds)
 		SlimeCling->UpdateCling(DeltaSeconds);
 	}
 	TickFootsteps(DeltaSeconds);
+	TickFatalFall();
 	Super::Tick(DeltaSeconds);
 	if (IsPlayerControlled())
 	{
@@ -804,15 +813,33 @@ void ASlimeCharacter::HandleDeath()
 	}
 	bPlayerDead = true;
 
+	if (SlimeMorph && SlimeMorph->GetMorphTarget())
+	{
+		SlimeMorph->ForceUnmorph(false);
+	}
+
 	if (SlimeDevour)
 	{
 		SlimeDevour->ClosePhantomWheel(false);
 		SlimeDevour->AbortDevour(true);
 	}
 
-	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		PC = UGameplayStatics::GetPlayerController(this, 0);
+	}
+	if (PC)
 	{
 		DisableInput(PC);
+		if (APawn* Controlled = PC->GetPawn())
+		{
+			if (UCharacterMovementComponent* OtherMove = Controlled->FindComponentByClass<UCharacterMovementComponent>())
+			{
+				OtherMove->StopMovementImmediately();
+				OtherMove->DisableMovement();
+			}
+		}
 	}
 	if (UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
@@ -825,6 +852,10 @@ void ASlimeCharacter::HandleDeath()
 		{
 			HUD->SetDeathVisible(true);
 		}
+	}
+	if (USoundBase* DeathSfx = LoadObject<USoundBase>(nullptr, EnemyCombat::DefaultPlayerDeathSound))
+	{
+		SlimeAudioPlay::PlaySfx2D(this, DeathSfx);
 	}
 	if (UWorld* World = GetWorld())
 	{
@@ -845,9 +876,67 @@ void ASlimeCharacter::FinishPlayerDeathReload()
 		{
 			if (UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
 			{
-				Quests->ReloadActiveChapterAfterDeath();
+				Quests->RequestPlayerSessionRestart(World);
 			}
 		}
+	}
+}
+
+void ASlimeCharacter::TickFatalFall()
+{
+	if (bPlayerDead)
+	{
+		return;
+	}
+
+	AActor* Tracked = this;
+	if (SlimeMorph)
+	{
+		if (APawn* Morph = SlimeMorph->GetMorphTarget())
+		{
+			if (SlimeMorph->IsMorphed() || Morph->IsPlayerControlled())
+			{
+				Tracked = Morph;
+			}
+		}
+	}
+
+	if (FallTrackActor.Get() != Tracked)
+	{
+		FallTrackActor = Tracked;
+		LastGroundedZ = Tracked->GetActorLocation().Z;
+		bHasLastGroundedZ = true;
+		return;
+	}
+
+	const float Z = Tracked->GetActorLocation().Z;
+	bool bGrounded = false;
+	bool bFalling = false;
+	if (const ACharacter* Character = Cast<ACharacter>(Tracked))
+	{
+		if (const UCharacterMovementComponent* Move = Character->GetCharacterMovement())
+		{
+			bGrounded = Move->IsMovingOnGround();
+			bFalling = Move->IsFalling();
+		}
+	}
+	else
+	{
+		const float VelZ = Tracked->GetVelocity().Z;
+		bFalling = VelZ < -10.f;
+		bGrounded = FMath::Abs(VelZ) <= 10.f;
+	}
+
+	if (bGrounded)
+	{
+		LastGroundedZ = Z;
+		bHasLastGroundedZ = true;
+		return;
+	}
+
+	if (bHasLastGroundedZ && bFalling && (LastGroundedZ - Z) >= FatalFallDistance)
+	{
+		HandleDeath();
 	}
 }
 

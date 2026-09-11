@@ -71,6 +71,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	bool IsInvulnerable() const;
 
+	/** 打到玩家后，头顶血条不再受距离限制。 */
+	void RevealWorldHealthBar() { bRevealWorldHealthBar = true; }
+	bool IsWorldHealthBarRevealed() const { return bRevealWorldHealthBar; }
+
 	/** Public so non-Character pawns (GASP Mover) can dissolve after death. */
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void BeginDeathDissolve();
@@ -82,6 +86,7 @@ private:
 	void ApplyDeathVisual(float Alpha) const;
 
 	bool bDissolving = false;
+	bool bRevealWorldHealthBar = false;
 	float DissolveElapsed = 0.f;
 	float DissolveDuration = 0.7f;
 	FTimerHandle DissolveTimerHandle;

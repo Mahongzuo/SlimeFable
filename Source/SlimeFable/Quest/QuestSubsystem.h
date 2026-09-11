@@ -153,6 +153,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Quest")
 	void ReloadActiveChapterAfterDeath();
 
+	/** Calendar day → ReloadActiveChapterAfterDeath; Lab / FeatureLab / sandbox → OpenLevel current map. */
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void RequestPlayerSessionRestart(const UObject* WorldContext = nullptr);
+
 	UFUNCTION(BlueprintPure, Category = "Quest")
 	bool IsSideComplete(FName ChapterId, FName QuestId) const;
 

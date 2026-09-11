@@ -76,6 +76,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Phoebe|Locomotion")
 	static bool PrepareInPlaceCombatMontage(UAnimMontage* Montage);
 
+	/** Editor: pin Mixamo Hips/pelvis X/Y to the first frame. Leaves Z so jump/land stay grounded. */
+	UFUNCTION(BlueprintCallable, Category = "Phoebe|Locomotion")
+	static bool LockMixamoTravelBoneToFirstFrame(UAnimSequence* Sequence);
+
 	/**
 	 * Bake First then Second into a new (or overwritten) AnimSequence.
 	 * Used to turn climb *_1 + *_2 halves into a left/right looping clip.

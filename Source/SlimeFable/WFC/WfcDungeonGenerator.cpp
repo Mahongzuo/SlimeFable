@@ -554,6 +554,40 @@ void AWFCDungeonGenerator::UpdateLights(const FIntPoint& PlayerCell)
 	}
 }
 
+void AWFCDungeonGenerator::SetExploreBgmDucked(bool bDucked)
+{
+	if (bExploreBgmDucked == bDucked)
+	{
+		return;
+	}
+	bExploreBgmDucked = bDucked;
+	if (!BgmComponent)
+	{
+		return;
+	}
+
+	const float Fade = 0.4f;
+	if (bDucked)
+	{
+		BgmComponent->FadeOut(Fade, 0.f);
+		return;
+	}
+
+	if (!BgmComponent->GetSound())
+	{
+		PlayBgmAt(BgmIndex);
+		return;
+	}
+
+	const float TargetVol = SlimeAudioPlay::MusicMul(this);
+	if (!BgmComponent->IsPlaying())
+	{
+		BgmComponent->SetVolumeMultiplier(0.f);
+		BgmComponent->Play();
+	}
+	BgmComponent->FadeIn(Fade, TargetVol);
+}
+
 void AWFCDungeonGenerator::StartBgm()
 {
 	PlayBgmAt(0);
@@ -594,7 +628,7 @@ void AWFCDungeonGenerator::PlayBgmAt(int32 Index)
 
 void AWFCDungeonGenerator::HandleBgmFinished()
 {
-	if (BgmPlaylist.Num() == 0)
+	if (bExploreBgmDucked || BgmPlaylist.Num() == 0)
 	{
 		return;
 	}

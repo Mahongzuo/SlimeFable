@@ -71,6 +71,7 @@ class SLIMEFABLE_API AGaspSandboxPawn : public APawn,
 public:
 	AGaspSandboxPawn();
 
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -94,6 +95,7 @@ public:
 	virtual FText GetResolvedDisplayName() const override;
 	virtual FLinearColor ResolveDevourWheelTint() const override;
 	virtual USkeletalMeshComponent* GetPrimarySkeletalMesh() const override { return CachedSkeletalMesh; }
+	USkeletalMeshComponent* GetVisualSkeletalMesh() const { return FindChildActorVisualMesh(); }
 	virtual USkeletalMeshComponent* GetDevourPreviewMesh() const override;
 	virtual USkeletalMeshComponent* GetMorphVisualMesh() const override { return GetDevourPreviewMesh(); }
 	virtual UCapsuleComponent* GetDevourCapsule() const override { return CachedCapsule; }
@@ -134,9 +136,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "GASP")
 	UNavMoverComponent* GetNavMoverComponent() const { return CachedNavMover; }
 
-	/** AI / direct-drive movement intent in world XY (unit-ish). */
-	void SetAiMoveIntent(const FVector& WorldIntent);
+	/** AI / direct-drive movement intent in world XY (unit-ish). Dest is a nav-projected world point. */
+	void SetAiMoveIntent(const FVector& WorldIntent, const FVector& WorldDest = FVector::ZeroVector);
 	void ClearAiMoveIntent();
+	const FVector& GetAiMoveDest() const { return AiMoveDest; }
 	/** AI facing intent in world XY — feed OrientationIntent via input bridge. */
 	void SetAiFaceIntent(const FVector& WorldIntent) { AiFaceIntent = WorldIntent; }
 	void ClearAiFaceIntent() { AiFaceIntent = FVector::ZeroVector; }
@@ -152,6 +155,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "GASP")
 	virtual void TriggerSandboxRagdoll();
 
+	/** Drop an input-triggered ragdoll so costume R can play as a skill. Death / combat knockdown stay intact. */
+	void CancelInputRagdoll();
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Devour",
 		meta = (ToolTip = "能否被史莱姆吞噬。默认开。"))
 	bool bDevourable = true;
@@ -165,10 +171,19 @@ public:
 		meta = (ToolTip = "锁定顶栏名字。空则显示「动作试样」。"))
 	FText DisplayName;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Costume",
+		meta = (ToolTip = "服装角色。Meituan/Xigua 追加幻形 QER；Nailong/Niulai 只走路。"))
+	EGaspCostumeKind CostumeKind = EGaspCostumeKind::None;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD",
 		meta = (ClampMin = "-200.0", ClampMax = "800.0", Units = "cm",
 			ToolTip = "血条在胶囊顶上方的额外厘米。默认 12。"))
 	float HealthBarZOffset = 12.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD",
+		meta = (ClampMin = "100.0", Units = "cm",
+			ToolTip = "超过这个距离不显示头顶血条。默认 500（5 米）。"))
+	float HealthBarVisibleRange = 500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Camera",
 		meta = (ClampMin = "0.0", Units = "cm",
@@ -315,13 +330,16 @@ protected:
 
 	void ResolveBlueprintComponents();
 	void EnsureInputBridge();
-	void EnsureMoveKit();
+	virtual void EnsureMoveKit();
 	void EnsureMoverModes();
 	void EnsureCapsuleIsRoot();
 	void EnsureMeshTickAfterMover();
 	void SuspendMoverSim();
 	void ResumeMoverSim();
 	void ApplyActiveVisualOnly();
+	void ApplyCostumeVisualClass();
+	void ApplyCostumeRetargeter();
+	void StripXiguaOutlineOverlay();
 	void BindWorldHealthBar();
 	void AttachHealthBarToCapsule();
 	void RefreshWorldHealthBarVisibility();
@@ -331,6 +349,7 @@ protected:
 	void BindMorphLocomotionActions(APlayerController* PC);
 	void UnbindMorphLocomotionActions();
 	virtual void RestoreUnexpectedRagdoll();
+	void SuppressCostumeInputRagdoll();
 	virtual bool WantsHeldRagdollMode() const;
 	void ForcePhysicalRagdollBodies(bool bDisableCapsule);
 	virtual void KeepDeathRagdollPhysics();
@@ -473,6 +492,7 @@ protected:
 	FVector MorphTracePrevMesh = FVector::ZeroVector;
 	FVector MorphTracePrevCamera = FVector::ZeroVector;
 	FVector AiMoveIntent = FVector::ZeroVector;
+	FVector AiMoveDest = FVector::ZeroVector;
 	FVector AiFaceIntent = FVector::ZeroVector;
 	TWeakObjectPtr<AActor> MorphMaster;
 	TObjectPtr<UMaterialInstanceDynamic> HitFlashMID;

@@ -8,6 +8,6 @@ class APlayerController;
 
 namespace SlimeCombatDetect
 {
-	/** True when the local player is locked on or any enemy reports IsInCombat(). */
+	/** True when a hostile or allied AI is chasing / attacking (not lock-on alone). */
 	bool IsLocalCombatActive(APlayerController* PC);
 }

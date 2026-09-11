@@ -1557,6 +1557,42 @@ void UQuestSubsystem::ReloadActiveChapterAfterDeath()
 	}
 }
 
+void UQuestSubsystem::RequestPlayerSessionRestart(const UObject* WorldContext)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : ActiveWorld.Get();
+	if (!World)
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			World = GI->GetWorld();
+		}
+	}
+	if (!World)
+	{
+		return;
+	}
+
+	const FString Day = ActiveDayId.ToString();
+	const bool bCalendarDay = Day.Len() == 4 && Day.IsNumeric();
+	if (bCalendarDay)
+	{
+		if (!ActiveWorld.IsValid())
+		{
+			ActiveWorld = World;
+		}
+		ReloadActiveChapterAfterDeath();
+		return;
+	}
+
+	const FString LevelName = UGameplayStatics::GetCurrentLevelName(World, true);
+	if (LevelName.IsEmpty())
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("RequestPlayerSessionRestart: empty level name"));
+		return;
+	}
+	UGameplayStatics::OpenLevel(World, FName(*LevelName));
+}
+
 void UQuestSubsystem::ApplyWeekDifficultyToEnemies(UWorld* World) const
 {
 	if (!World)

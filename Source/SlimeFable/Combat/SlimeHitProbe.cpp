@@ -300,6 +300,19 @@ void USlimeHitProbe::ApplyToActor(
 		Health->ApplyDamage(DamageAmount, Instigator, HitLocation, Impulse);
 	}
 
+	if (DamageAmount > 0.f && Instigator && Target)
+	{
+		const bool bHitPlayer = Cast<ASlimeCharacter>(Target) != nullptr
+			|| (Cast<APawn>(Target) && Cast<APawn>(Target)->IsPlayerControlled());
+		if (bHitPlayer)
+		{
+			if (USlimeHealthComponent* InstHealth = Instigator->FindComponentByClass<USlimeHealthComponent>())
+			{
+				InstHealth->RevealWorldHealthBar();
+			}
+		}
+	}
+
 	if (DamageAmount > 0.f && Instigator && Cast<ASlimeCharacter>(Instigator) && IsValidDamageTarget(Target))
 	{
 		FString Line;

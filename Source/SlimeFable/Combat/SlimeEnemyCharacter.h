@@ -36,8 +36,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "-200.0", ClampMax = "800.0", Units = "cm"))
 	float HealthBarZOffset = 72.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "100.0", Units = "cm"))
-	float HealthBarVisibleRange = 1000.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|HUD", meta = (ClampMin = "100.0", Units = "cm",
+		ToolTip = "超过这个距离不显示头顶血条。默认 500（5 米）。"))
+	float HealthBarVisibleRange = 500.f;
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	virtual bool CanBeLockedOn() const override;

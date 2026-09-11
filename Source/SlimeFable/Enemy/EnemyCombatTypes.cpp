@@ -3,6 +3,7 @@
 #include "EnemyCombatTypes.h"
 
 #include "Animation/AnimMontage.h"
+#include "NiagaraSystem.h"
 #include "Animation/AnimNotifies/AnimNotify.h"
 #include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Animation/AnimSequence.h"
@@ -53,6 +54,9 @@ FSlimeSkillDef EnemyCombat::ToSlimeHitSkill(const FEnemySkillDef& Def)
 	case EEnemySkillExec::Dash:
 		Out.Exec = ESlimeSkillExec::Dash;
 		break;
+	case EEnemySkillExec::BeamLane:
+	case EEnemySkillExec::Summon:
+	case EEnemySkillExec::WatermelonRain:
 	case EEnemySkillExec::Melee:
 	default:
 		Out.Exec = ESlimeSkillExec::Melee;
@@ -223,6 +227,227 @@ void EnemyCombat::FillDefaultGaspMoves(TArray<FEnemyMoveDef>& OutMoves)
 	AddMelee(TEXT("GaspCharged"), FText::FromString(TEXT("Combo 4")), Combo, 0.8f, 18.f, 320.f, 0.28f, 0.48f, 0.5f, 75.f, 130.f);
 }
 
+FText EnemyCombat::CostumeDisplayName(EGaspCostumeKind Kind)
+{
+	switch (Kind)
+	{
+	case EGaspCostumeKind::Meituan: return FText::FromString(TEXT("美团"));
+	case EGaspCostumeKind::Xigua: return FText::FromString(TEXT("西瓜"));
+	case EGaspCostumeKind::Nailong: return FText::FromString(TEXT("奶龙"));
+	case EGaspCostumeKind::Niulai: return FText::FromString(TEXT("牛来"));
+	default: return FText::GetEmpty();
+	}
+}
+
+const TCHAR* EnemyCombat::CostumeRetargeterPath(EGaspCostumeKind Kind)
+{
+	switch (Kind)
+	{
+	case EGaspCostumeKind::Meituan: return TEXT("/Game/_Slime/Enemies/Costume/Rigs/RTG_UEFN_to_Meituan.RTG_UEFN_to_Meituan");
+	case EGaspCostumeKind::Xigua: return TEXT("/Game/_Slime/Enemies/Costume/Rigs/RTG_UEFN_to_Xigua.RTG_UEFN_to_Xigua");
+	case EGaspCostumeKind::Nailong: return TEXT("/Game/_Slime/Enemies/Costume/Rigs/RTG_UEFN_to_Nailong.RTG_UEFN_to_Nailong");
+	case EGaspCostumeKind::Niulai: return TEXT("/Game/_Slime/Enemies/Costume/Rigs/RTG_UEFN_to_Niulai.RTG_UEFN_to_Niulai");
+	default: return nullptr;
+	}
+}
+
+const TCHAR* EnemyCombat::CostumeVisualClassPath(EGaspCostumeKind Kind)
+{
+	switch (Kind)
+	{
+	case EGaspCostumeKind::Meituan: return TEXT("/Game/_Slime/Enemies/Costume/Visual/BP_Visual_Meituan.BP_Visual_Meituan_C");
+	case EGaspCostumeKind::Xigua: return TEXT("/Game/_Slime/Enemies/Costume/Visual/BP_Visual_Xigua.BP_Visual_Xigua_C");
+	case EGaspCostumeKind::Nailong: return TEXT("/Game/_Slime/Enemies/Costume/Visual/BP_Visual_Nailong.BP_Visual_Nailong_C");
+	case EGaspCostumeKind::Niulai: return TEXT("/Game/_Slime/Enemies/Costume/Visual/BP_Visual_Niulai.BP_Visual_Niulai_C");
+	default: return nullptr;
+	}
+}
+
+const TCHAR* EnemyCombat::CostumeAttackSoundPath(EGaspCostumeKind Kind)
+{
+	switch (Kind)
+	{
+	case EGaspCostumeKind::Meituan: return MeituanAttackSound;
+	case EGaspCostumeKind::Xigua: return XiguaAttackSound;
+	case EGaspCostumeKind::Nailong: return NailongAttackSound;
+	case EGaspCostumeKind::Niulai: return NiulaiAttackSound;
+	default: return DefaultGaspAttackSound;
+	}
+}
+
+FName EnemyCombat::CostumeRetargeterTag(EGaspCostumeKind Kind)
+{
+	switch (Kind)
+	{
+	case EGaspCostumeKind::Meituan: return FName(TEXT("RTG_UEFN_to_Meituan"));
+	case EGaspCostumeKind::Xigua: return FName(TEXT("RTG_UEFN_to_Xigua"));
+	case EGaspCostumeKind::Nailong: return FName(TEXT("RTG_UEFN_to_Nailong"));
+	case EGaspCostumeKind::Niulai: return FName(TEXT("RTG_UEFN_to_Niulai"));
+	default: return NAME_None;
+	}
+}
+
+const FEnemyMoveDef* EnemyCombat::FindMoveByPlayerSlot(const TArray<FEnemyMoveDef>& Moves, EEnemyPlayerSkillSlot Slot)
+{
+	if (Slot == EEnemyPlayerSkillSlot::None)
+	{
+		return nullptr;
+	}
+	for (const FEnemyMoveDef& Move : Moves)
+	{
+		if (Move.PlayerSkillSlot == Slot && !Move.Skill.DisplayName.IsEmpty())
+		{
+			return &Move;
+		}
+	}
+	return nullptr;
+}
+
+bool EnemyCombat::HasPlayerSkillSlots(const TArray<FEnemyMoveDef>& Moves)
+{
+	return FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillQ)
+		|| FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillE)
+		|| FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillR)
+		|| FindMoveByPlayerSlot(Moves, EEnemyPlayerSkillSlot::SkillT);
+}
+
+void EnemyCombat::AppendCostumeSkills(TArray<FEnemyMoveDef>& Moves, EGaspCostumeKind Kind)
+{
+	auto SoftMontage = [](const TCHAR* Path) -> TSoftObjectPtr<UAnimMontage>
+	{
+		return TSoftObjectPtr<UAnimMontage>(FSoftObjectPath(Path));
+	};
+	auto UpsertSkill = [&](FName Id, FText Name, EEnemyPlayerSkillSlot Slot, EEnemySkillExec Exec,
+		const TCHAR* MontagePath, float Damage, float Range, float Radius, float HitStart, float HitEnd, float Recovery,
+		float Weight, float Cooldown) -> FEnemyMoveDef*
+	{
+		FEnemyMoveDef* Existing = Moves.FindByPredicate([Id](const FEnemyMoveDef& Move)
+		{
+			return Move.MoveId == Id;
+		});
+		if (Existing)
+		{
+			Existing->PlayerSkillSlot = Slot;
+			Existing->Skill.DisplayName = Name;
+			Existing->Skill.Exec = Exec;
+			Existing->Skill.Damage = Damage;
+			Existing->Skill.Hit.Radius = Radius;
+			Existing->Skill.Hit.Range = Range;
+			Existing->Skill.HitStart = HitStart;
+			Existing->Skill.HitEnd = HitEnd;
+			Existing->Skill.Recovery = Recovery;
+			Existing->Weight = Weight;
+			Existing->Cooldown = Cooldown;
+			Existing->MaxRange = Range + 120.f;
+			if (Existing->Skill.AttackMontage.IsNull())
+			{
+				Existing->Skill.AttackMontage = SoftMontage(MontagePath);
+			}
+			return Existing;
+		}
+
+		FEnemyMoveDef Move;
+		Move.MoveId = Id;
+		Move.PlayerSkillSlot = Slot;
+		Move.Skill.DisplayName = Name;
+		Move.Skill.Exec = Exec;
+		Move.Skill.Windup = 0.12f;
+		Move.Skill.HitStart = HitStart;
+		Move.Skill.HitEnd = HitEnd;
+		Move.Skill.Recovery = Recovery;
+		Move.Skill.Damage = Damage;
+		Move.Skill.Knockback = 280.f;
+		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
+		Move.Skill.Hit.Radius = Radius;
+		Move.Skill.Hit.Range = Range;
+		Move.Skill.Hit.OriginForwardOffset = 60.f;
+		Move.Skill.AttackMontage = SoftMontage(MontagePath);
+		Move.MinRange = 0.f;
+		Move.MaxRange = Range + 120.f;
+		Move.Weight = Weight;
+		Move.TelegraphTime = 0.16f;
+		Move.Cooldown = Cooldown;
+		const int32 Index = Moves.Add(Move);
+		return &Moves[Index];
+	};
+
+	if (Kind == EGaspCostumeKind::Meituan)
+	{
+		UpsertSkill(TEXT("MeituanMagic"), FText::FromString(TEXT("召唤奶龙")), EEnemyPlayerSkillSlot::SkillE,
+			EEnemySkillExec::Summon,
+			TEXT("/Game/_Slime/Enemies/Costume/Montages/AM_Meituan_Magic.AM_Meituan_Magic"),
+			0.f, 300.f, 40.f, 0.3f, 0.55f, 0.45f, 1.f, 10.f);
+		if (FEnemyMoveDef* Summon = Moves.FindByPredicate([](const FEnemyMoveDef& M) { return M.MoveId == TEXT("MeituanMagic"); }))
+		{
+			Summon->Skill.SummonForwardOffset = 300.f;
+			Summon->Skill.Damage = 0.f;
+			Summon->Skill.SummonClass = LoadClass<AActor>(
+				nullptr, TEXT("/Game/_Slime/Enemies/Costume/BP_NailongEnemy.BP_NailongEnemy_C"));
+			Summon->MaxRange = 400.f;
+		}
+		UpsertSkill(TEXT("MeituanJump"), FText::FromString(TEXT("跳砸")), EEnemyPlayerSkillSlot::SkillR,
+			EEnemySkillExec::Dash,
+			TEXT("/Game/_Slime/Enemies/Costume/Montages/AM_Meituan_Jump.AM_Meituan_Jump"),
+			16.f, 0.f, 100.f, 0.90f, 1.10f, 0.4f, 1.f, 20.f);
+		if (FEnemyMoveDef* Jump = Moves.FindByPredicate([](const FEnemyMoveDef& M) { return M.MoveId == TEXT("MeituanJump"); }))
+		{
+			Jump->Skill.DashDistance = 400.f;
+			Jump->Skill.bAirDash = true;
+			Jump->Skill.Hit.OriginForwardOffset = 40.f;
+			Jump->bGapCloser = true;
+			Jump->MaxRange = 400.f;
+			Jump->MinRange = 0.f;
+		}
+	}
+	else if (Kind == EGaspCostumeKind::Xigua)
+	{
+		// Visual montage is truncated at 1.5s in PlayOwnerAttackMontage.
+		UpsertSkill(TEXT("XiguaSurprise"), FText::FromString(TEXT("突袭")), EEnemyPlayerSkillSlot::SkillQ,
+			EEnemySkillExec::Melee,
+			TEXT("/Game/_Slime/Enemies/Costume/Montages/AM_Xigua_Surprise.AM_Xigua_Surprise"),
+			16.f, 180.f, 80.f, 0.22f, 0.42f, 0.28f, 0.f, 1.4f);
+		UpsertSkill(TEXT("XiguaSummon"), FText::FromString(TEXT("召唤")), EEnemyPlayerSkillSlot::SkillE,
+			EEnemySkillExec::Summon,
+			TEXT("/Game/_Slime/Enemies/Costume/Montages/AM_Xigua_Summon.AM_Xigua_Summon"),
+			0.f, 300.f, 40.f, 0.3f, 0.55f, 0.45f, 1.f, 10.f);
+		if (FEnemyMoveDef* Summon = Moves.FindByPredicate([](const FEnemyMoveDef& M) { return M.MoveId == TEXT("XiguaSummon"); }))
+		{
+			Summon->Skill.SummonForwardOffset = 300.f;
+			Summon->Skill.Damage = 0.f;
+			Summon->MaxRange = 400.f;
+		}
+		UpsertSkill(TEXT("XiguaBolt"), FText::FromString(TEXT("法术")), EEnemyPlayerSkillSlot::SkillR,
+			EEnemySkillExec::BeamLane,
+			TEXT("/Game/_Slime/Enemies/Costume/Montages/AM_Xigua_Bolt.AM_Xigua_Bolt"),
+			14.f, 1000.f, 100.f, 0.35f, 0.55f, 0.45f, 1.f, 20.f);
+		if (FEnemyMoveDef* Bolt = Moves.FindByPredicate([](const FEnemyMoveDef& M) { return M.MoveId == TEXT("XiguaBolt"); }))
+		{
+			Bolt->Skill.Hit.Shape = ESlimeHitShape::Capsule;
+			Bolt->Skill.Hit.Range = 1000.f;
+			Bolt->Skill.Hit.Radius = 100.f;
+			Bolt->Skill.BeamDuration = 2.f;
+			Bolt->Skill.BeamTickInterval = 0.5f;
+			Bolt->Skill.HitNiagara = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(
+				TEXT("/Game/RPGEffects/ParticlesNiagara/Priest/Beam/NS_Priest_Beam.NS_Priest_Beam")));
+			Bolt->Skill.CastNiagara = Bolt->Skill.HitNiagara;
+			Bolt->MaxRange = 1100.f;
+		}
+		UpsertSkill(TEXT("XiguaMelonRain"), FText::FromString(TEXT("砸瓜")), EEnemyPlayerSkillSlot::SkillT,
+			EEnemySkillExec::WatermelonRain,
+			TEXT("/Game/_Slime/Enemies/Costume/Montages/AM_Xigua_Summon.AM_Xigua_Summon"),
+			8.f, 500.f, 40.f, 0.3f, 0.55f, 0.45f, 1.f, 20.f);
+		if (FEnemyMoveDef* Rain = Moves.FindByPredicate([](const FEnemyMoveDef& M) { return M.MoveId == TEXT("XiguaMelonRain"); }))
+		{
+			Rain->Skill.RainCount = 30;
+			Rain->Skill.RainRadius = 500.f;
+			Rain->Skill.RainDropHeight = 350.f;
+			Rain->Skill.RainLifeAfterBreak = 5.f;
+			Rain->MaxRange = 500.f;
+			Rain->MinRange = 0.f;
+		}
+	}
+}
+
 void EnemyCombat::SanitizeGaspCombatMontage(UAnimMontage* Montage)
 {
 	if (!Montage)
@@ -230,7 +455,8 @@ void EnemyCombat::SanitizeGaspCombatMontage(UAnimMontage* Montage)
 		return;
 	}
 	const FString Path = Montage->GetPathName();
-	if (!Path.Contains(TEXT("/_Slime/Enemies/GASP/Montages/")))
+	if (!Path.Contains(TEXT("/_Slime/Enemies/GASP/Montages/"))
+		&& !Path.Contains(TEXT("/_Slime/Enemies/Costume/Montages/")))
 	{
 		return;
 	}
@@ -900,12 +1126,12 @@ void EnemyCombat::FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 10.f;
 		Move.Skill.Knockback = 240.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 90.f;
-		Move.Skill.Hit.Range = 145.f;
-		Move.Skill.Hit.OriginForwardOffset = 55.f;
+		Move.Skill.Hit.Radius = 120.f;
+		Move.Skill.Hit.Range = 340.f;
+		Move.Skill.Hit.OriginForwardOffset = 90.f;
 		Move.Skill.Hit.OriginZOffset = -35.f;
 		Move.MinRange = 0.f;
-		Move.MaxRange = 200.f;
+		Move.MaxRange = 280.f;
 		Move.Weight = 1.5f;
 		Move.TelegraphTime = 0.12f;
 		Move.Cooldown = 0.7f;
@@ -924,12 +1150,12 @@ void EnemyCombat::FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 12.f;
 		Move.Skill.Knockback = 300.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Sphere;
-		Move.Skill.Hit.Radius = 90.f;
-		Move.Skill.Hit.Range = 160.f;
-		Move.Skill.Hit.OriginForwardOffset = 60.f;
+		Move.Skill.Hit.Radius = 120.f;
+		Move.Skill.Hit.Range = 360.f;
+		Move.Skill.Hit.OriginForwardOffset = 90.f;
 		Move.Skill.Hit.OriginZOffset = -35.f;
 		Move.MinRange = 0.f;
-		Move.MaxRange = 200.f;
+		Move.MaxRange = 280.f;
 		Move.Weight = 1.1f;
 		Move.TelegraphTime = 0.16f;
 		Move.Cooldown = 1.1f;
@@ -941,7 +1167,7 @@ void EnemyCombat::FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.MoveId = TEXT("TuskLunge");
 		Move.Skill.DisplayName = FText::FromString(TEXT("扑撞"));
 		Move.Skill.Exec = EEnemySkillExec::Dash;
-		Move.Skill.DashDistance = 180.f;
+		Move.Skill.DashDistance = 200.f;
 		Move.Skill.Windup = 0.16f;
 		Move.Skill.HitStart = 0.22f;
 		Move.Skill.HitEnd = 0.45f;
@@ -949,9 +1175,9 @@ void EnemyCombat::FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves)
 		Move.Skill.Damage = 14.f;
 		Move.Skill.Knockback = 360.f;
 		Move.Skill.Hit.Shape = ESlimeHitShape::Capsule;
-		Move.Skill.Hit.Radius = 80.f;
-		Move.Skill.Hit.Range = 210.f;
-		Move.Skill.Hit.OriginForwardOffset = 65.f;
+		Move.Skill.Hit.Radius = 110.f;
+		Move.Skill.Hit.Range = 360.f;
+		Move.Skill.Hit.OriginForwardOffset = 90.f;
 		Move.Skill.Hit.OriginZOffset = -25.f;
 		Move.MinRange = 80.f;
 		Move.MaxRange = 320.f;

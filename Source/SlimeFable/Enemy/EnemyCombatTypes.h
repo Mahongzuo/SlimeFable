@@ -34,7 +34,10 @@ enum class EEnemySkillExec : uint8
 	Melee,
 	Projectile,
 	AoE,
-	Dash
+	Dash,
+	Summon,
+	BeamLane,
+	WatermelonRain
 };
 
 UENUM(BlueprintType)
@@ -51,6 +54,26 @@ enum class EEnemyTowerFireMode : uint8
 {
 	Beam UMETA(DisplayName = "Beam"),
 	Projectile UMETA(DisplayName = "Projectile")
+};
+
+UENUM(BlueprintType)
+enum class EEnemyPlayerSkillSlot : uint8
+{
+	None UMETA(DisplayName = "None"),
+	SkillQ UMETA(DisplayName = "Q"),
+	SkillE UMETA(DisplayName = "E"),
+	SkillR UMETA(DisplayName = "R"),
+	SkillT UMETA(DisplayName = "T")
+};
+
+UENUM(BlueprintType)
+enum class EGaspCostumeKind : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Meituan UMETA(DisplayName = "Meituan"),
+	Xigua UMETA(DisplayName = "Xigua"),
+	Nailong UMETA(DisplayName = "Nailong"),
+	Niulai UMETA(DisplayName = "Niulai")
 };
 
 /** One attachable mesh piece on AEnemyCharacter (skeletal or static). */
@@ -153,6 +176,41 @@ struct SLIMEFABLE_API FEnemySkillDef
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Projectile")
 	TSoftObjectPtr<UNiagaraSystem> ProjectileNiagara;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Summon",
+		meta = (ToolTip = "召唤物类。空则运行时加载 /Game/_Slime/Enemies/Pig/BP_PigEnemy，再不行用 APigEnemy。"))
+	TSubclassOf<AActor> SummonClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Summon",
+		meta = (ClampMin = "0.0", Units = "cm",
+			ToolTip = "相对朝向正前方的出生偏移厘米。默认 300。"))
+	float SummonForwardOffset = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Beam",
+		meta = (ClampMin = "0.0", Units = "s",
+			ToolTip = "光波持续秒数。默认 2。到时销毁特效并停伤。"))
+	float BeamDuration = 2.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Beam",
+		meta = (ClampMin = "0.05", Units = "s",
+			ToolTip = "光波伤害间隔秒数。默认 0.5。"))
+	float BeamTickInterval = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Rain", meta = (ClampMin = "1",
+		ToolTip = "西瓜雨颗数。默认 30。"))
+	int32 RainCount = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Rain", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "西瓜雨水平半径。默认 500（5 米）。"))
+	float RainRadius = 500.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Rain", meta = (ClampMin = "50.0", Units = "cm",
+		ToolTip = "相对施法者的下落高度。默认 350。"))
+	float RainDropHeight = 350.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Skill|Rain", meta = (ClampMin = "0.5", Units = "s",
+		ToolTip = "西瓜碎开后销毁秒数。默认 5。"))
+	float RainLifeAfterBreak = 5.f;
+
 	float GetTotalDuration() const { return Windup + Recovery; }
 };
 
@@ -246,6 +304,10 @@ struct SLIMEFABLE_API FEnemyMoveDef
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Move")
 	bool bInterruptible = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Move",
+		meta = (ToolTip = "幻形后对应 Q/E/R。None 不占技能槽、HUD 不显示。"))
+	EEnemyPlayerSkillSlot PlayerSkillSlot = EEnemyPlayerSkillSlot::None;
 };
 
 namespace EnemyCombat
@@ -257,6 +319,14 @@ namespace EnemyCombat
 	SLIMEFABLE_API void FillPigTuskMoves(TArray<FEnemyMoveDef>& OutMoves);
 	/** GASP / Mover enemies: melee-only kit (no Dash — CMC LaunchCharacter unavailable). */
 	SLIMEFABLE_API void FillDefaultGaspMoves(TArray<FEnemyMoveDef>& OutMoves);
+	SLIMEFABLE_API void AppendCostumeSkills(TArray<FEnemyMoveDef>& Moves, EGaspCostumeKind Kind);
+	SLIMEFABLE_API const FEnemyMoveDef* FindMoveByPlayerSlot(const TArray<FEnemyMoveDef>& Moves, EEnemyPlayerSkillSlot Slot);
+	SLIMEFABLE_API bool HasPlayerSkillSlots(const TArray<FEnemyMoveDef>& Moves);
+	SLIMEFABLE_API FText CostumeDisplayName(EGaspCostumeKind Kind);
+	SLIMEFABLE_API const TCHAR* CostumeRetargeterPath(EGaspCostumeKind Kind);
+	SLIMEFABLE_API const TCHAR* CostumeVisualClassPath(EGaspCostumeKind Kind);
+	SLIMEFABLE_API FName CostumeRetargeterTag(EGaspCostumeKind Kind);
+	SLIMEFABLE_API const TCHAR* CostumeAttackSoundPath(EGaspCostumeKind Kind);
 	/** Strip ragdoll / movement-mode notifies from our GASP combat montage copies. */
 	SLIMEFABLE_API void SanitizeGaspCombatMontage(UAnimMontage* Montage);
 	/** Load a hit-react montage, or wrap the Mannequin sequence as a dynamic montage. */
@@ -311,9 +381,19 @@ namespace EnemyCombat
 	inline const TCHAR* DefaultLightningOverlayPath =
 		TEXT("/Game/NiagaraExamples/Materials/MI_Mesh_Overlay_TeslaCoil_Player.MI_Mesh_Overlay_TeslaCoil_Player");
 	inline const TCHAR* DefaultWindOverlayPath = TEXT("/Game/_Slime/FX/MI_EnemyHitOverlay_Wind.MI_EnemyHitOverlay_Wind");
+	/** Wind slime R actually plays this after ConfigureSkillVfx remaps Skill3. */
+	inline const TCHAR* WindSlimeRNiagaraPath =
+		TEXT("/Game/RPGEffects/ParticlesNiagara/Priest/Beam/NS_Priest_Beam.NS_Priest_Beam");
 	inline const TCHAR* DefaultGaspAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_attack_01.sfx_attack_01");
+	inline const TCHAR* DefaultPigAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_pig_attack.sfx_pig_attack");
+	inline const TCHAR* DefaultPigImpactSound = TEXT("/Game/Audio/SFX/Combat/sfx_pig_impact.sfx_pig_impact");
 	inline const TCHAR* DefaultGaspHitTakenSound = TEXT("/Game/Audio/SFX/Combat/sfx_hit_01.sfx_hit_01");
 	inline const TCHAR* DefaultGaspAttackImpactSound = TEXT("/Game/Audio/SFX/Combat/sfx_hit_01.sfx_hit_01");
+	inline const TCHAR* DefaultPlayerDeathSound = TEXT("/Game/Audio/SFX/Combat/sfx_player_death.sfx_player_death");
+	inline const TCHAR* MeituanAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_meituan_attack.sfx_meituan_attack");
+	inline const TCHAR* XiguaAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_xigua_attack.sfx_xigua_attack");
+	inline const TCHAR* NailongAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_nailong_attack.sfx_nailong_attack");
+	inline const TCHAR* NiulaiAttackSound = TEXT("/Game/Audio/SFX/Combat/sfx_niulai_attack.sfx_niulai_attack");
 
 	struct FGaspRagdollHitArgs
 	{

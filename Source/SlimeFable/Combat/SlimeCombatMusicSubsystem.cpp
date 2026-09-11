@@ -3,17 +3,37 @@
 #include "Combat/SlimeCombatMusicSubsystem.h"
 #include "Combat/SlimeCombatDetect.h"
 #include "Components/AudioComponent.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/SpectatorPawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Settings/SlimeAudioPlay.h"
 #include "Settings/SlimeAudioSettings.h"
+#include "Slime/SlimeCharacter.h"
 #include "SlimeFable.h"
-#include "SlimeFablePlayerController.h"
 #include "Sound/SoundBase.h"
+#include "UI/SlimeFableMenuGameMode.h"
+#include "UI/SlimeFableMenuPlayerController.h"
+#include "WFC/WfcDungeonGenerator.h"
 
 namespace
 {
 	const TCHAR* DefaultCombatBgm = TEXT("/Game/Audio/BGM/bgm_global_combat.bgm_global_combat");
+
+	void SetWorldExploreBgmDucked(UWorld* World, bool bDucked)
+	{
+		if (!World)
+		{
+			return;
+		}
+		for (TActorIterator<AWFCDungeonGenerator> It(World); It; ++It)
+		{
+			It->SetExploreBgmDucked(bDucked);
+		}
+	}
 }
 
 void USlimeCombatMusicSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -62,8 +82,7 @@ void USlimeCombatMusicSubsystem::Tick(float DeltaTime)
 	}
 
 	APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-	// Only drive music for gameplay controllers (not menu Spectator PC).
-	if (!Cast<ASlimeFablePlayerController>(PC))
+	if (!ShouldDriveCombatMusic(PC))
 	{
 		if (bWasInCombat || CombatMusicComponent)
 		{
@@ -74,12 +93,79 @@ void USlimeCombatMusicSubsystem::Tick(float DeltaTime)
 	}
 
 	const bool bInCombat = !World->IsPaused() && SlimeCombatDetect::IsLocalCombatActive(PC);
-	if (bInCombat == bWasInCombat)
+	if (bInCombat)
 	{
+		if (!bWasInCombat || !IsCombatMusicHealthy())
+		{
+			StartCombatMusic();
+		}
+		bWasInCombat = true;
 		return;
 	}
-	bWasInCombat = bInCombat;
-	SyncCombatMusic(bInCombat);
+
+	if (bWasInCombat)
+	{
+		StopCombatMusic();
+	}
+	bWasInCombat = false;
+}
+
+bool USlimeCombatMusicSubsystem::ShouldDriveCombatMusic(APlayerController* PC) const
+{
+	if (!PC)
+	{
+		return false;
+	}
+	if (Cast<ASlimeFableMenuPlayerController>(PC))
+	{
+		return false;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		if (Cast<ASlimeFableMenuGameMode>(World->GetAuthGameMode()))
+		{
+			return false;
+		}
+	}
+	if (Cast<ASpectatorPawn>(PC->GetPawn()))
+	{
+		return false;
+	}
+	return PC->GetPawn() != nullptr;
+}
+
+UAudioComponent* USlimeCombatMusicSubsystem::ResolveCombatBgmComponent() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
+	{
+		if (ASlimeCharacter* Slime = Cast<ASlimeCharacter>(PC->GetPawn()))
+		{
+			if (UAudioComponent* Bgm = Slime->GetCombatBgm())
+			{
+				return Bgm;
+			}
+		}
+	}
+
+	for (TActorIterator<ASlimeCharacter> It(World); It; ++It)
+	{
+		if (IsValid(*It) && It->GetCombatBgm())
+		{
+			return It->GetCombatBgm();
+		}
+	}
+	return nullptr;
+}
+
+bool USlimeCombatMusicSubsystem::IsCombatMusicHealthy() const
+{
+	return CombatMusicComponent && IsValid(CombatMusicComponent) && !bStopping && CombatMusicComponent->IsPlaying();
 }
 
 void USlimeCombatMusicSubsystem::SyncCombatMusic(bool bWantPlaying)
@@ -109,18 +195,11 @@ USoundBase* USlimeCombatMusicSubsystem::LoadCombatMusic() const
 void USlimeCombatMusicSubsystem::StartCombatMusic()
 {
 	bStopping = false;
+	SetWorldExploreBgmDucked(GetWorld(), true);
 
-	if (CombatMusicComponent && IsValid(CombatMusicComponent))
+	UAudioComponent* Bgm = ResolveCombatBgmComponent();
+	if (!Bgm)
 	{
-		const float TargetVol = SlimeAudioPlay::MusicMul(this);
-		if (CombatMusicComponent->IsPlaying())
-		{
-			CombatMusicComponent->FadeIn(FadeSeconds, TargetVol);
-			return;
-		}
-		CombatMusicComponent->SetVolumeMultiplier(0.f);
-		CombatMusicComponent->Play();
-		CombatMusicComponent->FadeIn(FadeSeconds, TargetVol);
 		return;
 	}
 
@@ -131,29 +210,28 @@ void USlimeCombatMusicSubsystem::StartCombatMusic()
 		return;
 	}
 
-	CombatMusicComponent = UGameplayStatics::SpawnSound2D(
-		this,
-		Music,
-		0.f,
-		1.f,
-		0.f,
-		nullptr,
-		false,
-		true);
-	if (!CombatMusicComponent)
-	{
-		return;
-	}
-
+	CombatMusicComponent = Bgm;
 	CombatMusicComponent->bAllowSpatialization = false;
 	CombatMusicComponent->bIsUISound = false;
-	const float TargetVol = SlimeAudioPlay::MusicMul(this);
-	CombatMusicComponent->SetVolumeMultiplier(0.f);
-	CombatMusicComponent->FadeIn(FadeSeconds, TargetVol);
+	CombatMusicComponent->bAutoDestroy = false;
+	if (CombatMusicComponent->GetSound() != Music)
+	{
+		CombatMusicComponent->SetSound(Music);
+	}
+
+	const float TargetVol = FMath::Max(SlimeAudioPlay::MusicMul(this), 0.01f);
+	if (CombatMusicComponent->IsPlaying())
+	{
+		CombatMusicComponent->FadeIn(FadeSeconds, TargetVol);
+		return;
+	}
+	CombatMusicComponent->SetVolumeMultiplier(TargetVol);
+	CombatMusicComponent->Play();
 }
 
 void USlimeCombatMusicSubsystem::StopCombatMusic()
 {
+	SetWorldExploreBgmDucked(GetWorld(), false);
 	if (!CombatMusicComponent || !IsValid(CombatMusicComponent))
 	{
 		CombatMusicComponent = nullptr;
@@ -167,11 +245,11 @@ void USlimeCombatMusicSubsystem::StopCombatMusic()
 
 void USlimeCombatMusicSubsystem::StopCombatMusicImmediate()
 {
+	SetWorldExploreBgmDucked(GetWorld(), false);
 	bStopping = false;
 	if (CombatMusicComponent && IsValid(CombatMusicComponent))
 	{
 		CombatMusicComponent->Stop();
-		CombatMusicComponent->DestroyComponent();
 	}
 	CombatMusicComponent = nullptr;
 }
