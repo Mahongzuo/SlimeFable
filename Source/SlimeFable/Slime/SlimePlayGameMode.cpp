@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimePlayGameMode.h"
+#include "GameModes/LyraGameState.h"
+#include "Player/SlimeFablePlayerState.h"
 
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -14,6 +16,8 @@
 ASlimePlayGameMode::ASlimePlayGameMode()
 {
 	DefaultPawnClass = ASlimeCharacter::StaticClass();
+	PlayerStateClass = ASlimeFablePlayerState::StaticClass();
+	GameStateClass = ALyraGameState::StaticClass();
 	// Concrete fallback: the abstract ASlimeFablePlayerController cannot be spawned.
 	PlayerControllerClass = APlayerController::StaticClass();
 

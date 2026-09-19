@@ -435,6 +435,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	FMenuUIStyle::ApplyMixedMenuFont(PhantomCountText, 16.f, FMenuUIStyle::WarmMutedTextColor());
 
 	UHorizontalBox* HotbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HotbarRow"));
+	HotbarRoot = HotbarRow;
 	if (UCanvasPanelSlot* HotbarSlot = Root->AddChildToCanvas(HotbarRow))
 	{
 		HotbarSlot->SetAnchors(FAnchors(0.5f, 1.f));
@@ -658,6 +659,13 @@ void USlimeCombatHUDWidget::Refresh()
 				}
 			}
 		}
+	}
+
+	if (HotbarRoot)
+	{
+		// Lyra body: 1-6 switch guns on its own quick bar (W_QuickBar), the element row would just lie.
+		const bool bHideHotbar = MorphPawn && MorphPawn->UsesSelfContainedPlayerCombat();
+		HotbarRoot->SetVisibility(bHideHotbar ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 	}
 
 	const FSlimeElementKitData Kit = Combat->GetCurrentKit();

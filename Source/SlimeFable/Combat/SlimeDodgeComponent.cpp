@@ -10,6 +10,7 @@
 #include "EnemyFighter.h"
 #include "EnemyTower.h"
 #include "GaspSandboxPawn.h"
+#include "LyraShooterEnemy.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -217,6 +218,29 @@ bool USlimeDodgeComponent::IsInEnemyThreatRange() const
 		}
 
 		if (FVector::DistSquared(Loc, Gasp->GetActorLocation()) <= FMath::Square(Gasp->DetectRange))
+		{
+			return true;
+		}
+	}
+
+	// Lyra shooters: a rifle is a threat across its whole fire range, so RMB must be a roll (and a
+	// perfect dodge inside the burst telegraph window) instead of a blink dash.
+	for (TActorIterator<ALyraShooterEnemy> It(World); It; ++It)
+	{
+		ALyraShooterEnemy* Shooter = *It;
+		if (!Shooter || Shooter == Owner || Shooter->IsMorphTarget() || Shooter->IsInDeathSequence()
+			|| Shooter->IsPlayerControlled())
+		{
+			continue;
+		}
+		if (const USlimeHealthComponent* EnemyHealth = Shooter->GetEnemyHealth())
+		{
+			if (!EnemyHealth->IsAlive())
+			{
+				continue;
+			}
+		}
+		if (FVector::DistSquared(Loc, Shooter->GetActorLocation()) <= FMath::Square(Shooter->AIFireRange))
 		{
 			return true;
 		}

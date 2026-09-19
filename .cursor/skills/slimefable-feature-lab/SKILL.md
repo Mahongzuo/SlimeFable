@@ -42,6 +42,7 @@ Agent 测新功能：先跑这个脚本建/刷新对应 FeatureLab，再在那�
 |------|------|
 | GASP Mover 可吞噬敌人 | `/Game/Maps/Sandbox/FeatureLabs/GaspMoverLab` |
 | GASP 服装敌人 | `/Game/Maps/Sandbox/FeatureLabs/CostumeLab` |
+| Lyra 射击敌人 | `/Game/Maps/Sandbox/FeatureLabs/LyraShooterLab` |
 
 ## 禁止
 

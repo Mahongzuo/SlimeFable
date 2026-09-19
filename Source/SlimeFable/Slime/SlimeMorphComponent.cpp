@@ -5,6 +5,7 @@
 #include "EnemyCharacter.h"
 #include "EnemyCombatComponent.h"
 #include "Combat/SlimeDevourTarget.h"
+#include "Enemy/LyraShooterEnemy.h"
 #include "EnemyFighter.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -275,9 +276,9 @@ void USlimeMorphComponent::TickMorphedKeyInput(float DeltaTime)
 	}
 	if (const ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget))
 	{
-		if (MorphIface->UsesMoverMovement())
+		if (MorphIface->UsesExternalPossessCamera())
 		{
-			return; // GameplayCamera owns framing for GASP morph.
+			return; // GameplayCamera / Lyra camera owns framing.
 		}
 	}
 	USpringArmComponent* MorphCameraBoom = MorphTarget
@@ -1258,7 +1259,9 @@ void USlimeMorphComponent::PossessEnemy()
 	}
 	const FRotator PreservedViewRotation = PC->GetControlRotation();
 	const ISlimeDevourTarget* MorphIface = SlimeDevourUtil::As(MorphTarget);
-	const bool bMoverMorph = MorphIface && MorphIface->UsesMoverMovement();
+	const bool bExternalInput = MorphIface && MorphIface->UsesExternalPossessInput();
+	const bool bExternalCamera = MorphIface && MorphIface->UsesExternalPossessCamera();
+	const bool bMoverMorph = bExternalInput || bExternalCamera;
 
 	// Park the slime: hidden, no collision, no movement, and no shadow-proxy cast. The actor
 	// tick stays ON — this component lives on the slime and must keep running the phase
@@ -1316,11 +1319,19 @@ void USlimeMorphComponent::PossessEnemy()
 
 	if (ISlimeDevourTarget* Iface = SlimeDevourUtil::As(MorphTarget))
 	{
-		if (UEnemyCombatComponent* EnemyCombat = Iface->GetEnemyCombat())
+		if (!Iface->UsesSelfContainedPlayerCombat())
 		{
-			EnemyCombat->SetPlayerMorphed(true);
+			if (UEnemyCombatComponent* EnemyCombat = Iface->GetEnemyCombat())
+			{
+				EnemyCombat->SetPlayerMorphed(true);
+			}
 		}
 		Iface->RefreshHealthBarAnchor();
+	}
+
+	if (ALyraShooterEnemy* LyraEnemy = Cast<ALyraShooterEnemy>(MorphTarget))
+	{
+		LyraEnemy->ActivateStandaloneForPlayer(PC);
 	}
 
 	EnsureMorphDodge();
@@ -1420,8 +1431,8 @@ void USlimeMorphComponent::PossessSlime()
 	USpringArmComponent* SlimeBoom = Slime->GetCameraBoom();
 	USpringArmComponent* MorphBoom = MorphTarget->FindComponentByClass<USpringArmComponent>();
 	UCameraComponent* MorphCamera = MorphTarget->FindComponentByClass<UCameraComponent>();
-	const bool bMoverMorph = SlimeDevourUtil::As(MorphTarget)
-		&& SlimeDevourUtil::As(MorphTarget)->UsesMoverMovement();
+	const ISlimeDevourTarget* ReturnIface = SlimeDevourUtil::As(MorphTarget);
+	const bool bMoverMorph = ReturnIface && ReturnIface->UsesExternalPossessCamera();
 	if (!bMoverMorph)
 	{
 		CopyCameraRig(MorphBoom, SlimeBoom, MorphCamera, Slime->GetFollowCamera());

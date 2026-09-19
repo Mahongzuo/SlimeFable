@@ -76,6 +76,8 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 		.SetDefaultSubobjectClass<USlimeSpringArmComponent>(TEXT("CameraBoom")))
 {
 	PrimaryActorTick.bCanEverTick = true;
+	bReplicates = true;
+	SetReplicateMovement(true);
 	FootstepSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultFootstep));
 	JumpSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultJump));
 	HitTakenSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultHitTaken));

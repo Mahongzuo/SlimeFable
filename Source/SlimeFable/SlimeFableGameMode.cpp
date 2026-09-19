@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeFableGameMode.h"
+#include "GameModes/LyraGameState.h"
+#include "Player/SlimeFablePlayerState.h"
 #include "EngineUtils.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
@@ -47,6 +49,8 @@ namespace
 
 ASlimeFableGameMode::ASlimeFableGameMode()
 {
+	PlayerStateClass = ASlimeFablePlayerState::StaticClass();
+	GameStateClass = ALyraGameState::StaticClass();
 }
 
 AActor* ASlimeFableGameMode::ChoosePlayerStart_Implementation(AController* Player)

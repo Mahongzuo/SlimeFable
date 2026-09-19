@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "RHI.h"
 #include "SlimeFable.h"
 #include "SlimeFablePlayerController.h"
 
@@ -61,7 +62,8 @@ void USlimeFableGameInstance::EndLoadingScreen(UWorld* LoadedWorld)
 
 void USlimeFableGameInstance::ShowLoadingGate(UWorld* LoadedWorld)
 {
-	if (IsRunningDedicatedServer() || !LoadedWorld)
+	// -nullrhi (headless verification): Slate never ticks the widget, so the gate would pause the world forever.
+	if (IsRunningDedicatedServer() || !LoadedWorld || GUsingNullRHI)
 	{
 		GAreScreenMessagesEnabled = bPrevScreenMessagesEnabled;
 		return;
@@ -128,5 +130,34 @@ void USlimeFableGameInstance::HandleLoadingGateFinished()
 				PC->bShowMouseCursor = true;
 			}
 		}
+	}
+}
+
+void USlimeFableGameInstance::SlimeHostListen(const FString& MapPackage)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeHostListen: no world"));
+		return;
+	}
+	FString URL = MapPackage;
+	if (!URL.Contains(TEXT("?listen")))
+	{
+		URL += TEXT("?listen");
+	}
+	World->ServerTravel(URL, true);
+}
+
+void USlimeFableGameInstance::SlimeJoin(const FString& Address)
+{
+	if (Address.IsEmpty())
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeJoin: empty address"));
+		return;
+	}
+	if (APlayerController* PC = GetFirstLocalPlayerController())
+	{
+		PC->ClientTravel(Address, TRAVEL_Absolute);
 	}
 }

@@ -450,6 +450,52 @@ bool USlimeBlueprintFixupLibrary::FixupScsParent(UBlueprint* Blueprint, FName Ch
 #endif
 }
 
+int32 USlimeBlueprintFixupLibrary::RemoveFunctionCallNodes(UBlueprint* Blueprint, FName FunctionName, FName GraphName)
+{
+#if WITH_EDITOR
+	if (!Blueprint || FunctionName.IsNone())
+	{
+		return -1;
+	}
+	TArray<UEdGraph*> Graphs;
+	SlimeBpFixup::CollectGraphs(Blueprint, Graphs);
+	int32 Removed = 0;
+	for (UEdGraph* Graph : Graphs)
+	{
+		if (!Graph || (!GraphName.IsNone() && Graph->GetFName() != GraphName))
+		{
+			continue;
+		}
+		TArray<UEdGraphNode*> ToRemove;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node);
+			if (CallNode && CallNode->FunctionReference.GetMemberName() == FunctionName)
+			{
+				ToRemove.Add(Node);
+			}
+		}
+		for (UEdGraphNode* Node : ToRemove)
+		{
+			UE_LOG(LogSlimeFable, Log, TEXT("[bp-fixup] %s: removing %s call in %s"),
+				*Blueprint->GetName(), *FunctionName.ToString(), *Graph->GetName());
+			FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+			++Removed;
+		}
+	}
+	if (Removed > 0)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
+	return Removed;
+#else
+	(void)Blueprint;
+	(void)FunctionName;
+	(void)GraphName;
+	return -1;
+#endif
+}
+
 TArray<FString> USlimeBlueprintFixupLibrary::GetBlueprintComponentNames(UBlueprint* Blueprint)
 {
 	TArray<FString> Names;
@@ -496,4 +542,76 @@ TArray<FString> USlimeBlueprintFixupLibrary::GetBlueprintComponentNames(UBluepri
 	(void)Blueprint;
 #endif
 	return Names;
+}
+
+FString USlimeBlueprintFixupLibrary::DumpBlueprintGraphs(UBlueprint* Blueprint, FName GraphName)
+{
+	FString Out;
+#if WITH_EDITOR
+	if (!Blueprint)
+	{
+		return Out;
+	}
+	TArray<UEdGraph*> Graphs;
+	SlimeBpFixup::CollectGraphs(Blueprint, Graphs);
+	for (UEdGraph* Graph : Graphs)
+	{
+		if (!Graph || (GraphName != NAME_None && Graph->GetFName() != GraphName))
+		{
+			continue;
+		}
+		Out += FString::Printf(TEXT("== Graph %s (%d nodes)\n"), *Graph->GetName(), Graph->Nodes.Num());
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node)
+			{
+				continue;
+			}
+			FString Extra;
+			if (const UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(Node))
+			{
+				Extra = FString::Printf(TEXT(" fn=%s::%s"),
+					*GetNameSafe(Call->FunctionReference.GetMemberParentClass()), *Call->FunctionReference.GetMemberName().ToString());
+			}
+			else if (const UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
+			{
+				Extra = FString::Printf(TEXT(" cast=%s"), *GetNameSafe(CastNode->TargetType));
+			}
+			else if (const UK2Node_Variable* Var = Cast<UK2Node_Variable>(Node))
+			{
+				Extra = FString::Printf(TEXT(" var=%s::%s"),
+					*GetNameSafe(Var->VariableReference.GetMemberParentClass()), *Var->VariableReference.GetMemberName().ToString());
+			}
+			Out += FString::Printf(TEXT("[%s] %s%s\n"), *Node->GetClass()->GetName(), *Node->GetNodeTitle(ENodeTitleType::ListView).ToString().Replace(TEXT("\n"), TEXT(" ")), *Extra);
+			for (const UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Pin || Pin->bHidden)
+				{
+					continue;
+				}
+				FString Links;
+				for (const UEdGraphPin* Other : Pin->LinkedTo)
+				{
+					if (Other && Other->GetOwningNode())
+					{
+						Links += FString::Printf(TEXT(" -> %s.%s"),
+							*Other->GetOwningNode()->GetNodeTitle(ENodeTitleType::ListView).ToString().Replace(TEXT("\n"), TEXT(" ")), *Other->PinName.ToString());
+					}
+				}
+				if (Links.IsEmpty() && Pin->DefaultValue.IsEmpty() && !Pin->DefaultObject)
+				{
+					continue;
+				}
+				Out += FString::Printf(TEXT("    %s %s [%s%s] def='%s' obj=%s%s\n"),
+					Pin->Direction == EGPD_Input ? TEXT("in ") : TEXT("out"), *Pin->PinName.ToString(),
+					*Pin->PinType.PinCategory.ToString(), *(Pin->PinType.PinSubCategoryObject.IsValid() ? TEXT(":") + Pin->PinType.PinSubCategoryObject->GetName() : FString()),
+					*Pin->DefaultValue, *GetNameSafe(Pin->DefaultObject), *Links);
+			}
+		}
+	}
+#else
+	(void)Blueprint;
+	(void)GraphName;
+#endif
+	return Out;
 }

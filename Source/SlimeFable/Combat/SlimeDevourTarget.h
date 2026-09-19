@@ -62,6 +62,12 @@ public:
 	virtual bool IsDevouredDeath() const = 0;
 	virtual bool UsesSingleNodeAnims() const = 0;
 	virtual bool UsesMoverMovement() const = 0;
+	/** Possess should drop slime IMCs and let this pawn bind its own Enhanced Input. Default = Mover. */
+	virtual bool UsesExternalPossessInput() const { return UsesMoverMovement(); }
+	/** Possess should not copy the slime SpringArm; the pawn has its own camera. Default = Mover. */
+	virtual bool UsesExternalPossessCamera() const { return UsesMoverMovement(); }
+	/** Morph combat is driven by the pawn (Lyra GAS / weapons), not PollPlayerCombatKeys. */
+	virtual bool UsesSelfContainedPlayerCombat() const { return false; }
 	virtual void FreezeForDevour() = 0;
 	virtual void RestoreFromDevour() = 0;
 	virtual void StopMeshAnimation() = 0;

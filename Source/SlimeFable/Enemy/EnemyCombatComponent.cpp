@@ -1547,6 +1547,14 @@ float UEnemyCombatComponent::GetAuraAttackIntervalMul() const
 
 void UEnemyCombatComponent::PollPlayerCombatKeys(float DeltaTime)
 {
+	if (const ISlimeDevourTarget* Target = SlimeDevourUtil::As(GetOwner()))
+	{
+		if (Target->UsesSelfContainedPlayerCombat())
+		{
+			return;
+		}
+	}
+
 	APlayerController* PC = nullptr;
 	if (const UWorld* World = GetWorld())
 	{

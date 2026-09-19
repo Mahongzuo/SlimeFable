@@ -73,9 +73,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge")
 	bool bPollRightMouse = true;
 
+	/**
+	 * Same as the RMB poll: blink dash outside threat range, roll / perfect dodge inside it.
+	 * Pawns that own the right mouse button themselves (Lyra morph: tap = dodge, hold = ADS) turn
+	 * bPollRightMouse off and call this on the tap.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dodge")
+	void TryHandleRightClick();
+
 protected:
 	void PollRightMouse();
-	void TryHandleRightClick();
 	void PerformCombatRoll(bool bSpawnRollAfterimage = true);
 	void PerformPerfectDodge();
 	void SpawnAfterimage();

@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeDevourComponent.h"
+#include "Net/UnrealNetwork.h"
 
 #include "SlimePhantomWheelWidget.h"
 #include "SlimeAbilityComponent.h"
@@ -52,8 +53,15 @@ USlimeDevourComponent::USlimeDevourComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
+	SetIsReplicatedByDefault(true);
 	SwallowSound = TSoftObjectPtr<USoundBase>(
 		FSoftObjectPath(TEXT("/Game/Audio/SFX/Combat/sfx_swallow_01.sfx_swallow_01")));
+}
+
+void USlimeDevourComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(USlimeDevourComponent, PhantomSlots);
 }
 
 void USlimeDevourComponent::BeginPlay()

@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/PlayerController.h"
+#include "Player/LyraPlayerController.h"
 #include "SlimeFablePlayerController.generated.h"
 
 class UInputMappingContext;
@@ -37,7 +37,7 @@ struct FSlimeUIInputEntry
  *  Manages input mappings and in-game pause menu (ESC).
  */
 UCLASS(abstract)
-class ASlimeFablePlayerController : public APlayerController
+class ASlimeFablePlayerController : public ALyraPlayerController
 {
 	GENERATED_BODY()
 

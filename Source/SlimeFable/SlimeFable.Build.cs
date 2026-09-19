@@ -36,7 +36,13 @@ public class SlimeFable : ModuleRules
 			"AnimationWarpingRuntime",
 			"MotionWarping",
 			"MotionTrajectory",
-			"Mover"
+			"Mover",
+			"LyraGame",
+			"CommonGame",
+			"CommonUser",
+			"UIExtension",
+			"ModularGameplay",
+			"ModularGameplayActors"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
@@ -71,6 +77,7 @@ public class SlimeFable : ModuleRules
 			"SlimeFable/Slime",
 			"SlimeFable/Combat",
 			"SlimeFable/Enemy",
+			"SlimeFable/Player",
 			"SlimeFable/Inventory",
 			"SlimeFable/Settings",
 			"SlimeFable/UI",

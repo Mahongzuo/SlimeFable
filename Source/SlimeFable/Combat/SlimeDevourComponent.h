@@ -90,6 +90,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Devour")
 	bool IsDevouring() const { return Phase != ESlimeDevourPhase::Idle; }
@@ -352,7 +353,7 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> InnerStatic;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, Replicated)
 	TArray<FSlimeDevourCapture> PhantomSlots;
 
 	TWeakObjectPtr<APawn> DevourTarget;

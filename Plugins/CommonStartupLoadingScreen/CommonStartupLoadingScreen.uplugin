@@ -1,0 +1,30 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "CommonStartupLoadingScreen",
+	"Description": "Loading screen showing during the startup of the game",
+	"Category": "Gameplay",
+	"CreatedBy": "Epic Games, Inc.",
+	"CreatedByURL": "https://www.epicgames.com",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "CommonStartupLoadingScreen",
+			"Type": "RuntimeNoCommandlet",
+			"LoadingPhase": "PreEarlyLoadingScreen"
+		}
+	],
+	"Plugins": [
+		{
+			"Name" : "CommonLoadingScreen",
+			"Enabled": true
+		}
+	]
+}

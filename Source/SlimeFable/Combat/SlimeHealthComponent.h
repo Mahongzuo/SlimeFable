@@ -28,11 +28,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	ESlimeTeam Team = ESlimeTeam::Player;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Combat", meta = (ClampMin = "1.0"))
 	float MaxHP = 100.f;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentHP, Category = "Combat")
 	float CurrentHP = 100.f;
+
+	UFUNCTION()
+	void OnRep_CurrentHP();
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	bool bDestroyOnDeath = false;

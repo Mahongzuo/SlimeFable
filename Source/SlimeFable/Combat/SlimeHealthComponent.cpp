@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeHealthComponent.h"
+#include "Net/UnrealNetwork.h"
 
 #include "AIController.h"
 #include "BrainComponent.h"
@@ -22,6 +23,19 @@
 USlimeHealthComponent::USlimeHealthComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
+}
+
+void USlimeHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(USlimeHealthComponent, CurrentHP);
+	DOREPLIFETIME(USlimeHealthComponent, MaxHP);
+}
+
+void USlimeHealthComponent::OnRep_CurrentHP()
+{
+	OnHealthChanged.Broadcast(CurrentHP, MaxHP);
 }
 
 void USlimeHealthComponent::BeginPlay()

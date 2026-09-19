@@ -150,6 +150,10 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> HotbarLabels;
 
+	/** Bottom 1-6 element row. Collapsed while a morph body runs its own weapon bar (Lyra quick bar). */
+	UPROPERTY(Transient)
+	TObjectPtr<UWidget> HotbarRoot;
+
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UButton>> SkillSlotButtons;
 

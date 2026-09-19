@@ -56,4 +56,17 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
 	static bool FixupScsParent(UBlueprint* Blueprint, FName ChildComponent, FName InheritedParent);
+
+	/**
+	 * Delete every call node to FunctionName (e.g. "PrintString") in GraphName (NAME_None = all graphs).
+	 * Meant for leaf debug prints in copied Lyra Blueprints; a node in the middle of an exec chain
+	 * would break that chain, so the caller must know the graph.
+	 * @return nodes removed, or -1 on bad input.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
+	static int32 RemoveFunctionCallNodes(UBlueprint* Blueprint, FName FunctionName, FName GraphName);
+
+	/** Human-readable dump of every graph: one line per node with its pins and links. Diagnostics for imported Lyra BPs. */
+	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
+	static FString DumpBlueprintGraphs(UBlueprint* Blueprint, FName GraphName = NAME_None);
 };

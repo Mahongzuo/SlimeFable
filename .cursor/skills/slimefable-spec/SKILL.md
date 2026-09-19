@@ -32,9 +32,10 @@ description: >-
 | 拨草 / 草 WPO 交互 / 接别的草 Master / 移植到其他工程 | 读并遵循 `slimefable-foliage-interact` |
 | 测新功能、复制 SlimeLab、功能沙盒图、掉到地下 | 读并遵循 `slimefable-feature-lab` |
 | GASP 服装敌人、套皮角色、Mixamo 重定向、CostumeLab | 读并遵循 `slimefable-gasp-costume` |
+| Lyra 射击敌人、吞噬幻形开枪、Listen 联机 | 读并遵循 `slimefable-lyra-shooter` |
 | 通用玩法 / 模板变体 | 以本 spec + coding-conventions 为准；若含 UI 仍先读 `slimefable-ui` |
 
-手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`、`/slimefable-feature-lab`、`/slimefable-gasp-costume`。
+手动调用：`/slimefable-spec`、`/slimefable-unreal-mcp`、`/slimefable-day-levels`、`/slimefable-week-cycle`、`/slimefable-ui`、`/slimefable-audio`、`/slimefable-morph-materials`、`/slimefable-foliage-interact`、`/slimefable-feature-lab`、`/slimefable-gasp-costume`、`/slimefable-lyra-shooter`。
 
 ## 项目硬事实
 
