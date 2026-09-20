@@ -20,6 +20,7 @@
 #include "MoverComponent.h"
 #include "SlimeAIController.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeFaceComponent.h"
 #include "SlimeDevourComponent.h"
 #include "SlimeDevourTarget.h"
 #include "SlimeDodgeAfterimage.h"
@@ -298,6 +299,10 @@ void USlimeDodgeComponent::TryHandleRightClick()
 	{
 		SlimeDodgeAudio::PlayAtOwner(this, BlinkDashSound, SlimeDodgeAudio::DefaultBlink);
 		OnBlinkDashRequested.Broadcast();
+		if (USlimeFaceComponent* Face = GetOwner() ? GetOwner()->FindComponentByClass<USlimeFaceComponent>() : nullptr)
+		{
+			Face->PulseBliss(0.5f);
+		}
 		return;
 	}
 
@@ -377,6 +382,11 @@ void USlimeDodgeComponent::PerformCombatRoll(bool bSpawnRollAfterimage)
 	const float Duration = FMath::Max(RollDuration, 0.05f);
 	const float Speed = RollDistance / Duration;
 	const FVector Impulse = Dir * Speed + FVector(0.f, 0.f, 40.f);
+
+	if (USlimeFaceComponent* Face = Owner->FindComponentByClass<USlimeFaceComponent>())
+	{
+		Face->PulseBliss(0.5f);
+	}
 
 	if (ACharacter* Character = Cast<ACharacter>(Owner))
 	{

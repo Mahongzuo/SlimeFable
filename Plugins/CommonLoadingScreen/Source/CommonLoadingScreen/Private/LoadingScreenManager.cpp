@@ -512,6 +512,11 @@ void ULoadingScreenManager::ShowLoadingScreen()
 		TSubclassOf<UUserWidget> LoadingScreenWidgetClass = Settings->LoadingScreenWidget.TryLoadClass<UUserWidget>();
 		UGameViewportClient* GameViewportClient = LocalGameInstance->GetGameViewportClient();
 
+		if (!LoadingScreenWidgetClass)
+		{
+			UE_LOG(LogLoadingScreen, Warning, TEXT("CommonLoadingScreen: LoadingScreenWidget is unset; using placeholder."));
+		}
+
 		if (GameViewportClient->bEnablePlayersSplitRT)
 		{
 			for (ULocalPlayer* Player : LocalGameInstance->GetLocalPlayers())
@@ -520,13 +525,19 @@ void ULoadingScreenManager::ShowLoadingScreen()
 				{
 					TSharedPtr<SWidget> PlayerWidget;
 
-					if (UUserWidget* UserWidget = UUserWidget::CreateWidgetInstance(*LocalGameInstance, LoadingScreenWidgetClass, NAME_None))
+					if (LoadingScreenWidgetClass)
 					{
-						PlayerWidget = UserWidget->TakeWidget();
+						if (UUserWidget* UserWidget = UUserWidget::CreateWidgetInstance(*LocalGameInstance, LoadingScreenWidgetClass, NAME_None))
+						{
+							PlayerWidget = UserWidget->TakeWidget();
+						}
 					}
-					else
+					if (!PlayerWidget.IsValid())
 					{
-						UE_LOG(LogLoadingScreen, Error, TEXT("Failed to load the loading screen widget %s, falling back to placeholder."), *Settings->LoadingScreenWidget.ToString());
+						if (LoadingScreenWidgetClass)
+						{
+							UE_LOG(LogLoadingScreen, Error, TEXT("Failed to load the loading screen widget %s, falling back to placeholder."), *Settings->LoadingScreenWidget.ToString());
+						}
 						PlayerWidget = SNew(SThrobber);
 					}
 
@@ -537,13 +548,19 @@ void ULoadingScreenManager::ShowLoadingScreen()
 		}
 		else
 		{
-			if (UUserWidget* UserWidget = UUserWidget::CreateWidgetInstance(*LocalGameInstance, LoadingScreenWidgetClass, NAME_None))
+			if (LoadingScreenWidgetClass)
 			{
-				LoadingScreenWidget = UserWidget->TakeWidget();
+				if (UUserWidget* UserWidget = UUserWidget::CreateWidgetInstance(*LocalGameInstance, LoadingScreenWidgetClass, NAME_None))
+				{
+					LoadingScreenWidget = UserWidget->TakeWidget();
+				}
 			}
-			else
+			if (!LoadingScreenWidget.IsValid())
 			{
-				UE_LOG(LogLoadingScreen, Error, TEXT("Failed to load the loading screen widget %s, falling back to placeholder."), *Settings->LoadingScreenWidget.ToString());
+				if (LoadingScreenWidgetClass)
+				{
+					UE_LOG(LogLoadingScreen, Error, TEXT("Failed to load the loading screen widget %s, falling back to placeholder."), *Settings->LoadingScreenWidget.ToString());
+				}
 				LoadingScreenWidget = SNew(SThrobber);
 			}
 

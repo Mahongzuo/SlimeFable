@@ -171,6 +171,29 @@ public:
 	/** Average penetration depth resolved last step; a cheap read on how hard it is pinched. */
 	float GetContactLoad() const { return ContactLoad; }
 
+	// ---- Shell readback (face / bubble visuals) -----------------------------------------
+
+	/** Hard-shell ellipsoid half-axes in the (Forward, Right, Up) frame, cm. Includes squeeze / spread / landing / combat pose. */
+	FVector3f GetShellAxes() const { return ShellAxes; }
+
+	/** Smoothed horizontal move direction (unit XY). Forward axis of the shell frame. */
+	FVector3f GetInertiaForward() const { return InertiaForward; }
+
+	/** 0..1 how stretched the shell is along InertiaForward. */
+	float GetInertiaAmount() const { return InertiaAmount; }
+
+	/** Shell centre is shifted this far behind COM along -InertiaForward (inertia trail). */
+	float GetShellBackShift() const { return ShellBackShift; }
+
+	/** World-space centre of the hard shell (COM minus back shift). */
+	FVector GetShellCenter() const
+	{
+		return GetBodyCenter() - FVector(InertiaForward) * double(ShellBackShift);
+	}
+
+	bool IsSpread() const { return bSpread; }
+	bool IsClingPlane() const { return bCling; }
+
 	// ---- Abilities -------------------------------------------------------------------
 
 	/**

@@ -29,6 +29,7 @@ class USlimeMorphComponent;
 class USlimePathSwordComponent;
 class USlimeFluidNinjaContactComponent;
 class USlimeFoliageInteractComponent;
+class USlimeFaceComponent;
 class UStaticMeshComponent;
 class USoundBase;
 class UAudioComponent;
@@ -153,6 +154,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Morph")
 	USlimeMorphComponent* GetSlimeMorph() const { return SlimeMorph; }
+
+	UFUNCTION(BlueprintPure, Category = "Slime|Face")
+	USlimeFaceComponent* GetSlimeFace() const { return SlimeFace; }
 
 	UFUNCTION(BlueprintPure, Category = "Audio")
 	UAudioComponent* GetCombatBgm() const { return CombatBgm; }
@@ -326,6 +330,10 @@ protected:
 	/** Writes position/velocity into MPC_SlimeFoliage for interactive grass WPO. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Foliage")
 	TObjectPtr<USlimeFoliageInteractComponent> SlimeFoliageInteract;
+
+	/** Procedural face card inside the jelly (mood, facing, ellipsoid clip). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Slime|Face")
+	TObjectPtr<USlimeFaceComponent> SlimeFace;
 
 	/** Cached before CMC clears vertical speed on Landed. */
 	FVector LastVelocity = FVector::ZeroVector;

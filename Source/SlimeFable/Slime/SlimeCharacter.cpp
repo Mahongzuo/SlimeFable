@@ -18,6 +18,7 @@
 #include "SlimeCharacterMovementComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
+#include "SlimeFaceComponent.h"
 #include "Slime/SlimeElementProgressSubsystem.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeCombatHUDWidget.h"
@@ -215,6 +216,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	PathSword = CreateDefaultSubobject<USlimePathSwordComponent>(TEXT("PathSword"));
 	SlimeFluidNinjaContact = CreateDefaultSubobject<USlimeFluidNinjaContactComponent>(TEXT("SlimeFluidNinjaContact"));
 	SlimeFoliageInteract = CreateDefaultSubobject<USlimeFoliageInteractComponent>(TEXT("SlimeFoliageInteract"));
+	SlimeFace = CreateDefaultSubobject<USlimeFaceComponent>(TEXT("SlimeFace"));
 
 	VehicleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("VehicleMesh"));
 	VehicleMesh->SetupAttachment(RootComponent);
@@ -686,6 +688,10 @@ void ASlimeCharacter::SetMorphParked(bool bParked)
 	{
 		SlimeBody->SetShadowCastSuppressed(bParked);
 	}
+	if (SlimeFace)
+	{
+		SlimeFace->SetFaceSuppressed(bParked);
+	}
 
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 	{
@@ -741,6 +747,10 @@ void ASlimeCharacter::Landed(const FHitResult& Hit)
 	if (SlimeBody)
 	{
 		SlimeBody->ApplyLandingSquash(FMath::Abs(LastVelocity.Z));
+	}
+	if (SlimeFace)
+	{
+		SlimeFace->NotifyLanded(FMath::Abs(LastVelocity.Z));
 	}
 }
 

@@ -73,7 +73,10 @@ namespace SlimeSpectralLook
 {
 	// Keep in sync with Content/Python/create_slime_spectral_material.py
 	// Rollback (first ship): Absorption 0.035, Dispersion 0.035, ThicknessScale 1, MaxThickness 120, DistortionScale 0.6, Opacity unscaled.
-	static constexpr float ClearAbsorption = 0.018f;
+	// Murk (2026-09-19): Absorption 0.018 -> 0.026, CoreAmount 0 -> 0.4 so the centre carries
+	// element colour instead of reading straight through to the floor. Rim stays clear.
+	static constexpr float ClearAbsorption = 0.026f;
+	static constexpr float ClearCoreAmount = 0.4f;
 	static constexpr float ClearDispersion = 0.035f;
 	static constexpr float ClearThicknessScale = 1.f;
 	static constexpr float ClearMaxThickness = 90.f;
@@ -118,7 +121,7 @@ namespace SlimeSpectralLook
 		Mid->SetScalarParameterValue(SlimeElementParams::ThicknessScale, ClearThicknessScale);
 		Mid->SetScalarParameterValue(SlimeElementParams::MaxThickness, ClearMaxThickness);
 		Mid->SetScalarParameterValue(SlimeElementParams::DistortionScale, ClearDistortionScale);
-		Mid->SetScalarParameterValue(SlimeElementParams::CoreAmount, 0.f);
+		Mid->SetScalarParameterValue(SlimeElementParams::CoreAmount, ClearCoreAmount);
 	}
 }
 

@@ -15,6 +15,7 @@
 #include "SlimeElementComponent.h"
 #include "EnemyCharacter.h"
 #include "SlimeCharacter.h"
+#include "SlimeFaceComponent.h"
 #include "Settings/SlimeCheatSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "SlimeFable.h"
@@ -159,6 +160,13 @@ float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, con
 void USlimeHealthComponent::HandleDeath(AActor* DamageCauser)
 {
 	OnDied.Broadcast();
+	if (DamageCauser && DamageCauser != GetOwner())
+	{
+		if (USlimeFaceComponent* Face = DamageCauser->FindComponentByClass<USlimeFaceComponent>())
+		{
+			Face->PulseWicked(1.2f);
+		}
+	}
 	UE_LOG(LogSlimeFable, Log, TEXT("Slime '%s' died (caused by '%s')"), *GetNameSafe(GetOwner()), *GetNameSafe(DamageCauser));
 
 	if (bDestroyOnDeath)

@@ -398,6 +398,43 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	float GetSqueezeAmount() const { return SqueezeAmount; }
 
+	// ---- Shell readback (face / bubbles) ----------------------------------------------
+
+	/** Hard-shell half-axes (Forward, Right, Up) in cm, already scaled by body scale / squeeze / spread. */
+	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
+	FVector GetShellAxes() const { return FVector(Solver.GetShellAxes()); }
+
+	/** Unit horizontal move direction the shell is stretched along. */
+	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
+	FVector GetInertiaForward() const { return FVector(Solver.GetInertiaForward()); }
+
+	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
+	float GetInertiaAmount() const { return Solver.GetInertiaAmount(); }
+
+	/** World centre of the hard shell (COM shifted back along the inertia trail) plus visual Z lift. */
+	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
+	FVector GetShellCenter() const { return Solver.GetShellCenter() + FVector(0.f, 0.f, VisualZLift); }
+
+	/** World AABB of the attached body particles. */
+	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
+	FBox GetBodyBounds() const { return Solver.GetBodyBounds(); }
+
+	/** Number of inner bubbles pushed to the body material each frame. */
+	static constexpr int32 NumBubbles = 8;
+
+	/** World position of one lagging inner bubble (0..NumBubbles-1). */
+	FVector GetBubbleWorldPosition(int32 Index) const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface",
+		meta = (ClampMin = "0.005", ClampMax = "0.15",
+		ToolTip = "气泡刚从底部冒出时的半径，相对椭球最短半轴。默认 0.02（27cm 身体约 0.5cm）。"))
+	float BubbleMinR = 0.02f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface",
+		meta = (ClampMin = "0.01", ClampMax = "0.2",
+		ToolTip = "气泡到顶破裂前的半径，相对椭球最短半轴。默认 0.05（27cm 身体约 1.4cm）。"))
+	float BubbleMaxR = 0.05f;
+
 	/** Drives the capsule towards its minimum regardless of what the probes found. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void SetForcedSqueeze(float Amount) { ForcedSqueeze = FMath::Clamp(Amount, 0.f, 1.f); }
@@ -492,6 +529,8 @@ private:
 	void RebuildSurface();
 	void PushMeshSection();
 	void UpdateMeshFollow();
+	/** Lag-spring the bubble centres toward their rest spots and push shell / bubble params to the body MID. */
+	void UpdateBubblesAndShellParams(float DeltaTime);
 	void UpdateQuality();
 	void ResolveMaterial();
 	class USlimeGraphicsSettings* GetGraphicsSettings() const;
@@ -609,6 +648,18 @@ private:
 
 	FVector ClingPoint = FVector::ZeroVector;
 	FVector ClingNormal = FVector::ForwardVector;
+
+	/** Inner bubble state: rest offset in shell-normalised space, current world offset from shell centre, velocity. */
+	FVector BubbleRestNorm[8];
+	FVector BubbleOffset[8];
+	FVector BubbleVelocity[8];
+	FVector2D BubbleLateral[8];
+	float BubblePhase[8];
+	float BubbleSpeed[8];
+	float BubbleBurst[8];
+	bool bBubblesInitialised = false;
+
+	void RespawnBubble(int32 Index, bool bStagger);
 
 	TMap<uint8, float> FragmentAttackCooldownRemaining;
 

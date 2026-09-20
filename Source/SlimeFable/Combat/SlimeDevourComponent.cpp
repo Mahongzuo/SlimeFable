@@ -11,6 +11,7 @@
 #include "SlimeLockOnComponent.h"
 #include "SlimeFable.h"
 #include "SlimeHealthComponent.h"
+#include "SlimeFaceComponent.h"
 #include "SlimePlacementComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeVehicleComponent.h"
@@ -1399,6 +1400,10 @@ void USlimeDevourComponent::SwallowTarget()
 	}
 	LatchShotIds.Reset();
 	EnterPhase(ESlimeDevourPhase::Digest);
+	if (USlimeFaceComponent* Face = GetOwner() ? GetOwner()->FindComponentByClass<USlimeFaceComponent>() : nullptr)
+	{
+		Face->PulseWicked(1.2f);
+	}
 }
 
 void USlimeDevourComponent::CleanupLatchShots()

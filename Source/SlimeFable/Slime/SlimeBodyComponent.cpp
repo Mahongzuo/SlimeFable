@@ -54,6 +54,19 @@ namespace SlimeBodyPrivate
 
 	constexpr float NoCeilingZ = 1.e9f;
 
+	/** Shell / bubble parameters shared by M_SlimeBody and M_SlimeBody_Spectral. */
+	static const FName ParamShellCenter(TEXT("ShellCenter"));
+	static const FName ParamShellAxes(TEXT("ShellAxes"));
+	static const FName ParamShellForward(TEXT("ShellForward"));
+	static const FName ParamBubbles[8] = {
+		FName(TEXT("Bubble0")), FName(TEXT("Bubble1")), FName(TEXT("Bubble2")), FName(TEXT("Bubble3")),
+		FName(TEXT("Bubble4")), FName(TEXT("Bubble5")), FName(TEXT("Bubble6")), FName(TEXT("Bubble7")),
+	};
+	static const FName ParamBubbleBurst[8] = {
+		FName(TEXT("BubbleBurst0")), FName(TEXT("BubbleBurst1")), FName(TEXT("BubbleBurst2")), FName(TEXT("BubbleBurst3")),
+		FName(TEXT("BubbleBurst4")), FName(TEXT("BubbleBurst5")), FName(TEXT("BubbleBurst6")), FName(TEXT("BubbleBurst7")),
+	};
+
 	/** Material parameter names of M_SlimeBody_Volumetric (create_slime_volumetric_material.py). */
 	static const FName ParamDensityAtlas(TEXT("DensityAtlas"));
 	static const FName ParamGridOrigin(TEXT("GridOrigin"));
@@ -684,7 +697,129 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		UpdateMeshFollow();
 	}
 
+	UpdateBubblesAndShellParams(DeltaTime);
+
 	TickFragmentAttacks(DeltaTime);
+}
+
+FVector USlimeBodyComponent::GetBubbleWorldPosition(int32 Index) const
+{
+	if (Index < 0 || Index >= NumBubbles || !bBubblesInitialised)
+	{
+		return GetShellCenter();
+	}
+	return GetShellCenter() + BubbleOffset[Index];
+}
+
+void USlimeBodyComponent::RespawnBubble(int32 Index, bool bStagger)
+{
+	const float Angle = FMath::FRand() * 2.f * PI;
+	const float Rad = FMath::FRandRange(0.08f, 0.36f);
+	BubbleLateral[Index] = FVector2D(FMath::Cos(Angle) * Rad, FMath::Sin(Angle) * Rad);
+	BubbleSpeed[Index] = FMath::FRandRange(0.10f, 0.18f);
+	BubblePhase[Index] = bStagger ? (float(Index) / float(NumBubbles)) : 0.f;
+	BubbleBurst[Index] = 0.f;
+	BubbleRestNorm[Index] = FVector(BubbleLateral[Index].X, BubbleLateral[Index].Y, -0.55);
+}
+
+void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
+{
+	if (!bBubblesInitialised)
+	{
+		for (int32 i = 0; i < NumBubbles; ++i)
+		{
+			BubbleOffset[i] = FVector::ZeroVector;
+			BubbleVelocity[i] = FVector::ZeroVector;
+			RespawnBubble(i, true);
+		}
+		bBubblesInitialised = true;
+	}
+
+	const FVector Axes = GetShellAxes();
+	const FVector Fwd = GetInertiaForward().GetSafeNormal2D(KINDA_SMALL_NUMBER, FVector::ForwardVector);
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, Fwd).GetSafeNormal();
+	const FVector Up = FVector::UpVector;
+
+	// Critically damped follower so bubbles land half a beat after the body stops / squashes.
+	constexpr float Frequency = 1.6f;
+	constexpr float Damping = 0.9f;
+	constexpr float BurstSeconds = 0.25f;
+	const float Omega = 2.f * PI * Frequency;
+	const float K = Omega * Omega;
+	const float C = 2.f * Damping * Omega;
+	const float Dt = FMath::Clamp(DeltaTime, 0.f, 0.05f);
+	const float MinR = FMath::Min(BubbleMinR, BubbleMaxR);
+	const float MaxR = FMath::Max(BubbleMinR, BubbleMaxR);
+
+	float Radii[NumBubbles];
+	for (int32 i = 0; i < NumBubbles; ++i)
+	{
+		if (BubbleBurst[i] > 0.f)
+		{
+			BubbleBurst[i] += Dt / BurstSeconds;
+			if (BubbleBurst[i] >= 1.f)
+			{
+				RespawnBubble(i, false);
+			}
+		}
+		else
+		{
+			BubblePhase[i] += BubbleSpeed[i] * Dt;
+			if (BubblePhase[i] >= 1.f)
+			{
+				BubblePhase[i] = 1.f;
+				BubbleBurst[i] = KINDA_SMALL_NUMBER;
+			}
+		}
+
+		const float Phase = FMath::Clamp(BubblePhase[i], 0.f, 1.f);
+		const float Z = FMath::Lerp(-0.55f, 0.70f, Phase);
+		const float Sway = FMath::Sin(Phase * 4.2f + float(i) * 1.7f) * 0.05f;
+		const float SwayB = FMath::Cos(Phase * 3.1f + float(i) * 2.1f) * 0.04f;
+		BubbleRestNorm[i] = FVector(BubbleLateral[i].X + Sway, BubbleLateral[i].Y + SwayB, Z);
+
+		const float RiseR = FMath::Lerp(MinR, MaxR, Phase);
+		const float BurstR = MaxR * (1.f + BubbleBurst[i] * 1.8f);
+		Radii[i] = FMath::Clamp(float(Axes.GetMin()) * (BubbleBurst[i] > 0.f ? BurstR : RiseR), 0.25f, 6.f);
+
+		const FVector RestWorld =
+			Fwd * (BubbleRestNorm[i].X * Axes.X * 0.72) +
+			Right * (BubbleRestNorm[i].Y * Axes.Y * 0.72) +
+			Up * (BubbleRestNorm[i].Z * Axes.Z * 0.72);
+
+		const FVector Accel = (RestWorld - BubbleOffset[i]) * K - BubbleVelocity[i] * C;
+		BubbleVelocity[i] += Accel * Dt;
+		BubbleOffset[i] += BubbleVelocity[i] * Dt;
+
+		const FVector Local(
+			FVector::DotProduct(BubbleOffset[i], Fwd) / FMath::Max(Axes.X, 1.0),
+			FVector::DotProduct(BubbleOffset[i], Right) / FMath::Max(Axes.Y, 1.0),
+			FVector::DotProduct(BubbleOffset[i], Up) / FMath::Max(Axes.Z, 1.0));
+		const double Len = Local.Size();
+		constexpr double MaxNorm = 0.8;
+		if (Len > MaxNorm)
+		{
+			const FVector Clamped = Local * (MaxNorm / Len);
+			BubbleOffset[i] = Fwd * (Clamped.X * Axes.X) + Right * (Clamped.Y * Axes.Y) + Up * (Clamped.Z * Axes.Z);
+			BubbleVelocity[i] *= 0.5;
+		}
+	}
+
+	UMaterialInstanceDynamic* Mid = SurfaceMesh ? Cast<UMaterialInstanceDynamic>(SurfaceMesh->GetMaterial(0)) : nullptr;
+	if (!Mid)
+	{
+		return;
+	}
+	const FVector Center = GetShellCenter();
+	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellCenter, FLinearColor(float(Center.X), float(Center.Y), float(Center.Z), 0.f));
+	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellAxes, FLinearColor(float(Axes.X), float(Axes.Y), float(Axes.Z), 0.f));
+	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellForward, FLinearColor(float(Fwd.X), float(Fwd.Y), float(Fwd.Z), 0.f));
+	for (int32 i = 0; i < NumBubbles; ++i)
+	{
+		const FVector P = Center + BubbleOffset[i];
+		Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamBubbles[i], FLinearColor(float(P.X), float(P.Y), float(P.Z), Radii[i]));
+		Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamBubbleBurst[i], BubbleBurst[i]);
+	}
 }
 
 void USlimeBodyComponent::FixedStep(float StepDelta)
