@@ -61,7 +61,7 @@ py E:/UE/SlimeFable/Content/Python/import_lyra_shooter.py
 ### 血量 / 伤害契约
 
 - `USlimeHealthComponent` 是 Lyra 敌人的**唯一真血**。`ULyraHealthComponent::OnHealthChanged` 只按比例镜像成 SlimeHealth 的伤害/治疗（`HandleLyraHealthChanged`），**不要**再每帧 `SyncSlimeHealthFromLyra` 反写 CurrentHP（那会把史莱姆近战全吃掉）。
-- Lyra 子弹打到**没有 ASC** 的 Actor（史莱姆、GASP 服装敌人、幻形体）走 `FLyraPlainWeaponDamage::OnHit`（`LyraGameplayAbility_RangedWeapon::ApplyPlainDamageToNonAbilityTargets`），由 `SlimeFable.cpp` 绑到 `ICombatDamageable::ApplyDamage` / `USlimeHealthComponent`。数值来自 `ULyraRangedWeaponInstance::PlainHitDamage`，由 `ALyraShooterEnemy::ApplyWeaponDamageOverrides` 按 `AIGunDamagePerHit`（AI 打玩家，默认低）/ `PlayerGunDamagePerHit`（幻形打敌人）覆盖；玩家幻形被打再乘 `MorphIncomingGunDamageScale`。
+- Lyra 子弹打到**没有 Lyra 血量**（无 `ULyraHealthComponent`，ASC 上也没有 `ULyraHealthSet`）的 Actor（史莱姆、菲比 `AEnemyCharacter`、GASP 服装敌人、幻形体）走 `FLyraPlainWeaponDamage::OnHit`（`LyraGameplayAbility_RangedWeapon::ApplyPlainDamageToNonAbilityTargets`），由 `SlimeFable.cpp` 绑到 `ICombatDamageable::ApplyDamage` / `USlimeHealthComponent`。判定**不能**是「有 ASC 就跳过」：菲比 / GASP 挂着自己的 `EnemyAbilitySystem`，官方 `ULyraDamageExecution` 写不进他们的血，两条路都空就打不掉血。只有 `ALyraShooterEnemy` 同类（有 `LyraHealthSet`）才走官方 GE，避免双倍伤。GASP 倒地后网格切成 `PhysicsActor`，`DefaultEngine.ini` 已给 `PhysicsActor` / `Ragdoll` 补 Block `Lyra_TraceChannel_Weapon(_Capsule)`，倒地也能被射中。数值来自 `ULyraRangedWeaponInstance::PlainHitDamage`，由 `ALyraShooterEnemy::ApplyWeaponDamageOverrides` 按 `AIGunDamagePerHit`（AI 打玩家，默认低）/ `PlayerGunDamagePerHit`（幻形打敌人）覆盖；玩家幻形被打再乘 `MorphIncomingGunDamageScale`。
 - 子弹要命中史莱姆/GASP，靶子的 `Pawn` / `CharacterMesh` / `CharacterCapsule` 碰撞预设必须 Block `Lyra_TraceChannel_Weapon(_Capsule)`（见 `DefaultEngine.ini` 的 `+EditProfiles`）。
 - 死亡：`HandleDeath` 卸枪 → Ragdoll → `DeathRagdollSeconds` 后走 SlimeHealth 溶解；`bMorphTarget` 时只 `ForceUnmorph`。
 - `IsDevourableNow()` **不能**看 `bDevourLocked`：`FreezeDevourTarget` 会先把它设 true，`TickPhase` 每帧再查 `CanDevourTarget`，一查就 Abort，表现为「按了 F 不缩小」。和 `AGaspSandboxPawn` 一致，只看 bDevourable / 幻形 / 死亡 / 玩家控制。
@@ -79,6 +79,10 @@ py E:/UE/SlimeFable/Content/Python/import_lyra_shooter.py
 ### 玩家幻形层（`ActivateStandaloneForPlayer` / `DeactivateStandaloneForPlayer`）
 
 `PossessedBy(PC)` 和 `USlimeMorphComponent::PossessMorphTarget` 都会调 Activate，每一步幂等；`UnPossessed` / `EndPlay` 调 Deactivate。
+
+- **预载**：Activate 链上十几处 `LoadSynchronous`（AbilitySet_ShooterHero、W_ShooterHUDLayout、W_QuickBar、W_WeaponReticleHost、IMC、CM_*、Orbitron 字体……），首次幻形会在 Possess 那一帧 `FlushAsyncLoading` 卡半秒以上。`ALyraShooterEnemy::PreloadStandaloneAssets`（`BeginPlay`，游戏世界，进程内只发一次）把全部 `Standalone*` / HUD / `DefaultWeaponItem` / `DefaultAnimLayers` / `IA_Crouch` 软引用交给 `StreamableManager::RequestAsyncLoad`，句柄 static 常驻。关卡里有一只 Lyra 兵就开始预载，`LoadSynchronous` 保留作兜底直接命中内存。新增 Standalone 软引用属性时记得也加进这个函数。
+- **卡帧不吞窗口**：`USlimeMorphComponent::TickPhase` 把 Dt 夹到 ≤0.1s，否则一次卡顿就把 Growing/Blending 直接推到 Morphed，套皮看不到。
+- **Nanite**：`SKM_Manny` 是 Nanite 骨骼网格，幻形皮必须带 `bUsedWithNanite`（见 morph-materials skill），否则 PIE 显示默认材质并每次启动重编译 shader。
 
 - **能力**：`SimplePawnData` 一个能力都不给，跳不起来就是这原因。Activate 里按 `StandaloneAbilitySets`（默认 `AbilitySet_ShooterHero`）用 `ULyraAbilitySet::GiveToAbilitySystemFiltered` 授予，`StandaloneExcludedAbilities` 默认剔掉 `GA_Hero_Death`（Lyra 死亡链会销毁幻形体，死亡归 SlimeHealth）、`GA_SpawnEffect`、`GA_ADS`（内部 `GetLyraPlayerControllerFromActorInfo`，我们的 PC 不是 Lyra PC，会报 Accessed None）。
 - **队伍**：`EnsurePlayerTeam` 把 PlayerState（`ALyraPlayerState`，NoTeam 时）和幻形体都设成 `PlayerTeamId`。`ULyraDamageExecution → CanCauseDamage` 任一边 NoTeam 就 0 伤害。

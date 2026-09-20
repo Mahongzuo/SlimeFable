@@ -58,6 +58,11 @@ namespace SlimeBodyPrivate
 	static const FName ParamShellCenter(TEXT("ShellCenter"));
 	static const FName ParamShellAxes(TEXT("ShellAxes"));
 	static const FName ParamShellForward(TEXT("ShellForward"));
+	/** Shot cluster ellipsoids (xyz = centre, a = radius); slot order = USlimeBodyComponent::GetShotSlotIds(). */
+	static const FName ParamShotCenter[USlimeBodyComponent::MaxShotSlots] = {
+		FName(TEXT("ShotCenter0")), FName(TEXT("ShotCenter1")), FName(TEXT("ShotCenter2")),
+		FName(TEXT("ShotCenter3")), FName(TEXT("ShotCenter4")),
+	};
 	static const FName ParamBubbles[USlimeBodyComponent::MaxBubbles] = {
 		FName(TEXT("Bubble0")), FName(TEXT("Bubble1")), FName(TEXT("Bubble2")), FName(TEXT("Bubble3")),
 		FName(TEXT("Bubble4")), FName(TEXT("Bubble5")), FName(TEXT("Bubble6")), FName(TEXT("Bubble7")),
@@ -828,6 +833,26 @@ void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
 		const float R = (i < ActiveBubbles) ? Radii[i] : 0.f;
 		Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamBubbles[i], FLinearColor(float(P.X), float(P.Y), float(P.Z), R));
 		Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamBubbleBurst[i], (i < ActiveBubbles) ? BubbleBurst[i] : 0.f);
+	}
+
+	// Shot cluster ellipsoids, indexed by the slot table from the last surface rebuild so the
+	// vertex colour tag and ShotCenter{i} always refer to the same mini-slime. a = 0 disables the slot.
+	Solver.RefreshShotStates();
+	const TArray<FSlimeSolver::FShotState>& Shots = Solver.GetShotStates();
+	const float MiniR = FMath::Max(Solver.GetMiniMembraneRadius(), 1.f);
+	for (int32 Slot = 0; Slot < MaxShotSlots; ++Slot)
+	{
+		FLinearColor ShotParam(0.f, 0.f, 0.f, 0.f);
+		if (ShotSlotIds.IsValidIndex(Slot))
+		{
+			const uint8 WantedId = ShotSlotIds[Slot];
+			const FSlimeSolver::FShotState* Shot = Shots.FindByPredicate([WantedId](const FSlimeSolver::FShotState& S) { return S.Id == WantedId; });
+			if (Shot)
+			{
+				ShotParam = FLinearColor(Shot->Center.X, Shot->Center.Y, Shot->Center.Z, MiniR);
+			}
+		}
+		Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShotCenter[Slot], ShotParam);
 	}
 }
 
@@ -1833,8 +1858,14 @@ void USlimeBodyComponent::RebuildSurface()
 	TMap<uint8, float> ShotClips;
 	Solver.RefreshShotStates();
 	const float MiniR = FMath::Max(Solver.GetMiniMembraneRadius(), SolverParams.ParticleSpacing * 2.f);
+	ShotSlotIds.Reset();
 	for (const FSlimeSolver::FShotState& Shot : Solver.GetShotStates())
 	{
+		// Slot order = GetShotStates() order; the face / shell params and the vertex colours share this table.
+		if (ShotSlotIds.Num() < MaxShotSlots && Shot.Id != 0)
+		{
+			ShotSlotIds.Add(Shot.Id);
+		}
 		if (Shot.FloorZ <= -1.e8f)
 		{
 			continue;
@@ -1844,6 +1875,21 @@ void USlimeBodyComponent::RebuildSurface()
 		{
 			ShotClips.Add(Shot.Id, Shot.FloorZ);
 		}
+	}
+	Surface.SetShotSlotIds(ShotSlotIds);
+
+	// The builder reserves 35% of the vertex budget for shots. Instead of letting that carve the top
+	// off the body, grow the budget so the body's 65% share equals its normal budget. Held briefly
+	// after the last fragment vanishes so rapid re-fires do not thrash the render sections.
+	if (Solver.HasFragments())
+	{
+		LastFragmentSeenTime = GetWorld() ? float(GetWorld()->GetTimeSeconds()) : 0.f;
+	}
+	const float SinceFragments = GetWorld() ? float(GetWorld()->GetTimeSeconds()) - LastFragmentSeenTime : 1.e9f;
+	if (SinceFragments < 0.5f)
+	{
+		const int32 Wanted = FMath::CeilToInt(float(ActiveSurface.MaxVertices) / 0.65f);
+		ActiveSurface.MaxVertices = FMath::Clamp(Wanted, ActiveSurface.MaxVertices, FMath::Max(FragmentVertexBudgetCap, ActiveSurface.MaxVertices));
 	}
 
 	const float ConfigureSpacing = SolverParams.ParticleSpacing * SurfaceScale;
@@ -1917,14 +1963,30 @@ void USlimeBodyComponent::PushMeshSection()
 	const TArray<FProcMeshTangent> NoTangents;
 	const TArray<FVector>& Normals = Surface.GetNormals();
 	const TArray<int32>& Indices = Surface.GetIndices();
+	// Cluster id in R (0 = body, (slot + 1) / 255 = shot slot). Stored raw: no sRGB conversion on either path.
+	const TArray<FLinearColor>& ClusterColors = Surface.GetColors();
+
+	// The sections are sized to the builder's vertex budget; when that changes (shots in flight,
+	// body scale) the in-place update would mismatch, so all three sections are recreated.
+	if (SectionVertexCount != Vertices.Num())
+	{
+		bMeshSectionCreated = false;
+		bShadowMeshSectionCreated = false;
+		bXRayMeshSectionCreated = false;
+		bWarnedTruncation = false;
+		SectionVertexCount = Vertices.Num();
+	}
 
 	if (!bMeshSectionCreated)
 	{
 		SurfaceMesh->ClearAllMeshSections();
 		SurfaceMesh->CreateMeshSection_LinearColor(
 			0, Vertices, Indices, Normals,
-			NoUVs, NoColors, NoTangents, false);
-		if (ResolvedMaterial)
+			NoUVs, ClusterColors, NoTangents, false, false);
+		// Keep the element component's MID when the section is merely resized (shot budget); only
+		// (re)assign the base material when slot 0 does not already derive from it.
+		const UMaterialInstanceDynamic* CurrentMid = Cast<UMaterialInstanceDynamic>(SurfaceMesh->GetMaterial(0));
+		if (ResolvedMaterial && !(CurrentMid && CurrentMid->Parent == ResolvedMaterial))
 		{
 			SurfaceMesh->SetMaterial(0, ResolvedMaterial);
 		}
@@ -1934,7 +1996,7 @@ void USlimeBodyComponent::PushMeshSection()
 	{
 		// Vertex count is constant by design, so this is an in place update: no reallocation and
 		// no collision cook, which is what made the reference implementation expensive.
-		SurfaceMesh->UpdateMeshSection_LinearColor(0, Vertices, Normals, NoUVs, NoColors, NoTangents);
+		SurfaceMesh->UpdateMeshSection_LinearColor(0, Vertices, Normals, NoUVs, ClusterColors, NoTangents, false);
 	}
 
 	// CreateMeshSection can reset component shadow flags; keep the jelly casting-free.

@@ -20,7 +20,8 @@ description: >-
 5. 不要按角色名写死 Phoebe / Samurai / 0815；按「多槽 + extra parts + Groom + Hair VF」处理。
 6. 不要为了幻形去改角色原 Toon/Hair 资产。禁止「只退回 Masked Toon 而漏掉头发」。**仅 Hair 槽**套皮失败才 `HideMaterialSection`；禁止用指针比较藏 Face/Up。
 7. **禁止**把 `/Game/FluidNinjaLive/UseCases/016_Caustics/MI_Water_SingleLayer_CausticsDemo` 当角色皮。本体 `M_SlimeBody` 保持原项目 Fresnel 果冻，不要加 PNO / 焦散 / Custom 法线。
-8. **视觉验证归用户。** 描边、套皮、面部阴影等观感由用户在视口 / PIE 亲自确认。实现做完就停；禁止凭截图或自己判断去改线宽 / TwoSidedSign / 颜色 / 曝光。用户已说效果不错后，只改用户点名的问题，不要顺手「优化」同一视觉点。
+8. **幻形皮必须带 `bUsedWithNanite`**（`_set_mesh_usage` 已设 `used_with_nanite`，三张 `M_SlimeMorph*` 都走它）。Lyra `SKM_Manny` 是 Nanite 骨骼网格；缺这个标记 PIE 日志报 `missing usage flag Nanite! Default Material will be used`，网格显示默认材质、每次编辑器启动都现场重编 shader（首次幻形长卡），打包后永远是默认材质。菲比 / GASP 不是 Nanite，所以只在 Lyra 身上暴露。改了 usage 后必须无头重刷并重启编辑器。
+9. **视觉验证归用户。** 描边、套皮、面部阴影等观感由用户在视口 / PIE 亲自确认。实现做完就停；禁止凭截图或自己判断去改线宽 / TwoSidedSign / 颜色 / 曝光。用户已说效果不错后，只改用户点名的问题，不要顺手「优化」同一视觉点。
 
 ## 资产
 

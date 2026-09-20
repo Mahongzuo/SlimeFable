@@ -10,6 +10,8 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystem/LyraGameplayAbilityTargetData_SingleTargetHit.h"
+#include "AbilitySystem/Attributes/LyraHealthSet.h"
+#include "Character/LyraHealthComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Kismet/GameplayStatics.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
@@ -578,10 +580,19 @@ void ULyraGameplayAbility_RangedWeapon::ApplyPlainDamageToNonAbilityTargets(cons
 		{
 			continue;
 		}
-		if (UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(HitActor) != nullptr)
+		// Only targets that can actually absorb the Lyra damage GE (ULyraHealthSet) count as "handled".
+		// Enemies with their own non-Lyra ASC (SlimeFable Phoebe / GASP EnemyAbilitySystem) have no
+		// LyraHealthSet, so ULyraDamageExecution writes nothing; they need the plain path.
+		if (ULyraHealthComponent::FindHealthComponent(HitActor) != nullptr)
 		{
-			// Lyra path already handled this one.
 			continue;
+		}
+		if (const UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(HitActor))
+		{
+			if (TargetASC->GetAttributeSet(ULyraHealthSet::StaticClass()) != nullptr)
+			{
+				continue;
+			}
 		}
 
 		const float Distance = FVector::Dist(Hit->TraceStart, Hit->ImpactPoint);

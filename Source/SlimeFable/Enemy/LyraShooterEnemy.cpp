@@ -10,7 +10,9 @@
 #include "AIController.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
+#include "Engine/AssetManager.h"
 #include "Engine/GameInstance.h"
+#include "Engine/StreamableManager.h"
 #include "GameFramework/InputSettings.h"
 #include "Engine/LocalPlayer.h"
 #include "GenericTeamAgentInterface.h"
@@ -250,9 +252,82 @@ void ALyraShooterEnemy::EnsureBodyVisuals()
 	}
 }
 
+void ALyraShooterEnemy::PreloadStandaloneAssets()
+{
+	// One shot per process; the assets stay resident for every later morph.
+	static TSharedPtr<FStreamableHandle> StandalonePreloadHandle;
+	static bool bRequested = false;
+	if (bRequested)
+	{
+		return;
+	}
+	bRequested = true;
+
+	TSet<FSoftObjectPath> Unique;
+	auto Add = [&Unique](const FSoftObjectPath& Path)
+	{
+		if (Path.IsValid())
+		{
+			Unique.Add(Path);
+		}
+	};
+	Add(StandalonePawnData.ToSoftObjectPath());
+	Add(StandaloneInputConfig.ToSoftObjectPath());
+	Add(StandaloneMappingContext.ToSoftObjectPath());
+	Add(StandaloneCameraMode.ToSoftObjectPath());
+	Add(ADSCameraMode.ToSoftObjectPath());
+	Add(ADSMappingContext.ToSoftObjectPath());
+	for (const TSoftObjectPtr<ULyraAbilitySet>& Set : StandaloneAbilitySets)
+	{
+		Add(Set.ToSoftObjectPath());
+	}
+	for (const TSoftClassPtr<ULyraGameplayAbility>& Ability : StandaloneExcludedAbilities)
+	{
+		Add(Ability.ToSoftObjectPath());
+	}
+	Add(StandaloneHUDLayoutClass.ToSoftObjectPath());
+	for (const FSlimeLyraHUDWidgetEntry& Entry : StandaloneHUDWidgets)
+	{
+		Add(Entry.WidgetClass.ToSoftObjectPath());
+	}
+	for (const TSoftClassPtr<UUserWidget>& Removed : StandaloneHUDRemovedWidgets)
+	{
+		Add(Removed.ToSoftObjectPath());
+	}
+	Add(DefaultWeaponItem.ToSoftObjectPath());
+	Add(DefaultAnimLayers.ToSoftObjectPath());
+	// BindStandaloneInput's last-resort crouch action.
+	Add(FSoftObjectPath(TEXT("/Game/Input/Actions/IA_Crouch.IA_Crouch")));
+
+	if (Unique.IsEmpty())
+	{
+		return;
+	}
+	TArray<FSoftObjectPath> Paths = Unique.Array();
+	const int32 Count = Paths.Num();
+	StandalonePreloadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
+		MoveTemp(Paths),
+		FStreamableDelegate::CreateLambda([Count]()
+		{
+			UE_LOG(LogSlimeFable, Log, TEXT("LyraShooterEnemy: standalone morph assets preloaded (%d)"), Count);
+		}),
+		FStreamableManager::DefaultAsyncLoadPriority,
+		/*bManageActiveHandle*/ false,
+		/*bStartStalled*/ false,
+		TEXT("LyraShooterStandalone"));
+	if (!StandalonePreloadHandle.IsValid())
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("LyraShooterEnemy: standalone preload could not create a streamable handle (%d assets)"), Count);
+	}
+}
+
 void ALyraShooterEnemy::BeginPlay()
 {
 	Super::BeginPlay();
+	if (UWorld* World = GetWorld(); World && World->IsGameWorld())
+	{
+		PreloadStandaloneAssets();
+	}
 	// PawnExt->InitializeAbilitySystem (inside GrantStandaloneAbilities) fires
 	// ALyraCharacter::OnAbilitySystemInitialized, which already inits LyraHealthComponent.
 	// Only fall back to a manual init if PawnData failed to load.

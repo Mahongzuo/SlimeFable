@@ -218,6 +218,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.5"))
 	float FragmentLifetime = 10.f;
 
+	/** Vertex budget ceiling while shots are in flight; the body keeps its normal budget and shots use the extra ~35%. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "3000", ClampMax = "60000",
+		ToolTip = "有子球在飞时表面顶点预算上限。发射后本体不再让出 35% 预算，子球用额外的部分。默认 20000；过低会让本体顶部缺片（日志出现 vertex budget 警告）。"))
+	int32 FragmentVertexBudgetCap = 20000;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "50.0", Units = "cm",
 		ToolTip = "G 子球自动攻击半径。默认 500cm。"))
 	float FragmentAttackRadius = 500.f;
@@ -397,6 +402,11 @@ public:
 
 	void RefreshShotStates() { Solver.RefreshShotStates(); }
 	const TArray<FSlimeSolver::FShotState>& GetShotStates() const { return Solver.GetShotStates(); }
+
+	/** Shader shot slots (ShotCenter0..4). Matches the body material Custom node. */
+	static constexpr int32 MaxShotSlots = 5;
+	/** Slot -> ShotId assigned at the last surface rebuild; slot i drives ShotCenter{i} and vertex colour R = (i + 1) / 255. */
+	const TArray<uint8>& GetShotSlotIds() const { return ShotSlotIds; }
 	float GetMiniMembraneRadius() const { return Solver.GetMiniMembraneRadius(); }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
@@ -644,6 +654,12 @@ private:
 	int32 SavedSurfaceMaxVertices = 9000;
 	int32 SavedSurfaceMaxGridDim = 36;
 	bool bEnlargedSurfaceBudget = false;
+	/** World time fragments were last seen; the enlarged shot budget is held ~0.5 s past that to avoid section churn. */
+	float LastFragmentSeenTime = -1.e9f;
+	/** Vertex count the render sections were created with; a budget change forces a section rebuild. */
+	int32 SectionVertexCount = 0;
+	/** Shader slot (0..MaxShotSlots-1) -> ShotId, shared by the surface vertex colours and the ShotCenter params. */
+	TArray<uint8> ShotSlotIds;
 	bool bFreezeQualityLod = false;
 
 	bool bSpread = false;

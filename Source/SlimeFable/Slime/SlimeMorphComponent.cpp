@@ -530,6 +530,9 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 
 void USlimeMorphComponent::TickPhase(float Dt)
 {
+	// A hitch (shader compile, sync load on possess) must not swallow the Growing / Blending window:
+	// one huge Dt would jump straight to Morphed and the slime skin would never be seen.
+	Dt = FMath::Min(Dt, 0.1f);
 	PhaseElapsed += Dt;
 
 	auto PhaseAlpha = [this](float Duration) -> float

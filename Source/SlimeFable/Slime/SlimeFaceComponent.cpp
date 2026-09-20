@@ -30,10 +30,7 @@ namespace SlimeFaceParams
 	static const FName FaceLookX(TEXT("FaceLookX"));
 	static const FName FaceVisible(TEXT("FaceVisible"));
 	static const FName FaceHalfPx(TEXT("FaceHalfPx"));
-	static const FName ShotCenter[5] = {
-		TEXT("ShotCenter0"), TEXT("ShotCenter1"), TEXT("ShotCenter2"),
-		TEXT("ShotCenter3"), TEXT("ShotCenter4")
-	};
+	// ShotCenter0..4 are written by USlimeBodyComponent (shared slot table with the vertex colours).
 	static const FName ShotForward[5] = {
 		TEXT("ShotForward0"), TEXT("ShotForward1"), TEXT("ShotForward2"),
 		TEXT("ShotForward3"), TEXT("ShotForward4")
@@ -355,25 +352,28 @@ void USlimeFaceComponent::UpdateMaterial()
 	Mid->SetScalarParameterValue(SlimeFaceParams::FaceVisible, VisibleAlpha);
 	Mid->SetScalarParameterValue(SlimeFaceParams::FaceHalfPx, FaceHalfPx);
 
+	// ShotCenter{i} (centre + radius) is owned by USlimeBodyComponent, which also tags the surface
+	// vertices with the same slot; only the facing direction is written here, by the same slot table.
 	Body->RefreshShotStates();
 	const TArray<FSlimeSolver::FShotState>& Shots = Body->GetShotStates();
-	const float MiniR = FMath::Max(Body->GetMiniMembraneRadius(), 1.f);
+	const TArray<uint8>& SlotIds = Body->GetShotSlotIds();
 	for (int32 i = 0; i < SlimeFaceParams::MaxShotFaces; ++i)
 	{
-		FLinearColor Center(0.f, 0.f, 0.f, 0.f);
 		FLinearColor Forward(float(FaceForward.X), float(FaceForward.Y), float(FaceForward.Z), 0.f);
-		if (Shots.IsValidIndex(i))
+		if (SlotIds.IsValidIndex(i))
 		{
-			const FSlimeSolver::FShotState& Shot = Shots[i];
-			Center = FLinearColor(Shot.Center.X, Shot.Center.Y, Shot.Center.Z, MiniR);
-			const FVector Horiz(Shot.Velocity.X, Shot.Velocity.Y, 0.f);
-			if (Horiz.SizeSquared() > 100.f)
+			const uint8 WantedId = SlotIds[i];
+			const FSlimeSolver::FShotState* Shot = Shots.FindByPredicate([WantedId](const FSlimeSolver::FShotState& S) { return S.Id == WantedId; });
+			if (Shot)
 			{
-				const FVector Dir = Horiz.GetSafeNormal();
-				Forward = FLinearColor(float(Dir.X), float(Dir.Y), float(Dir.Z), 0.f);
+				const FVector Horiz(Shot->Velocity.X, Shot->Velocity.Y, 0.f);
+				if (Horiz.SizeSquared() > 100.f)
+				{
+					const FVector Dir = Horiz.GetSafeNormal();
+					Forward = FLinearColor(float(Dir.X), float(Dir.Y), float(Dir.Z), 0.f);
+				}
 			}
 		}
-		Mid->SetVectorParameterValue(SlimeFaceParams::ShotCenter[i], Center);
 		Mid->SetVectorParameterValue(SlimeFaceParams::ShotForward[i], Forward);
 	}
 }

@@ -320,6 +320,7 @@ void FSlimeSurfaceBuilder::Configure(const FSlimeSurfaceParams& InParams, float 
 	const int32 Budget = FMath::Max(Params.MaxVertices - (Params.MaxVertices % 3), 3);
 	Vertices.SetNumUninitialized(Budget);
 	Normals.SetNumUninitialized(Budget);
+	Colors.SetNumUninitialized(Budget);
 	if (Indices.Num() != Budget)
 	{
 		Indices.SetNumUninitialized(Budget);
@@ -473,6 +474,7 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 	{
 		Vertices[Index] = DegenerateAnchor;
 		Normals[Index] = FVector::UpVector;
+		Colors[Index] = FLinearColor(0.f, 0.f, 0.f, 1.f);
 	}
 }
 
@@ -492,6 +494,18 @@ void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles,
 	}
 	ClipFloorZ = ClusterClip;
 	bClipFloorThisCluster = ClipFloorZ > -1.e8f;
+
+	// Cluster tag for the body material: 0 = body / unslotted shot, (slot + 1) / 255 = shot slot.
+	CurrentClusterColor = FLinearColor(0.f, 0.f, 0.f, 1.f);
+	if (bBallisticSubset)
+	{
+		const int32 Slot = ShotSlotIds.IndexOfByKey(ShotFilter);
+		if (Slot != INDEX_NONE)
+		{
+			CurrentClusterColor.R = float(Slot + 1) / 255.f;
+		}
+	}
+
 	PrepareGrid(Bounds, !bBallisticSubset);
 	SplatDensity(Particles, bBallisticSubset, ShotFilter, bBallisticSubset ? nullptr : &ActiveMergingShots);
 	BlurDensity();
@@ -948,6 +962,7 @@ void FSlimeSurfaceBuilder::Triangulate()
 
 			Vertices[LiveVertexCount] = GridOrigin + FVector(P) * double(ActiveCellSize);
 			Normals[LiveVertexCount] = Normal;
+			Colors[LiveVertexCount] = CurrentClusterColor;
 
 			++LiveVertexCount;
 		}

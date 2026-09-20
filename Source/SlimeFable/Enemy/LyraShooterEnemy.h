@@ -393,6 +393,12 @@ protected:
 	USlimeDodgeComponent* FindMorphDodge();
 
 	void EnsureBodyVisuals();
+	/**
+	 * Kick an async load of every Standalone* / HUD / weapon soft ref the morph layer LoadSynchronous()es.
+	 * Runs once per process from BeginPlay (first Lyra body in a level); the handle is kept alive so
+	 * PossessEnemy no longer pays a FlushAsyncLoading hitch for ShooterCore GA / HUD / fonts.
+	 */
+	void PreloadStandaloneAssets();
 	void EnsureAnimLayersLinked();
 	void RelinkWeaponAnimLayers();
 	void EnsureDefaultWeapon();

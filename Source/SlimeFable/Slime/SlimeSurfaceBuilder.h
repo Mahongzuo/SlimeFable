@@ -53,9 +53,18 @@ public:
 	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift = 0.f, float InClipFloorZ = -1.e9f);
 	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift, float InClipFloorZ, const TMap<uint8, float>& InShotClipFloors);
 
+	/**
+	 *  Shader shot slots for the next Build: slot i (ShotId = Ids[i]) tags its cluster's vertices with
+	 *  colour R = (i + 1) / 255; the body and any shot without a slot get R = 0. The body material uses
+	 *  this to pick the per-cluster shell ellipsoid instead of the whole-component ObjectBounds.
+	 */
+	void SetShotSlotIds(const TArray<uint8>& Ids) { ShotSlotIds = Ids; }
+
 	/** World space positions, MaxVertices long. */
 	const TArray<FVector>& GetVertices() const { return Vertices; }
 	const TArray<FVector>& GetNormals() const { return Normals; }
+	/** Per-vertex cluster id (see SetShotSlotIds), MaxVertices long. */
+	const TArray<FLinearColor>& GetColors() const { return Colors; }
 
 	/** Static 0..MaxVertices-1 soup, built once. */
 	const TArray<int32>& GetIndices() const { return Indices; }
@@ -145,7 +154,12 @@ private:
 
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
+	TArray<FLinearColor> Colors;
 	TArray<int32> Indices;
+
+	TArray<uint8> ShotSlotIds;
+	/** Colour written for every vertex of the cluster currently being triangulated. */
+	FLinearColor CurrentClusterColor = FLinearColor(0.f, 0.f, 0.f, 1.f);
 
 	FVector GridOrigin = FVector::ZeroVector;
 	FIntVector Dims = FIntVector(1);
