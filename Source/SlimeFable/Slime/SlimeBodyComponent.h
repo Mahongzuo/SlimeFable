@@ -395,6 +395,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	void GetActiveShotCenters(TArray<FVector>& OutCenters) const;
 
+	void RefreshShotStates() { Solver.RefreshShotStates(); }
+	const TArray<FSlimeSolver::FShotState>& GetShotStates() const { return Solver.GetShotStates(); }
+	float GetMiniMembraneRadius() const { return Solver.GetMiniMembraneRadius(); }
+
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	float GetSqueezeAmount() const { return SqueezeAmount; }
 
@@ -419,21 +423,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
 	FBox GetBodyBounds() const { return Solver.GetBodyBounds(); }
 
-	/** Number of inner bubbles pushed to the body material each frame. */
-	static constexpr int32 NumBubbles = 8;
+	/** Shader slot count. Custom HLSL is unrolled; runtime uses BubbleCount. */
+	static constexpr int32 MaxBubbles = 10;
 
-	/** World position of one lagging inner bubble (0..NumBubbles-1). */
+	/** World position of one lagging inner bubble (0..MaxBubbles-1). */
 	FVector GetBubbleWorldPosition(int32 Index) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface",
+		meta = (ClampMin = "0", ClampMax = "10",
+		ToolTip = "同时可见的体内气泡个数（0–10）。默认 10。多出的槽半径写 0。"))
+	int32 BubbleCount = 10;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface",
 		meta = (ClampMin = "0.005", ClampMax = "0.15",
-		ToolTip = "气泡刚从底部冒出时的半径，相对椭球最短半轴。默认 0.02（27cm 身体约 0.5cm）。"))
-	float BubbleMinR = 0.02f;
+		ToolTip = "气泡刚从底部冒出时的半径，相对椭球最短半轴。默认 0.014（27cm 身体约 0.4cm）。"))
+	float BubbleMinR = 0.014f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface",
 		meta = (ClampMin = "0.01", ClampMax = "0.2",
-		ToolTip = "气泡到顶破裂前的半径，相对椭球最短半轴。默认 0.05（27cm 身体约 1.4cm）。"))
-	float BubbleMaxR = 0.05f;
+		ToolTip = "气泡到顶破裂前的半径，相对椭球最短半轴。默认 0.035（27cm 身体约 0.9cm）。"))
+	float BubbleMaxR = 0.035f;
 
 	/** Drives the capsule towards its minimum regardless of what the probes found. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
@@ -650,13 +659,13 @@ private:
 	FVector ClingNormal = FVector::ForwardVector;
 
 	/** Inner bubble state: rest offset in shell-normalised space, current world offset from shell centre, velocity. */
-	FVector BubbleRestNorm[8];
-	FVector BubbleOffset[8];
-	FVector BubbleVelocity[8];
-	FVector2D BubbleLateral[8];
-	float BubblePhase[8];
-	float BubbleSpeed[8];
-	float BubbleBurst[8];
+	FVector BubbleRestNorm[MaxBubbles];
+	FVector BubbleOffset[MaxBubbles];
+	FVector BubbleVelocity[MaxBubbles];
+	FVector2D BubbleLateral[MaxBubbles];
+	float BubblePhase[MaxBubbles];
+	float BubbleSpeed[MaxBubbles];
+	float BubbleBurst[MaxBubbles];
 	bool bBubblesInitialised = false;
 
 	void RespawnBubble(int32 Index, bool bStagger);

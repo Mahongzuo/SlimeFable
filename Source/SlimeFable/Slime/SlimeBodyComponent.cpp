@@ -58,13 +58,15 @@ namespace SlimeBodyPrivate
 	static const FName ParamShellCenter(TEXT("ShellCenter"));
 	static const FName ParamShellAxes(TEXT("ShellAxes"));
 	static const FName ParamShellForward(TEXT("ShellForward"));
-	static const FName ParamBubbles[8] = {
+	static const FName ParamBubbles[USlimeBodyComponent::MaxBubbles] = {
 		FName(TEXT("Bubble0")), FName(TEXT("Bubble1")), FName(TEXT("Bubble2")), FName(TEXT("Bubble3")),
 		FName(TEXT("Bubble4")), FName(TEXT("Bubble5")), FName(TEXT("Bubble6")), FName(TEXT("Bubble7")),
+		FName(TEXT("Bubble8")), FName(TEXT("Bubble9")),
 	};
-	static const FName ParamBubbleBurst[8] = {
+	static const FName ParamBubbleBurst[USlimeBodyComponent::MaxBubbles] = {
 		FName(TEXT("BubbleBurst0")), FName(TEXT("BubbleBurst1")), FName(TEXT("BubbleBurst2")), FName(TEXT("BubbleBurst3")),
 		FName(TEXT("BubbleBurst4")), FName(TEXT("BubbleBurst5")), FName(TEXT("BubbleBurst6")), FName(TEXT("BubbleBurst7")),
+		FName(TEXT("BubbleBurst8")), FName(TEXT("BubbleBurst9")),
 	};
 
 	/** Material parameter names of M_SlimeBody_Volumetric (create_slime_volumetric_material.py). */
@@ -704,7 +706,7 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 
 FVector USlimeBodyComponent::GetBubbleWorldPosition(int32 Index) const
 {
-	if (Index < 0 || Index >= NumBubbles || !bBubblesInitialised)
+	if (Index < 0 || Index >= MaxBubbles || !bBubblesInitialised)
 	{
 		return GetShellCenter();
 	}
@@ -717,7 +719,7 @@ void USlimeBodyComponent::RespawnBubble(int32 Index, bool bStagger)
 	const float Rad = FMath::FRandRange(0.08f, 0.36f);
 	BubbleLateral[Index] = FVector2D(FMath::Cos(Angle) * Rad, FMath::Sin(Angle) * Rad);
 	BubbleSpeed[Index] = FMath::FRandRange(0.10f, 0.18f);
-	BubblePhase[Index] = bStagger ? (float(Index) / float(NumBubbles)) : 0.f;
+	BubblePhase[Index] = bStagger ? (float(Index) / float(MaxBubbles)) : 0.f;
 	BubbleBurst[Index] = 0.f;
 	BubbleRestNorm[Index] = FVector(BubbleLateral[Index].X, BubbleLateral[Index].Y, -0.55);
 }
@@ -726,7 +728,7 @@ void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
 {
 	if (!bBubblesInitialised)
 	{
-		for (int32 i = 0; i < NumBubbles; ++i)
+		for (int32 i = 0; i < MaxBubbles; ++i)
 		{
 			BubbleOffset[i] = FVector::ZeroVector;
 			BubbleVelocity[i] = FVector::ZeroVector;
@@ -751,9 +753,15 @@ void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
 	const float MinR = FMath::Min(BubbleMinR, BubbleMaxR);
 	const float MaxR = FMath::Max(BubbleMinR, BubbleMaxR);
 
-	float Radii[NumBubbles];
-	for (int32 i = 0; i < NumBubbles; ++i)
+	float Radii[MaxBubbles];
+	const int32 ActiveBubbles = FMath::Clamp(BubbleCount, 0, MaxBubbles);
+	for (int32 i = 0; i < MaxBubbles; ++i)
 	{
+		if (i >= ActiveBubbles)
+		{
+			Radii[i] = 0.f;
+			continue;
+		}
 		if (BubbleBurst[i] > 0.f)
 		{
 			BubbleBurst[i] += Dt / BurstSeconds;
@@ -814,11 +822,12 @@ void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellCenter, FLinearColor(float(Center.X), float(Center.Y), float(Center.Z), 0.f));
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellAxes, FLinearColor(float(Axes.X), float(Axes.Y), float(Axes.Z), 0.f));
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellForward, FLinearColor(float(Fwd.X), float(Fwd.Y), float(Fwd.Z), 0.f));
-	for (int32 i = 0; i < NumBubbles; ++i)
+	for (int32 i = 0; i < MaxBubbles; ++i)
 	{
 		const FVector P = Center + BubbleOffset[i];
-		Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamBubbles[i], FLinearColor(float(P.X), float(P.Y), float(P.Z), Radii[i]));
-		Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamBubbleBurst[i], BubbleBurst[i]);
+		const float R = (i < ActiveBubbles) ? Radii[i] : 0.f;
+		Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamBubbles[i], FLinearColor(float(P.X), float(P.Y), float(P.Z), R));
+		Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamBubbleBurst[i], (i < ActiveBubbles) ? BubbleBurst[i] : 0.f);
 	}
 }
 
@@ -1547,6 +1556,10 @@ void USlimeBodyComponent::ProbeSqueeze(float DeltaTime)
 bool USlimeBodyComponent::ShouldIgnoreFluidNinjaCollider(const UPrimitiveComponent* Component)
 {
 	using namespace SlimeBodyPrivate;
+	if (!Component)
+	{
+		return false;
+	}
 	if (!ComponentLooksLikeNinjaSimGeom(Component))
 	{
 		return false;
@@ -1801,13 +1814,36 @@ void USlimeBodyComponent::RebuildSurface()
 
 	VisualZLift = 0.f;
 	float ClipZ = -1.e9f;
-	// Only clip when devour visual-scale is inflated (HEAD). Always-on ClipZ flattened
-	// the blob against enemy capsules mistaken for FloorZ near gunners.
 	if (bVisualOnly && RequestedBodyScale > 1.05f && FloorZ > -1.e8f)
 	{
 		const float VisualR = SolverParams.RestRadius * RequestedBodyScale;
 		VisualZLift = FMath::Max(0.f, VisualR - (RebuildBodyCOM.Z - FloorZ));
 		ClipZ = FloorZ;
+	}
+	else if (!bClingVisual && FloorZ > -1.e8f)
+	{
+		const float Hang = float(GetFootLocation().Z) - FloorZ;
+		if (Hang > -8.f && Hang < SolverParams.RestRadius)
+		{
+			ClipZ = FloorZ;
+			VisualZLift = 4.f;
+		}
+	}
+
+	TMap<uint8, float> ShotClips;
+	Solver.RefreshShotStates();
+	const float MiniR = FMath::Max(Solver.GetMiniMembraneRadius(), SolverParams.ParticleSpacing * 2.f);
+	for (const FSlimeSolver::FShotState& Shot : Solver.GetShotStates())
+	{
+		if (Shot.FloorZ <= -1.e8f)
+		{
+			continue;
+		}
+		const float ShotHang = Shot.Center.Z - Shot.FloorZ;
+		if (ShotHang > -8.f && ShotHang < MiniR * 2.5f)
+		{
+			ShotClips.Add(Shot.Id, Shot.FloorZ);
+		}
 	}
 
 	const float ConfigureSpacing = SolverParams.ParticleSpacing * SurfaceScale;
@@ -1827,7 +1863,7 @@ void USlimeBodyComponent::RebuildSurface()
 
 	TArray<uint8> MergingIds;
 	Solver.GetMergingShotIds(MergingIds);
-	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter(), MergingIds, VisualZLift, ClipZ);
+	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter(), MergingIds, VisualZLift, ClipZ, ShotClips);
 
 	if (Surface.WasTruncated() && !bWarnedTruncation)
 	{

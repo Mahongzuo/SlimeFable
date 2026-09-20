@@ -310,7 +310,7 @@ void FSlimeSolver::ClampToShotShell(FVector3f& InOutPoint, const FVector3f& Shot
 void FSlimeSolver::LiftShotCentersAboveFloor()
 {
 	const float MiniR = FMath::Max(MiniMembraneRadius, Params.ParticleSpacing * 2.f);
-	const float MinComZOffset = MiniR * 0.45f;
+	const float MinComZOffset = MiniR * 0.55f;
 
 	TMap<uint8, float> FloorByShot;
 	for (const FShotState& Shot : ShotStates)

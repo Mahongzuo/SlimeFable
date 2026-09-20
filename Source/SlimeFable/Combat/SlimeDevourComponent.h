@@ -379,6 +379,7 @@ protected:
 
 	ESlimeDevourPhase Phase = ESlimeDevourPhase::Idle;
 	float PhaseElapsed = 0.f;
+	bool bPoopReactionPlayed = false;
 	int32 SelectedPhantomSlot = 0;
 	float CycleCooldownRemaining = 0.f;
 	float SavedTimeDilation = 1.f;

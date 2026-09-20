@@ -344,6 +344,12 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift, float InClipFloorZ)
 {
+	static const TMap<uint8, float> EmptyShotClips;
+	Build(Particles, DegenerateAnchor, MergingShotIds, InVisualZLift, InClipFloorZ, EmptyShotClips);
+}
+
+void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift, float InClipFloorZ, const TMap<uint8, float>& InShotClipFloors)
+{
 	if (!IsConfigured())
 	{
 		return;
@@ -356,7 +362,9 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 	// Invalidate up front: if no body cluster gets built this frame the GPU must not march a stale grid.
 	BodyField.Dims = FIntVector::ZeroValue;
 	VisualZLift = FMath::Max(InVisualZLift, 0.f);
+	BodyClipFloorZ = InClipFloorZ;
 	ClipFloorZ = InClipFloorZ;
+	ShotClipFloors = InShotClipFloors;
 	ActiveMergingShots.Reset();
 	for (const uint8 ShotId : MergingShotIds)
 	{
@@ -470,7 +478,20 @@ void FSlimeSurfaceBuilder::Build(const TArray<FSlimeParticle>& Particles, const 
 
 void FSlimeSurfaceBuilder::BuildCluster(const TArray<FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds, uint8 ShotFilter)
 {
-	bClipFloorThisCluster = !bBallisticSubset && ClipFloorZ > -1.e8f;
+	float ClusterClip = -1.e9f;
+	if (bBallisticSubset)
+	{
+		if (const float* Found = ShotClipFloors.Find(ShotFilter))
+		{
+			ClusterClip = *Found;
+		}
+	}
+	else
+	{
+		ClusterClip = BodyClipFloorZ;
+	}
+	ClipFloorZ = ClusterClip;
+	bClipFloorThisCluster = ClipFloorZ > -1.e8f;
 	PrepareGrid(Bounds, !bBallisticSubset);
 	SplatDensity(Particles, bBallisticSubset, ShotFilter, bBallisticSubset ? nullptr : &ActiveMergingShots);
 	BlurDensity();

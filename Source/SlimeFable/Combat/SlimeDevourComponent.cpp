@@ -13,6 +13,7 @@
 #include "SlimeHealthComponent.h"
 #include "SlimeFaceComponent.h"
 #include "SlimePlacementComponent.h"
+#include "SlimePoopActor.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeVehicleComponent.h"
 #include "SlimeFableCharacter.h"
@@ -684,6 +685,10 @@ void USlimeDevourComponent::EnterPhase(ESlimeDevourPhase NewPhase)
 {
 	Phase = NewPhase;
 	PhaseElapsed = 0.f;
+	if (NewPhase == ESlimeDevourPhase::Digest)
+	{
+		bPoopReactionPlayed = false;
+	}
 	if (NewPhase == ESlimeDevourPhase::Retract)
 	{
 		BeginRetract(DevourTarget.Get());
@@ -825,6 +830,11 @@ void USlimeDevourComponent::TickPhase(float DeltaTime)
 	case ESlimeDevourPhase::Digest:
 		{
 			const float Remaining = DigestSeconds - PhaseElapsed;
+			if (!bPoopReactionPlayed && Remaining <= ASlimePoopActor::ReactLeadSeconds)
+			{
+				bPoopReactionPlayed = true;
+				ASlimePoopActor::PlayProducerReaction(GetOwner());
+			}
 			if (Remaining <= DigestDissolveSeconds)
 			{
 				const float Alpha = DigestDissolveSeconds > KINDA_SMALL_NUMBER
@@ -1897,6 +1907,10 @@ void USlimeDevourComponent::FinishDevour()
 	DestroyInnerMesh();
 	RestoreBody();
 	CleanupLatchShots();
+	if (!ASlimePoopActor::SpawnFromProducer(GetOwner()))
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("FinishDevour: poop spawn failed"));
+	}
 	DevourTarget.Reset();
 	PendingDestroyEnemy.Reset();
 	Phase = ESlimeDevourPhase::Idle;

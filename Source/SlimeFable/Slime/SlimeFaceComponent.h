@@ -69,6 +69,14 @@ public:
 		ToolTip = "所有椭圆眼的宽度倍率。默认 1。"))
 	float EyeWScale = 1.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Face|Mouth", meta = (ClampMin = "1.0", ClampMax = "24.0",
+		ToolTip = "Idle/走路微笑二次曲线控制点 Y。越大嘴越弯。默认 10.5。"))
+	float IdleMouthCurve = 10.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Face|Mouth", meta = (ClampMin = "0.2", ClampMax = "3.0",
+		ToolTip = "微笑/Grin/皱眉等用 FaceCurve 的嘴弧倍率。O 嘴和线嘴不受影响。默认 1。"))
+	float MouthCurveScale = 1.f;
+
 	UFUNCTION(BlueprintCallable, Category = "Slime|Face")
 	void PulseMood(ESlimeMood Mood, float Duration, int32 Priority);
 
@@ -91,6 +99,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime|Face")
 	ESlimeMood GetCurrentMood() const { return Mood.Id; }
+
+	/** Horizontal look direction of the drawn face (eyes). */
+	UFUNCTION(BlueprintPure, Category = "Slime|Face")
+	FVector GetFaceForward() const { return FaceForward; }
 
 private:
 	void UpdateSense(float DeltaTime);

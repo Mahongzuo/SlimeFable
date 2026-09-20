@@ -48,8 +48,10 @@ public:
 	 *  (metaball fusion) instead of getting their own cluster.
 	 *  VisualZLift raises body splats so a visual-only scale stays glued to the floor.
 	 *  ClipFloorZ (world Z) zeros density below the plane after blur; pass a very low value to skip.
+	 *  ShotClipFloors clips each ballistic cluster at its own traced floor (sentinels omitted).
 	 */
 	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift = 0.f, float InClipFloorZ = -1.e9f);
+	void Build(const TArray<SlimeSim::FSlimeParticle>& Particles, const FVector& DegenerateAnchor, const TArray<uint8>& MergingShotIds, float InVisualZLift, float InClipFloorZ, const TMap<uint8, float>& InShotClipFloors);
 
 	/** World space positions, MaxVertices long. */
 	const TArray<FVector>& GetVertices() const { return Vertices; }
@@ -156,7 +158,9 @@ private:
 	float InvInteriorValue = 1.f;
 	float VisualZLift = 0.f;
 	float ClipFloorZ = -1.e9f;
+	float BodyClipFloorZ = -1.e9f;
 	bool bClipFloorThisCluster = false;
+	TMap<uint8, float> ShotClipFloors;
 
 	/** Truncation coarsening multiplier (body cluster). */
 	float CellScale = 1.f;

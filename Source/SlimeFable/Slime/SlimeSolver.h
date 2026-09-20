@@ -126,6 +126,9 @@ public:
 	/** RestRadius as used by the membrane / shell this step. */
 	float GetScaledRestRadius() const { return Params.RestRadius * SizeScale; }
 
+	/** Membrane radius of a launched mini-slime (cbrt of launch volume fraction). */
+	float GetMiniMembraneRadius() const { return MiniMembraneRadius; }
+
 	// ---- Queries ---------------------------------------------------------------------
 
 	const TArray<SlimeSim::FSlimeParticle>& GetParticles() const { return Particles; }
