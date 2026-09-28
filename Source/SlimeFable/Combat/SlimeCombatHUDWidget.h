@@ -178,6 +178,12 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> LockOnBarMID;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UImage> LockOnBar2;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> LockOnBar2MID;
+
 	TWeakObjectPtr<AActor> LastLockTarget;
 	float LockOnHealthPercent = 1.f;
 	float LockOnGhostPercent = 1.f;

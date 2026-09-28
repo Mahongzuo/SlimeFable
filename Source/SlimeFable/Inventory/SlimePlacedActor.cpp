@@ -12,6 +12,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Hub/HomeBuild/SlimeHomeBuildSubsystem.h"
 #include "SlimeFable.h"
 
 ASlimePlacedActor::ASlimePlacedActor()
@@ -174,6 +175,14 @@ bool ASlimePlacedActor::TryPickup(APawn* Picker)
 	if (Inv->AddItem(SourceItemId, 1) <= 0)
 	{
 		return false;
+	}
+
+	if (HomePieceId != INDEX_NONE)
+	{
+		if (USlimeHomeBuildSubsystem* Home = World->GetSubsystem<USlimeHomeBuildSubsystem>())
+		{
+			Home->ForgetRecord(HomePieceId);
+		}
 	}
 
 	Destroy();

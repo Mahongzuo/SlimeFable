@@ -19,6 +19,9 @@
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeCheatComponent.h"
 #include "UI/PauseMenuWidget.h"
+#include "DayLevel/DayLevelSubsystem.h"
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
+#include "Hub/SlimeMuseumDayGate.h"
 #include "UI/SlimeTouchHUDWidget.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SVirtualJoystick.h"
@@ -40,7 +43,9 @@ namespace
 			|| Reason == ESlimeUIInputReason::Souvenir
 			|| Reason == ESlimeUIInputReason::ElementFormation
 			|| Reason == ESlimeUIInputReason::HotbarConfirm
-			|| Reason == ESlimeUIInputReason::LoadingGate;
+			|| Reason == ESlimeUIInputReason::LoadingGate
+			|| Reason == ESlimeUIInputReason::MuseumCalendar
+			|| Reason == ESlimeUIInputReason::HomeBuild;
 	}
 
 	bool ShouldShowCursor(ESlimeUIInputReason Reason)
@@ -533,6 +538,31 @@ void ASlimeFablePlayerController::ApplyTopUIInput()
 
 bool ASlimeFablePlayerController::DismissOverlayUI()
 {
+	if (HasUIInput(ESlimeUIInputReason::HomeBuild))
+	{
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			if (USlimeBuildModeComponent* Build = ControlledPawn->FindComponentByClass<USlimeBuildModeComponent>())
+			{
+				Build->NotifyCatalogClosed();
+			}
+		}
+		else
+		{
+			PopUIInput(ESlimeUIInputReason::HomeBuild);
+		}
+		return true;
+	}
+	if (HasUIInput(ESlimeUIInputReason::MuseumCalendar))
+	{
+		if (ASlimeMuseumDayGate::CloseOpenCalendar())
+		{
+			return true;
+		}
+		PopUIInput(ESlimeUIInputReason::MuseumCalendar);
+		return true;
+	}
+
 	UGameInstance* GI = GetGameInstance();
 	UQuestSubsystem* Quests = GI ? GI->GetSubsystem<UQuestSubsystem>() : nullptr;
 	USlimeInventorySubsystem* Inventory = GI ? GI->GetSubsystem<USlimeInventorySubsystem>() : nullptr;
@@ -622,6 +652,17 @@ bool ASlimeFablePlayerController::DismissOverlayUI()
 
 void ASlimeFablePlayerController::TogglePauseMenu()
 {
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (USlimeBuildModeComponent* Build = ControlledPawn->FindComponentByClass<USlimeBuildModeComponent>())
+		{
+			if (Build->HandleEscape())
+			{
+				return;
+			}
+		}
+	}
+
 	if (DismissOverlayUI())
 	{
 		return;
@@ -671,6 +712,7 @@ void ASlimeFablePlayerController::OpenPauseMenu()
 		PauseMenuWidget->OnLevelSelectRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseLevelSelect);
 		PauseMenuWidget->OnMainMenuRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseMainMenu);
 		PauseMenuWidget->OnReturnToHubRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseReturnToHub);
+		PauseMenuWidget->OnReturnToMuseumRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseReturnToMuseum);
 		PauseMenuWidget->OnResetDayRequested.AddDynamic(this, &ASlimeFablePlayerController::HandlePauseResetDay);
 	}
 
@@ -723,6 +765,18 @@ void ASlimeFablePlayerController::HandlePauseMainMenu()
 		}
 	}
 	ClosePauseMenu();
+}
+
+void ASlimeFablePlayerController::HandlePauseReturnToMuseum()
+{
+	ClosePauseMenu();
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UDayLevelSubsystem* Days = GI->GetSubsystem<UDayLevelSubsystem>())
+		{
+			Days->TravelToMuseumHub(this);
+		}
+	}
 }
 
 void ASlimeFablePlayerController::HandlePauseReturnToHub()

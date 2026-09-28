@@ -22,6 +22,7 @@
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 #include "Quest/QuestSubsystem.h"
+#include "DayLevel/DayLevelSubsystem.h"
 
 UPauseMenuWidget::UPauseMenuWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -76,6 +77,10 @@ void UPauseMenuWidget::NativeConstruct()
 	if (ReturnToHubButton)
 	{
 		ReturnToHubButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnReturnToHubClicked);
+	}
+	if (ReturnToMuseumButton)
+	{
+		ReturnToMuseumButton->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::OnReturnToMuseumClicked);
 	}
 	if (ResetDayButton)
 	{
@@ -150,6 +155,7 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	{
 		bBuiltInCode = false;
 		EnsureReturnToHubButton();
+		EnsureReturnToMuseumButton();
 		EnsureResetDayButton();
 		return;
 	}
@@ -208,6 +214,7 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	TitleText = AddText(TEXT("TitleText"), FText::FromString(TEXT("暂停")));
 	ContinueButton = AddButton(TEXT("ContinueButton"), FText::FromString(TEXT("继续游戏")));
 	ReturnToHubButton = AddButton(TEXT("ReturnToHubButton"), FText::FromString(TEXT("回到大厅")));
+	ReturnToMuseumButton = AddButton(TEXT("ReturnToMuseumButton"), FText::FromString(TEXT("回到博物馆")));
 	ResetDayButton = AddButton(TEXT("ResetDayButton"), FText::FromString(TEXT("重制本关进度")));
 	LevelSelectButton = AddButton(TEXT("LevelSelectButton"), FText::FromString(TEXT("返回选关")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
@@ -259,6 +266,60 @@ void UPauseMenuWidget::EnsureReturnToHubButton()
 	Label->SetJustification(ETextJustify::Center);
 	ReturnToHubButton->AddChild(Label);
 	SizeBox->AddChild(ReturnToHubButton);
+
+	if (UPanelSlot* InsertedSlot = InsertParent->InsertChildAt(InsertIndex, SizeBox))
+	{
+		if (UVerticalBoxSlot* VSlot = Cast<UVerticalBoxSlot>(InsertedSlot))
+		{
+			VSlot->SetPadding(FMargin(0.f, 8.f));
+			VSlot->SetHorizontalAlignment(HAlign_Center);
+		}
+	}
+}
+
+void UPauseMenuWidget::EnsureReturnToMuseumButton()
+{
+	if (ReturnToMuseumButton || !WidgetTree)
+	{
+		return;
+	}
+
+	UPanelWidget* InsertParent = nullptr;
+	int32 InsertIndex = 2;
+	UWidget* Anchor = ReturnToHubButton ? static_cast<UWidget*>(ReturnToHubButton) : static_cast<UWidget*>(ContinueButton);
+	if (Anchor)
+	{
+		if (USizeBox* AnchorSize = Cast<USizeBox>(Anchor->GetParent()))
+		{
+			InsertParent = Cast<UPanelWidget>(AnchorSize->GetParent());
+			if (InsertParent)
+			{
+				InsertIndex = InsertParent->GetChildIndex(AnchorSize) + 1;
+			}
+		}
+		else if (UPanelWidget* Direct = Cast<UPanelWidget>(Anchor->GetParent()))
+		{
+			InsertParent = Direct;
+			InsertIndex = Direct->GetChildIndex(Anchor) + 1;
+		}
+	}
+	if (!InsertParent)
+	{
+		return;
+	}
+
+	USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(), TEXT("ReturnToMuseumButton_Size"));
+	SizeBox->SetWidthOverride(320.f);
+	SizeBox->SetHeightOverride(60.f);
+
+	ReturnToMuseumButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ReturnToMuseumButton"));
+	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(
+		UTextBlock::StaticClass(), TEXT("ReturnToMuseumButton_Label"));
+	Label->SetText(FText::FromString(TEXT("回到博物馆")));
+	Label->SetJustification(ETextJustify::Center);
+	ReturnToMuseumButton->AddChild(Label);
+	SizeBox->AddChild(ReturnToMuseumButton);
 
 	if (UPanelSlot* InsertedSlot = InsertParent->InsertChildAt(InsertIndex, SizeBox))
 	{
@@ -347,6 +408,27 @@ void UPauseMenuWidget::RefreshHubButtonVisibility()
 			Parent->SetVisibility(Vis);
 		}
 	}
+
+	bool bInMuseum = false;
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (const UDayLevelSubsystem* Days = GI->GetSubsystem<UDayLevelSubsystem>())
+			{
+				bInMuseum = Days->IsMuseumHubWorld(this);
+			}
+		}
+	}
+	const ESlateVisibility MuseumVis = bInMuseum ? ESlateVisibility::Collapsed : ESlateVisibility::Visible;
+	if (ReturnToMuseumButton)
+	{
+		ReturnToMuseumButton->SetVisibility(MuseumVis);
+		if (UWidget* Parent = ReturnToMuseumButton->GetParent())
+		{
+			Parent->SetVisibility(MuseumVis);
+		}
+	}
 }
 
 void UPauseMenuWidget::ApplyLook()
@@ -368,6 +450,7 @@ void UPauseMenuWidget::ApplyLook()
 	const FVector2D Size(320.f, 60.f);
 	FMenuUIStyle::ApplyMaterialButtonStyle(ContinueButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(ReturnToHubButton, BrushBtn, Size);
+	FMenuUIStyle::ApplyMaterialButtonStyle(ReturnToMuseumButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(ResetDayButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(LevelSelectButton, BrushBtn, Size);
 	FMenuUIStyle::ApplyMaterialButtonStyle(KeybindButton, BrushBtn, Size);
@@ -389,6 +472,7 @@ void UPauseMenuWidget::ApplyLook()
 	};
 	StyleLabel(ContinueButton);
 	StyleLabel(ReturnToHubButton);
+	StyleLabel(ReturnToMuseumButton);
 	StyleLabel(ResetDayButton);
 	StyleLabel(LevelSelectButton);
 	StyleLabel(KeybindButton);
@@ -404,6 +488,7 @@ void UPauseMenuWidget::ApplyLook()
 	};
 	BindHover(ContinueButton);
 	BindHover(ReturnToHubButton);
+	BindHover(ReturnToMuseumButton);
 	BindHover(ResetDayButton);
 	BindHover(LevelSelectButton);
 	BindHover(KeybindButton);
@@ -566,6 +651,11 @@ void UPauseMenuWidget::OnMainMenuClicked()
 void UPauseMenuWidget::OnReturnToHubClicked()
 {
 	OnReturnToHubRequested.Broadcast();
+}
+
+void UPauseMenuWidget::OnReturnToMuseumClicked()
+{
+	OnReturnToMuseumRequested.Broadcast();
 }
 
 void UPauseMenuWidget::OnResetDayClicked()

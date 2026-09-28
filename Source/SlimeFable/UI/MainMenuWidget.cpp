@@ -238,7 +238,7 @@ void UMainMenuWidget::BuildLayoutIfNeeded()
 	TitleText = AddText(TEXT("TitleText"), FText::FromString(TEXT("SlimeFable")));
 	TodayText = AddText(TEXT("TodayText"), FText::GetEmpty());
 	StatusText = AddText(TEXT("StatusText"), FText::GetEmpty());
-	PlayTodayButton = AddButton(TEXT("PlayTodayButton"), FText::FromString(TEXT("进入今日关卡")));
+	PlayTodayButton = AddButton(TEXT("PlayTodayButton"), FText::FromString(TEXT("进入时光博物馆")));
 	SelectLevelButton = AddButton(TEXT("SelectLevelButton"), FText::FromString(TEXT("选择关卡")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
 	GraphicsButton = AddButton(TEXT("GraphicsButton"), FText::FromString(TEXT("画质选择")));
@@ -349,9 +349,9 @@ void UMainMenuWidget::RefreshTodayInfo()
 	}
 
 	UDayLevelSubsystem* DayLevels = GetDayLevelSubsystem();
+	SetPlayLabel(TEXT("进入时光博物馆"));
 	if (!DayLevels)
 	{
-		SetPlayLabel(TEXT("进入今日关卡"));
 		ShowStatusError(TEXT("无法获取日关卡系统"));
 		if (PlayTodayButton)
 		{
@@ -360,16 +360,10 @@ void UMainMenuWidget::RefreshTodayInfo()
 		return;
 	}
 
-	const FString DayId = DayLevels->GetTodayDayId().Id.ToString();
-	SetPlayLabel(FString::Printf(TEXT("进入今日关卡（%s）"), *DayId));
-
 	const bool bHasRegistry = DayLevels->HasRegistry();
-	TSoftObjectPtr<UWorld> TodayLevel;
-	const bool bHasToday = bHasRegistry && DayLevels->GetTodayLevel(TodayLevel);
-
 	if (PlayTodayButton)
 	{
-		PlayTodayButton->SetIsEnabled(bHasToday);
+		PlayTodayButton->SetIsEnabled(true);
 	}
 	if (SelectLevelButton)
 	{
@@ -379,10 +373,6 @@ void UMainMenuWidget::RefreshTodayInfo()
 	if (!bHasRegistry)
 	{
 		ShowStatusError(TEXT("日关卡注册表未加载"));
-	}
-	else if (!bHasToday)
-	{
-		ShowStatusError(TEXT("今日关卡条目缺失"));
 	}
 }
 
@@ -399,10 +389,10 @@ void UMainMenuWidget::OnPlayTodayClicked()
 {
 	if (UDayLevelSubsystem* DayLevels = GetDayLevelSubsystem())
 	{
-		if (!DayLevels->TravelToToday(this) && StatusText)
+		if (!DayLevels->TravelToMuseumHub(this) && StatusText)
 		{
 			StatusText->SetVisibility(ESlateVisibility::Visible);
-			StatusText->SetText(FText::FromString(TEXT("无法进入今日关卡")));
+			StatusText->SetText(FText::FromString(TEXT("无法进入时光博物馆")));
 			FMenuUIStyle::ApplyBrushCJKFont(StatusText, 16.f, FMenuUIStyle::WarmMutedTextColor());
 		}
 	}

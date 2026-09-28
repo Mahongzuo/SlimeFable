@@ -28,6 +28,8 @@
 #include "SlimeElementComponent.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeHitProbe.h"
+#include "Farm/SlimeElementReceiver.h"
+#include "Hub/HomeBuild/SlimeHomeFluidPad.h"
 #include "SlimeStatusComponent.h"
 #include "UI/SlimeFloatingTextWidget.h"
 #include "GameFramework/Pawn.h"
@@ -80,18 +82,34 @@ namespace SlimeBodyPrivate
 	static const FName ParamGridDims(TEXT("GridDims"));
 	static const FName ParamGridInfo(TEXT("GridInfo"));
 
+	bool IsHomeFluidPadActor(const AActor* Actor)
+	{
+		for (const AActor* Cursor = Actor; Cursor; Cursor = Cursor->GetAttachParentActor())
+		{
+			if (Cursor->IsA(ASlimeHomeFluidPad::StaticClass()))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	bool OwnerLooksLikeNinjaLive(const AActor* Owner)
 	{
 		if (!Owner)
 		{
 			return false;
 		}
-		const FString ClassName = Owner->GetClass()->GetName();
-		if (ClassName.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase))
+		// Home fluid blueprints are children of NinjaLive_C with their own class names.
+		for (const UClass* Class = Owner->GetClass(); Class; Class = Class->GetSuperClass())
 		{
-			return true;
+			if (Class->GetName().Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
 		}
-		return Owner->GetName().Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase);
+		return Owner->GetName().Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase)
+			|| IsHomeFluidPadActor(Owner);
 	}
 
 	bool ComponentLooksLikeNinjaSimGeom(const UPrimitiveComponent* Component)
@@ -569,6 +587,37 @@ void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
 			FCollisionShape::MakeSphere(FragmentAttackRadius),
 			QueryParams);
 
+		FCollisionObjectQueryParams WorldParams;
+		WorldParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		WorldParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+		TArray<FOverlapResult> WorldOverlaps;
+		World->OverlapMultiByObjectType(
+			WorldOverlaps,
+			Center,
+			FQuat::Identity,
+			WorldParams,
+			FCollisionShape::MakeSphere(FMath::Max(FragmentMeleeRange, 80.f)),
+			QueryParams);
+		for (const FOverlapResult& Overlap : WorldOverlaps)
+		{
+			AActor* Candidate = Overlap.GetActor();
+			if (!Candidate || !Candidate->GetClass()->ImplementsInterface(USlimeElementReceiver::StaticClass()))
+			{
+				continue;
+			}
+			if (FVector::DistSquared(Center, Candidate->GetActorLocation()) > MeleeRangeSq)
+			{
+				continue;
+			}
+			float& ElementCd = FragmentAttackCooldownRemaining.FindOrAdd(Shot.Id);
+			if (ElementCd <= KINDA_SMALL_NUMBER)
+			{
+				SlimeElementDelivery::NotifyActor(Candidate, Element, Owner, 1.f);
+				ElementCd = Interval;
+			}
+			break;
+		}
+
 		AActor* BestTarget = nullptr;
 		float BestDistSq = RadiusSq;
 		for (const FOverlapResult& Overlap : Overlaps)
@@ -641,6 +690,7 @@ void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
 			{
 				Status->ApplyAura(Element, Owner);
 			}
+			SlimeElementDelivery::NotifyActor(BestTarget, Element, Owner, 1.f);
 		}
 		Cd = Interval;
 	}
@@ -1584,6 +1634,11 @@ bool USlimeBodyComponent::ShouldIgnoreFluidNinjaCollider(const UPrimitiveCompone
 	if (!Component)
 	{
 		return false;
+	}
+	// The pad's AimQuery and anything spawned under it is never solid for the slime.
+	if (Component->GetOwner() && Component->GetOwner()->IsA(ASlimeHomeFluidPad::StaticClass()))
+	{
+		return true;
 	}
 	if (!ComponentLooksLikeNinjaSimGeom(Component))
 	{

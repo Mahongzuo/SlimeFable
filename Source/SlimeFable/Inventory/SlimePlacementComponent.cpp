@@ -2,6 +2,8 @@
 
 #include "SlimePlacementComponent.h"
 
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
+
 #include "SlimeItemDefinition.h"
 #include "SlimePlacePreview.h"
 #include "SlimePlacedActor.h"
@@ -25,6 +27,10 @@ bool USlimePlacementComponent::BeginPlacement(USlimePlaceableDefinition* Definit
 	if (!Definition)
 	{
 		return false;
+	}
+	if (USlimeBuildModeComponent* Build = GetOwner() ? GetOwner()->FindComponentByClass<USlimeBuildModeComponent>() : nullptr)
+	{
+		return Build->BeginBagPlacement(Definition);
 	}
 
 	CancelPlacement();
@@ -106,6 +112,10 @@ bool USlimePlacementComponent::ConfirmPlacement()
 void USlimePlacementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (GetOwner() && GetOwner()->FindComponentByClass<USlimeBuildModeComponent>())
+	{
+		return;
+	}
 	if (ActiveDefinition)
 	{
 		UpdatePreview();

@@ -47,6 +47,8 @@ protected:
 	UFUNCTION() void OnTabConsumable();
 	UFUNCTION() void OnTabPlaceable();
 	UFUNCTION() void OnTabSouvenir();
+	UFUNCTION() void OnTabSeed();
+	void EnsureSeedTab();
 	UFUNCTION() void OnPrimaryActionClicked();
 	UFUNCTION() void OnDiscardClicked();
 	void EnsureDiscardButton();
@@ -66,6 +68,7 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> TabConsumable;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> TabPlaceable;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> TabSouvenir;
+	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> TabSeed;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UUniformGridPanel> ItemGrid;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UImage> DetailIcon;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UTextBlock> DetailName;
@@ -82,9 +85,9 @@ protected:
 	/** After a successful assign, highlight this hotbar cell once. */
 	int32 FlashHotbarSlot = INDEX_NONE;
 
-	static constexpr int32 GridColumns = 4;
-	static constexpr int32 GridRows = 3;
-	static constexpr float CellSize = 88.f;
+	static constexpr int32 GridColumns = 6;
+	static constexpr int32 MinVisibleRows = 4;
+	static constexpr float CellSize = 120.f;
 	static constexpr float HotbarCellSize = 52.f;
 
 	UPROPERTY()

@@ -28,6 +28,9 @@ public:
 	 * @return number of nodes and variables touched, or -1 on bad input.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
+	static bool ReparentBlueprint(UBlueprint* Blueprint, UClass* NewParent);
+
+	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
 	static int32 RetargetBlueprintClassRefs(UBlueprint* Blueprint, UClass* OldClass, UClass* NewClass);
 
 	/**
@@ -65,6 +68,14 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
 	static int32 RemoveFunctionCallNodes(UBlueprint* Blueprint, FName FunctionName, FName GraphName);
+
+	/**
+	 * Reset orphaned Select / Switch-on-enum pins (e.g. Superhero Sand/Water after we kept
+	 * Slime Character/Concrete/Glass surfaces). Reconstructs the node. Does not merge pack Config.
+	 * @return nodes refreshed, or -1 on bad input.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")
+	static int32 SanitizeOrphanedEnumPins(UBlueprint* Blueprint);
 
 	/** Human-readable dump of every graph: one line per node with its pins and links. Diagnostics for imported Lyra BPs. */
 	UFUNCTION(BlueprintCallable, Category = "Slime|Editor")

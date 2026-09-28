@@ -12,5 +12,6 @@ public class SlimeFableEditorTarget : TargetRules
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("SlimeFable");
 		ExtraModuleNames.Add("LyraGame");
+		ExtraModuleNames.Add("SlimeFableEditor");
 	}
 }

@@ -15,6 +15,8 @@ class UMainMenuWidget;
 class UDayLevelSubsystem;
 class UDaySlotWidget;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLevelSelectClosed);
+
 UCLASS()
 class SLIMEFABLE_API ULevelSelectWidget : public UUserWidget
 {
@@ -29,6 +31,9 @@ public:
 	void SetParentMenu(UMainMenuWidget* InParent);
 	void JumpToTodayMonth();
 	void RefreshForCurrentMonth();
+
+	UPROPERTY(BlueprintAssignable, Category = "UI")
+	FOnLevelSelectClosed OnClosed;
 
 	UFUNCTION()
 	void HandleDaySlotClicked(FName DayId);

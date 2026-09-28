@@ -30,6 +30,7 @@ public class SlimeFable : ModuleRules
 			"MediaAssets",
 			"AssetRegistry",
 			"AnimGraphRuntime",
+			"AnimationCore",
 			"PoseSearch",
 			"Chooser",
 			"AnimationLocomotionLibraryRuntime",
@@ -63,7 +64,10 @@ public class SlimeFable : ModuleRules
 				"BlueprintGraph",
 				"PoseSearchEditor",
 				"AnimationWarpingEditor",
-				"Kismet"
+				"Kismet",
+				"PhysicsUtilities",
+				"KawaiiPhysics",
+				"KawaiiPhysicsEd"
 			});
 		}
 
@@ -79,6 +83,8 @@ public class SlimeFable : ModuleRules
 			"SlimeFable/Enemy",
 			"SlimeFable/Player",
 			"SlimeFable/Inventory",
+			"SlimeFable/Hub",
+			"SlimeFable/Farm",
 			"SlimeFable/Settings",
 			"SlimeFable/UI",
 			"SlimeFable/Variant_Platforming",

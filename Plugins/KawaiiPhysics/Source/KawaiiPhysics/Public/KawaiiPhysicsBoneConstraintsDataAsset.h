@@ -1,0 +1,134 @@
+﻿// Copyright 2019-2026 pafuhana1213. All Rights Reserved.
+
+#pragma once
+
+#include "KawaiiPhysicsBoneConstraintTypes.h"
+#include "Engine/DataAsset.h"
+#include "Interfaces/Interface_BoneReferenceSkeletonProvider.h"
+#include "KawaiiPhysicsBoneConstraintsDataAsset.generated.h"
+
+/**
+ * BoneConstraintの設定をDataAssetで保持するための構造体。
+ * Struct representing the data for modifying bone constraints in KawaiiPhysics.
+ */
+USTRUCT(BlueprintType)
+struct KAWAIIPHYSICS_API FModifyBoneConstraintData
+{
+	GENERATED_BODY()
+
+	/** Name of the first bone (deprecated) */
+	UPROPERTY()
+	FName BoneName1;
+
+	/** Name of the second bone (deprecated) */
+	UPROPERTY()
+	FName BoneName2;
+
+	/** 1本目のボーン参照 / Reference to the first bone */
+	UPROPERTY(EditAnywhere, Category = "Kawaii Physics")
+	FBoneReference BoneReference1;
+
+	/** 2本目のボーン参照 / Reference to the second bone */
+	UPROPERTY(EditAnywhere, Category = "Kawaii Physics")
+	FBoneReference BoneReference2;
+
+	/** ComplianceTypeを個別に上書きするフラグ / Whether to override the compliance type */
+	UPROPERTY(EditAnywhere, Category = "Kawaii Physics", meta=(InlineEditConditionToggle))
+	bool bOverrideCompliance = false;
+
+	/** 上書きする場合に使用するComplianceType / The compliance type to use if overriding */
+	UPROPERTY(EditAnywhere, Category = "Kawaii Physics", meta=(EditCondition="bOverrideCompliance"))
+	EXPBDComplianceType ComplianceType = EXPBDComplianceType::Leather;
+
+	/**
+	 * このConstraintをBoneConstraintSubdivisionの対象から除外する（構造/対角Constraint用のオプトアウト）
+	 * Exclude this constraint from BoneConstraintSubdivision (opt-out for structural/diagonal constraints).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Kawaii Physics")
+	bool bExcludeFromSubdivision = false;
+
+	/**
+	 * Updates the bone constraint data with the given constraint.
+	 * @param BoneConstraint The bone constraint to update from.
+	 */
+	void Update(const FModifyBoneConstraint& BoneConstraint);
+};
+
+/**
+ * ボーン名のマッチングに使う正規表現パターンのペア。
+ * Struct representing a set of regex patterns for bones in KawaiiPhysics.
+ */
+USTRUCT(BlueprintType)
+struct FRegexPatternBoneSet
+{
+	GENERATED_BODY()
+
+	/** 1本目のボーン名にマッチさせる正規表現パターン / Regex pattern for the first bone */
+	UPROPERTY(EditAnywhere, Category="Helper")
+	FString RegexPatternBone1;
+
+	/** 2本目のボーン名にマッチさせる正規表現パターン / Regex pattern for the second bone */
+	UPROPERTY(EditAnywhere, Category="Helper")
+	FString RegexPatternBone2;
+};
+
+
+/**
+ * BoneConstraintの設定をまとめて定義し、複数のKawaiiPhysicsノードで流用するためのDataAsset。
+ * Data asset for managing bone constraints in KawaiiPhysics.
+ */
+UCLASS(Blueprintable)
+class KAWAIIPHYSICS_API UKawaiiPhysicsBoneConstraintsDataAsset : public UDataAsset,
+                                                                 public IBoneReferenceSkeletonProvider
+{
+	GENERATED_BODY()
+
+public:
+	/** BoneConstraintの設定リスト / Array of bone constraint data */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bone Constraint (Experimental)",
+		meta=(TitleProperty="{BoneReference1} - {BoneReference2}"))
+	TArray<FModifyBoneConstraintData> BoneConstraintsData;
+
+#if WITH_EDITORONLY_DATA
+
+	/** ボーンペアを自動生成するための正規表現パターンリスト / List of regex patterns for bones */
+	UPROPERTY(EditAnywhere, Category="Helper")
+	TArray<FRegexPatternBoneSet> RegexPatternList;
+
+	/** エディタでのプレビューに使用するSkeleton / Preview skeleton for editor */
+	UPROPERTY(EditAnywhere, Category = "Skeleton")
+	TSoftObjectPtr<USkeleton> PreviewSkeleton;
+
+	/** プレビュー用のボーンリスト / List of preview bones */
+	UPROPERTY(VisibleAnywhere, Category = "Skeleton", meta= (EditCondition=false))
+	TArray<FBoneReference> PreviewBoneList;
+
+	/** String representation of the preview bone list */
+	UPROPERTY()
+	FString PreviewBoneListString;
+#endif
+
+	// Begin UObject Interface.
+	virtual void Serialize(FStructuredArchiveRecord Record) override;
+	virtual void PostLoad() override;
+	// End UObject Interface.
+
+	// IBoneReferenceSkeletonProvider interface
+	virtual USkeleton* GetSkeleton(bool& bInvalidSkeletonIsError, const IPropertyHandle* PropertyHandle) override;
+
+	/** Generates bone constraints based on the current data */
+	TArray<FModifyBoneConstraint> GenerateBoneConstraints();
+
+#if WITH_EDITOR
+
+	/** Applies regex patterns to the bone constraints */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Kawaii Physics|Helper")
+	void ApplyRegex();
+
+	/** Updates the preview bone list */
+	void UpdatePreviewBoneList();
+
+	/** Handles property changes in the editor */
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+};

@@ -39,8 +39,10 @@ void USlimeInventorySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
 {
-	const FSoftObjectPath PotionIconPath(TEXT("/Game/UIMaterialLab/Textures/T_UI_Potion.T_UI_Potion"));
-	const FSoftObjectPath SwordIconPath(TEXT("/Game/UIMaterialLab/Textures/T_UI_Sword.T_UI_Sword"));
+	auto IconPath = [](const TCHAR* Name)
+	{
+		return FSoftObjectPath(FString::Printf(TEXT("/Game/_Slime/Hub/Icons/T_Icon_%s.T_Icon_%s"), Name, Name));
+	};
 
 	auto MakeConsumable = [this](FName Id, const FString& Name, const FString& Desc, float Heal, float CdReduce,
 		float DmgMul, float Duration, const FSoftObjectPath& IconPath)
@@ -66,20 +68,20 @@ void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
 
 	auto MakePlaceable = [this](FName Id, const FString& Name)
 	{
-		if (Definitions.Contains(Id))
+		USlimePlaceableDefinition* Def = Cast<USlimePlaceableDefinition>(FindDefinition(Id));
+		if (!Def)
 		{
-			return;
+			Def = NewObject<USlimePlaceableDefinition>(this, Id);
+			Def->ItemId = Id;
+			Definitions.Add(Id, Def);
 		}
-		USlimePlaceableDefinition* Def = NewObject<USlimePlaceableDefinition>(this, Id);
-		Def->ItemId = Id;
 		Def->DisplayName = FText::FromString(Name);
-		Def->Description = FText::FromString(TEXT("可在平坦地面放置的测试物品"));
+		Def->Description = FText::FromString(TEXT("可用于家园建造的石板"));
 		Def->PlacedActorClass = TSoftClassPtr<ASlimePlacedActor>(
 			FSoftObjectPath(TEXT("/Game/Blueprints/Items/BP_PlacedProp.BP_PlacedProp_C")));
 		Def->PreviewMesh = TSoftObjectPtr<UStaticMesh>(
 			FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
 		Def->PlacedMeshScale = FVector(0.55f, 0.55f, 0.28f);
-		Definitions.Add(Id, Def);
 	};
 
 	auto MakeSouvenir = [this](FName Id, const FString& Name)
@@ -113,12 +115,12 @@ void USlimeInventorySubsystem::EnsureBuiltinDefinitions()
 	};
 
 	MakeConsumable(TEXT("HealJelly"), TEXT("回血药"),
-		TEXT("立即恢复 30 点生命。"), 30.f, 0.f, 1.f, 0.f, PotionIconPath);
+		TEXT("立即恢复 30 点生命。"), 30.f, 0.f, 1.f, 0.f, IconPath(TEXT("HealJelly")));
 	MakeConsumable(TEXT("CdTea"), TEXT("冷却茶"),
-		TEXT("缩短技能冷却 5 秒。"), 0.f, 5.f, 1.f, 0.f, PotionIconPath);
+		TEXT("缩短技能冷却 5 秒。"), 0.f, 5.f, 1.f, 0.f, IconPath(TEXT("CdTea")));
 	MakeConsumable(TEXT("PowerCandy"), TEXT("加攻药"),
-		TEXT("12 秒内攻击伤害 ×1.35。"), 0.f, 0.f, 1.35f, 12.f, SwordIconPath);
-	MakePlaceable(TEXT("FlatStone"), TEXT("平坦石"));
+		TEXT("12 秒内攻击伤害 ×1.35。"), 0.f, 0.f, 1.35f, 12.f, IconPath(TEXT("PowerCandy")));
+	MakePlaceable(TEXT("FlatStone"), TEXT("石板"));
 	MakeSouvenir(TEXT("OldPostcard"), TEXT("旧明信片"));
 }
 

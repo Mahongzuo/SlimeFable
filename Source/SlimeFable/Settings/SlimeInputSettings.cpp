@@ -18,7 +18,7 @@ namespace SlimeInputPrivate
 	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
 	static const TCHAR* PlayModeKey = TEXT("PlayInputMode");
 	static const TCHAR* HandednessKey = TEXT("TouchHandedness");
-	static constexpr int32 CurrentBindSchemeVersion = 7;
+	static constexpr int32 CurrentBindSchemeVersion = 8;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
 	static const TCHAR* DefaultMoveContextPath =
@@ -99,6 +99,8 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::CheatConsole: return EKeys::Enter;
 	case ESlimeInputAction::Sprint: return EKeys::LeftShift;
 	case ESlimeInputAction::BodySkin: return EKeys::Seven;
+	case ESlimeInputAction::BuildCatalog: return EKeys::F1;
+	case ESlimeInputAction::BuildClearMode: return EKeys::X;
 	default: return EKeys::Invalid;
 	}
 }
@@ -163,6 +165,8 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::CheatConsole: return FText::FromString(TEXT("作弊台"));
 	case ESlimeInputAction::Sprint: return FText::FromString(TEXT("冲刺"));
 	case ESlimeInputAction::BodySkin: return FText::FromString(TEXT("史莱姆皮肤"));
+	case ESlimeInputAction::BuildCatalog: return FText::FromString(TEXT("建造目录"));
+	case ESlimeInputAction::BuildClearMode: return FText::FromString(TEXT("建造清除"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -322,7 +326,9 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 		ESlimeInputAction::ElementFormation,
 		ESlimeInputAction::CheatConsole,
 		ESlimeInputAction::Sprint,
-		ESlimeInputAction::BodySkin // v7
+		ESlimeInputAction::BodySkin, // v7
+		ESlimeInputAction::BuildCatalog, // v8
+		ESlimeInputAction::BuildClearMode
 	};
 	for (ESlimeInputAction Action : NewActions)
 	{
@@ -656,6 +662,7 @@ FKey USlimeInputSettings::GetDefaultGamepadKey(ESlimeInputAction Action)
 	case ESlimeInputAction::Morph: return EKeys::Gamepad_FaceButton_Top;
 	case ESlimeInputAction::Dodge: return EKeys::Gamepad_FaceButton_Right;
 	case ESlimeInputAction::Sprint: return EKeys::Gamepad_LeftThumbstick;
+	case ESlimeInputAction::BuildCatalog: return EKeys::Gamepad_Special_Right;
 	default: return EKeys::Invalid;
 	}
 }

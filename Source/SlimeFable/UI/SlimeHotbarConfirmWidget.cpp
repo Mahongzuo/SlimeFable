@@ -6,6 +6,7 @@
 #include "Slime/SlimeAbilityComponent.h"
 #include "SlimeFablePlayerController.h"
 #include "Inventory/SlimeInventorySubsystem.h"
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
 #include "Inventory/SlimeItemDefinition.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -39,6 +40,10 @@ void USlimeHotbarConfirmWidget::NativeConstruct()
 	if (DiscardButton)
 	{
 		DiscardButton->OnClicked.AddUniqueDynamic(this, &USlimeHotbarConfirmWidget::OnDiscardClicked);
+	}
+	if (ClearModeButton)
+	{
+		ClearModeButton->OnClicked.AddUniqueDynamic(this, &USlimeHotbarConfirmWidget::OnClearModeClicked);
 	}
 	if (CancelButton)
 	{
@@ -84,7 +89,7 @@ void USlimeHotbarConfirmWidget::Setup(int32 InSlotIndex, FName InItemId, const F
 
 void USlimeHotbarConfirmWidget::BuildLayoutIfNeeded()
 {
-	if (TitleText && UseButton && DiscardButton && CancelButton)
+	if (TitleText && UseButton && DiscardButton && ClearModeButton && CancelButton)
 	{
 		bBuiltInCode = false;
 		return;
@@ -151,6 +156,7 @@ void USlimeHotbarConfirmWidget::BuildLayoutIfNeeded()
 	};
 	MakeBtn(TEXT("UseButton"), TEXT("使用"), UseButton);
 	MakeBtn(TEXT("DiscardButton"), TEXT("丢弃"), DiscardButton);
+	MakeBtn(TEXT("ClearModeButton"), TEXT("清除模式"), ClearModeButton);
 	MakeBtn(TEXT("CancelButton"), TEXT("取消"), CancelButton);
 }
 
@@ -179,6 +185,7 @@ void USlimeHotbarConfirmWidget::ApplyLook()
 	};
 	StyleBtn(UseButton);
 	StyleBtn(DiscardButton);
+	StyleBtn(ClearModeButton);
 	StyleBtn(CancelButton);
 }
 
@@ -225,6 +232,18 @@ void USlimeHotbarConfirmWidget::OnDiscardClicked()
 				Inv->RemoveItem(ItemId, 1);
 			}
 			Inv->ClearHotbar(SlotIndex);
+		}
+	}
+	CloseSelf();
+}
+
+void USlimeHotbarConfirmWidget::OnClearModeClicked()
+{
+	if (APawn* Pawn = GetOwningPlayerPawn())
+	{
+		if (USlimeBuildModeComponent* Build = Pawn->FindComponentByClass<USlimeBuildModeComponent>())
+		{
+			Build->BeginClearMode();
 		}
 	}
 	CloseSelf();

@@ -9,6 +9,7 @@
 class ASlimeWorldPickup;
 class ASlimePlacedActor;
 class AQuestInteractActor;
+class ASlimeHubInteractActor;
 class AEnemyCharacter;
 class APawn;
 class USlimeInventoryWidget;
@@ -45,6 +46,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	AQuestInteractActor* GetFocusedQuest() const { return FocusedQuest.Get(); }
 
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	ASlimeHubInteractActor* GetFocusedHub() const { return FocusedHub.Get(); }
+
 	/** World location for the F-prompt (pickup or placed). Zero if none. */
 	UFUNCTION(BlueprintPure, Category = "Inventory")
 	bool GetFocusedPromptWorldLocation(FVector& OutLocation) const;
@@ -67,6 +71,7 @@ protected:
 	TWeakObjectPtr<ASlimeWorldPickup> FocusedPickup;
 	TWeakObjectPtr<ASlimePlacedActor> FocusedPlaced;
 	TWeakObjectPtr<AQuestInteractActor> FocusedQuest;
+	TWeakObjectPtr<ASlimeHubInteractActor> FocusedHub;
 	TWeakObjectPtr<APawn> FocusedDevour;
 
 	UPROPERTY(Transient)

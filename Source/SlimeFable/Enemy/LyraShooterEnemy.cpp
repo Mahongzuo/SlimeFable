@@ -747,12 +747,9 @@ void ALyraShooterEnemy::HandleDeath()
 	{
 		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
-	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	if (USkeletalMeshComponent* MeshComp = GetDeathRagdollMesh())
 	{
-		MeshComp->SetCollisionProfileName(TEXT("Ragdoll"));
-		MeshComp->SetAllBodiesSimulatePhysics(true);
-		MeshComp->SetSimulatePhysics(true);
-		MeshComp->WakeAllRigidBodies();
+		EnableDeathRagdoll(MeshComp);
 	}
 	if (Health)
 	{
@@ -765,6 +762,19 @@ void ALyraShooterEnemy::HandleDeath()
 			}
 		}), DeathRagdollSeconds, false);
 	}
+}
+
+void ALyraShooterEnemy::EnableDeathRagdoll(USkeletalMeshComponent* MeshComp)
+{
+	if (!MeshComp)
+	{
+		return;
+	}
+	MeshComp->SetCollisionProfileName(TEXT("Ragdoll"));
+	MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	MeshComp->SetAllBodiesSimulatePhysics(true);
+	MeshComp->SetSimulatePhysics(true);
+	MeshComp->WakeAllRigidBodies();
 }
 
 void ALyraShooterEnemy::ApplyHealing(float Healing, AActor* Healer)
@@ -804,6 +814,11 @@ FText ALyraShooterEnemy::GetResolvedDisplayName() const
 FLinearColor ALyraShooterEnemy::ResolveDevourWheelTint() const
 {
 	return FLinearColor(0.35f, 0.45f, 0.28f);
+}
+
+USkeletalMeshComponent* ALyraShooterEnemy::GetDeathRagdollMesh() const
+{
+	return GetMesh();
 }
 
 USkeletalMeshComponent* ALyraShooterEnemy::GetPrimarySkeletalMesh() const

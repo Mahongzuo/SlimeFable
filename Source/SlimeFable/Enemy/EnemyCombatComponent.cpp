@@ -18,6 +18,7 @@
 #include "EnemyFighter.h"
 #include "GaspSandboxPawn.h"
 #include "PhoebeEnemy.h"
+#include "SuperHeroXinEnemy.h"
 #include "PhoebeAnimSetupLibrary.h"
 #include "EnemyProjectile.h"
 #include "PigEnemy.h"
@@ -729,6 +730,11 @@ bool UEnemyCombatComponent::PlayOwnerAttackMontage(UAnimMontage* Montage)
 		{
 			return true;
 		}
+	}
+
+	if (ASuperHeroXinEnemy* Xin = Cast<ASuperHeroXinEnemy>(GetOwner()))
+	{
+		return Xin->PlaySourceAttackMontage(Montage);
 	}
 
 	if (UAnimInstance* Anim = ResolveOwnerAnimInstance(Montage))

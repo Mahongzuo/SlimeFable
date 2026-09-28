@@ -23,7 +23,9 @@ enum class ESlimeUIInputReason : uint8
 	AltCursor,
 	ElementFormation,
 	HotbarConfirm,
-	CheatConsole
+	CheatConsole,
+	MuseumCalendar,
+	HomeBuild
 };
 
 struct FSlimeUIInputEntry
@@ -121,6 +123,9 @@ protected:
 
 	UFUNCTION()
 	void HandlePauseReturnToHub();
+
+	UFUNCTION()
+	void HandlePauseReturnToMuseum();
 
 	UFUNCTION()
 	void HandlePauseResetDay();

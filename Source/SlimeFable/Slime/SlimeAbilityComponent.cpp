@@ -2,6 +2,8 @@
 
 #include "SlimeAbilityComponent.h"
 
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
+
 #include "Blueprint/UserWidget.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
@@ -271,7 +273,9 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		}
 	}
 
-	const bool bAbsorb = IsDown(ESlimeInputAction::Absorb, EKeys::X);
+	const bool bBuildMode = GetOwner() && GetOwner()->FindComponentByClass<USlimeBuildModeComponent>()
+		&& GetOwner()->FindComponentByClass<USlimeBuildModeComponent>()->IsBuildInputActive();
+	const bool bAbsorb = !bBuildMode && IsDown(ESlimeInputAction::Absorb, EKeys::X);
 	bPollAbsorbDown = bAbsorb;
 	const bool bDevourOwnsShots = Devour && Devour->IsDevouring();
 	if (Body && !bDevourOwnsShots)
@@ -356,7 +360,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 		CloseWheel(true);
 	}
 
-	if (!bCombatLocked && !bPhantomWheelOpen && !bWheelOpen)
+	if (!bCombatLocked && !bPhantomWheelOpen && !bWheelOpen && !bBuildMode)
 	{
 		static const ESlimeInputAction ElementActions[6] = {
 			ESlimeInputAction::Element1, ESlimeInputAction::Element2, ESlimeInputAction::Element3,

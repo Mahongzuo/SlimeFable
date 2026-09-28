@@ -27,6 +27,7 @@
 #include "SlimeHitProbe.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockOnComponent.h"
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
 #include "SlimeMorphComponent.h"
 #include "SlimeFable.h"
 #include "SlimeSkillProjectile.h"
@@ -474,6 +475,14 @@ void USlimeCombatComponent::PollCombatKeys(float DeltaTime)
 	if (!PC)
 	{
 		return;
+	}
+
+	if (const USlimeBuildModeComponent* Build = GetOwner() ? GetOwner()->FindComponentByClass<USlimeBuildModeComponent>() : nullptr)
+	{
+		if (Build->IsBuildInputActive())
+		{
+			return;
+		}
 	}
 
 	// Lock combat inputs while a morph sequence is running or the player is morphed.

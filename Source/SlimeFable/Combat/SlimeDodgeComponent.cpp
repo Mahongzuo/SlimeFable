@@ -11,6 +11,7 @@
 #include "EnemyTower.h"
 #include "GaspSandboxPawn.h"
 #include "LyraShooterEnemy.h"
+#include "SuperHeroXinEnemy.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -247,6 +248,27 @@ bool USlimeDodgeComponent::IsInEnemyThreatRange() const
 		}
 	}
 
+	for (TActorIterator<ASuperHeroXinEnemy> It(World); It; ++It)
+	{
+		ASuperHeroXinEnemy* Xin = *It;
+		if (!Xin || Xin == Owner || Xin->IsMorphTarget() || Xin->IsInDeathSequence()
+			|| Xin->IsPlayerControlled())
+		{
+			continue;
+		}
+		if (const USlimeHealthComponent* EnemyHealth = Xin->GetEnemyHealth())
+		{
+			if (!EnemyHealth->IsAlive())
+			{
+				continue;
+			}
+		}
+		if (FVector::DistSquared(Loc, Xin->GetActorLocation()) <= FMath::Square(Xin->DetectRange))
+		{
+			return true;
+		}
+	}
+
 	return false;
 }
 
@@ -290,6 +312,15 @@ void USlimeDodgeComponent::TryHandleRightClick()
 	if (APhoebeEnemy* Phoebe = Cast<APhoebeEnemy>(GetOwner()))
 	{
 		if (!Phoebe->WantsCombatDodge())
+		{
+			return;
+		}
+	}
+
+	// SuperHeroXin: out of threat, leave RMB for Superhero IA_Dodge flight dash.
+	if (ASuperHeroXinEnemy* Xin = Cast<ASuperHeroXinEnemy>(GetOwner()))
+	{
+		if (!Xin->WantsCombatDodge())
 		{
 			return;
 		}

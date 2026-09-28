@@ -184,8 +184,13 @@ void ULyraHealthComponent::HandleOutOfHealth(AActor* DamageInstigator, AActor* D
 			//@TODO: Fill out context tags, and any non-ability-system source/instigator tags
 			//@TODO: Determine if it's an opposing team kill, self-own, team kill, etc...
 
-			UGameplayMessageSubsystem& MessageSystem = UGameplayMessageSubsystem::Get(GetWorld());
-			MessageSystem.BroadcastMessage(Message.Verb, Message);
+			// W_Reticle_* casts Instigator/Target to LyraPlayerState. AI Xin has no PlayerState —
+			// broadcasting a pawn/None here spams Accessed None on death.
+			if (Cast<APlayerState>(Message.Instigator) && Cast<APlayerState>(Message.Target))
+			{
+				UGameplayMessageSubsystem& MessageSystem = UGameplayMessageSubsystem::Get(GetWorld());
+				MessageSystem.BroadcastMessage(Message.Verb, Message);
+			}
 		}
 
 		//@TODO: assist messages (could compute from damage dealt elsewhere)?

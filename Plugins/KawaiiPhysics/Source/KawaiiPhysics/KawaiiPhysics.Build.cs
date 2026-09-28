@@ -1,0 +1,43 @@
+// Copyright 2019-2026 pafuhana1213. All Rights Reserved.
+
+using UnrealBuildTool;
+
+public class KawaiiPhysics : ModuleRules
+{
+	public KawaiiPhysics(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+		PublicDependencyModuleNames.AddRange(
+			new[]
+			{
+				"Core",
+				"AnimGraphRuntime",
+				"CoreUObject",
+				"Engine",
+				"GameplayTags",
+				"DeveloperSettings",
+			}
+		);
+
+		// StructUtils plugin has been integrated into the engine starting from 5.5
+		if (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion <= 4)
+		{
+			PublicDependencyModuleNames.Add("StructUtils");
+		}
+
+		PrivateDependencyModuleNames.AddRange(
+			new[]
+			{
+				"Slate",
+				"SlateCore",
+				"PhysicsCore",
+			}
+		);
+
+		if (Target.bBuildEditor)
+		{
+			PublicDependencyModuleNames.Add("UnrealEd");
+		}
+	}
+}

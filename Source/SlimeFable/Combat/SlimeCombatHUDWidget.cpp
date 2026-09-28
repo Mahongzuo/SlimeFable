@@ -27,6 +27,7 @@
 #include "SlimeCharacter.h"
 #include "SlimeElementComponent.h"
 #include "SlimeLockOnComponent.h"
+#include "SlimeLockTarget.h"
 #include "SlimeDevourComponent.h"
 #include "SlimeHealthComponent.h"
 #include "EnemyCharacter.h"
@@ -186,7 +187,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		StackSlot->SetAnchors(FAnchors(1.f, 0.32f, 1.f, 0.32f));
 		StackSlot->SetAlignment(FVector2D(1.f, 0.5f));
 		StackSlot->SetAutoSize(true);
-		StackSlot->SetPosition(FVector2D(-210.f, 0.f));
+		StackSlot->SetPosition(FVector2D(-24.f, 0.f));
 	}
 
 	ComboText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ComboText"));
@@ -558,6 +559,20 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 	FMenuUIStyle::ApplyHealthBarImage(LockOnBar, LockOnBarMID, FVector2D(520.f, 20.f));
 	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, 1.f, 1.f, 0.f, 26.f);
 	BarBox->AddChild(LockOnBar);
+
+	USizeBox* BarBox2 = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LockBarBox2"));
+	BarBox2->SetWidthOverride(520.f);
+	BarBox2->SetHeightOverride(16.f);
+	if (UVerticalBoxSlot* Bar2Slot = LockTexts->AddChildToVerticalBox(BarBox2))
+	{
+		Bar2Slot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+	}
+	LockOnBar2 = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("LockOnBar2"));
+	LockOnBar2MID = FMenuUIStyle::CreateHealthBarMID(this);
+	FMenuUIStyle::ApplyHealthBarImage(LockOnBar2, LockOnBar2MID, FVector2D(520.f, 16.f));
+	FMenuUIStyle::SetHealthBarValues(LockOnBar2MID, 1.f, 1.f, 0.f, 32.5f);
+	BarBox2->AddChild(LockOnBar2);
+	LockOnBar2->SetVisibility(ESlateVisibility::Collapsed);
 
 	UVerticalBox* StatusCluster = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("StatusCluster"));
 	if (UCanvasPanelSlot* ClusterSlot = Root->AddChildToCanvas(StatusCluster))
@@ -1102,9 +1117,28 @@ void USlimeCombatHUDWidget::RefreshLockOnBar(float DeltaTime)
 	FMenuUIStyle::ApplyMixedMenuFont(LockOnName, 18.f, FMenuUIStyle::WarmTitleColor());
 
 	float Percent = 1.f;
-	if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+	float Phase1 = 1.f;
+	float Phase2 = 1.f;
+	bool bDual = false;
+	if (const ISlimeLockTarget* LockTarget = Cast<ISlimeLockTarget>(Target))
 	{
-		Percent = Health->GetHealthPercent();
+		bDual = LockTarget->UsesDualHealthBars();
+		if (bDual)
+		{
+			LockTarget->GetDualHealthPercents(Phase1, Phase2);
+			Percent = Phase1 > 0.001f ? Phase1 : Phase2;
+		}
+	}
+	if (!bDual)
+	{
+		if (const USlimeHealthComponent* Health = Target->FindComponentByClass<USlimeHealthComponent>())
+		{
+			Percent = Health->GetHealthPercent();
+		}
+	}
+	if (LockOnBar2)
+	{
+		LockOnBar2->SetVisibility(bDual ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 
 	if (LastLockTarget.Get() != Target)
@@ -1139,7 +1173,18 @@ void USlimeCombatHUDWidget::RefreshLockOnBar(float DeltaTime)
 	}
 
 	LockOnFlash = FMath::FInterpTo(LockOnFlash, 0.f, DeltaTime, 12.f);
-	FMenuUIStyle::SetHealthBarValues(LockOnBarMID, Percent, LockOnGhostPercent, LockOnFlash, 26.f);
+	if (bDual)
+	{
+		FMenuUIStyle::SetHealthBarValues(LockOnBarMID, Phase1, Phase1, LockOnFlash, 26.f);
+		if (LockOnBar2MID)
+		{
+			FMenuUIStyle::SetHealthBarValues(LockOnBar2MID, Phase2, Phase2, 0.f, 32.5f);
+		}
+	}
+	else
+	{
+		FMenuUIStyle::SetHealthBarValues(LockOnBarMID, Percent, LockOnGhostPercent, LockOnFlash, 26.f);
+	}
 }
 
 void USlimeCombatHUDWidget::SetDeathVisible(bool bVisible)
@@ -1274,7 +1319,7 @@ void USlimeCombatHUDWidget::ApplyCombatHudSizes()
 		{
 			StackSlot->SetAnchors(FAnchors(1.f, 0.32f, 1.f, 0.32f));
 			StackSlot->SetAlignment(FVector2D(1.f, 0.5f));
-			StackSlot->SetPosition(FVector2D(-210.f, 0.f));
+			StackSlot->SetPosition(FVector2D(-24.f, 0.f));
 		}
 	}
 	if (HotbarLabels.Num() > 0)

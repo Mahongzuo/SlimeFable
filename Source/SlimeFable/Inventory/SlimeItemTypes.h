@@ -10,7 +10,8 @@ enum class ESlimeItemCategory : uint8
 {
 	Consumable UMETA(DisplayName = "消耗品"),
 	Placeable UMETA(DisplayName = "放置品"),
-	Souvenir UMETA(DisplayName = "纪念品")
+	Souvenir UMETA(DisplayName = "纪念品"),
+	Seed UMETA(DisplayName = "种子")
 };
 
 USTRUCT(BlueprintType)

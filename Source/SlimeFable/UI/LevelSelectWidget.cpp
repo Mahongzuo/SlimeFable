@@ -355,6 +355,7 @@ void ULevelSelectWidget::OnNextMonthClicked()
 void ULevelSelectWidget::OnBackClicked()
 {
 	SetVisibility(ESlateVisibility::Collapsed);
+	OnClosed.Broadcast();
 	if (ParentMenu)
 	{
 		ParentMenu->SetVisibility(ESlateVisibility::Visible);

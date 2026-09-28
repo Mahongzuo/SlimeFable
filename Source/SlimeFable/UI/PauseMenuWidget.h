@@ -18,6 +18,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuContinue);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuLevelSelect);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuMainMenu);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuReturnToHub);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuReturnToMuseum);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuResetDay);
 
 UCLASS()
@@ -48,6 +49,9 @@ public:
 	FOnPauseMenuReturnToHub OnReturnToHubRequested;
 
 	UPROPERTY(BlueprintAssignable, Category = "UI")
+	FOnPauseMenuReturnToMuseum OnReturnToMuseumRequested;
+
+	UPROPERTY(BlueprintAssignable, Category = "UI")
 	FOnPauseMenuResetDay OnResetDayRequested;
 
 	void RefreshHubButtonVisibility();
@@ -55,6 +59,7 @@ public:
 protected:
 	void BuildLayoutIfNeeded();
 	void EnsureReturnToHubButton();
+	void EnsureReturnToMuseumButton();
 	void EnsureResetDayButton();
 	void ApplyLook();
 	void ResolveSettingsClasses();
@@ -87,6 +92,9 @@ protected:
 
 	UFUNCTION()
 	void OnReturnToHubClicked();
+
+	UFUNCTION()
+	void OnReturnToMuseumClicked();
 
 	UFUNCTION()
 	void OnResetDayClicked();
@@ -132,6 +140,9 @@ protected:
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> ReturnToHubButton;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ReturnToMuseumButton;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UButton> ResetDayButton;

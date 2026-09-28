@@ -60,6 +60,13 @@ void USlimeHealthComponent::ResetHP()
 	OnHealthChanged.Broadcast(CurrentHP, MaxHP);
 }
 
+void USlimeHealthComponent::SetMaxAndRefill(float NewMaxHP)
+{
+	MaxHP = FMath::Max(NewMaxHP, 1.f);
+	CurrentHP = MaxHP;
+	OnHealthChanged.Broadcast(CurrentHP, MaxHP);
+}
+
 void USlimeHealthComponent::ApplyHealing(float Healing)
 {
 	if (!IsAlive() || Healing <= 0.f)
@@ -151,6 +158,10 @@ float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, con
 
 	if (CurrentHP <= 0.f)
 	{
+		if (AbsorbLethalDamage.IsBound() && AbsorbLethalDamage.Execute(DamageCauser))
+		{
+			return Damage;
+		}
 		HandleDeath(DamageCauser);
 	}
 

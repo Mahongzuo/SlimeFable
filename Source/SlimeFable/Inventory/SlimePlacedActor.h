@@ -28,6 +28,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Placeable")
 	bool TryPickup(APawn* Picker);
 
+	void SetHomePieceId(int32 InId) { HomePieceId = InId; }
+	int32 GetHomePieceId() const { return HomePieceId; }
+
 	UFUNCTION(BlueprintCallable, Category = "Placeable")
 	void SetHighlight(bool bEnabled);
 
@@ -65,6 +68,7 @@ protected:
 
 	bool bHighlighted = false;
 	FVector RestRelativeScale = FVector::OneVector;
+	int32 HomePieceId = INDEX_NONE;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> CachedOutlineMaterial;

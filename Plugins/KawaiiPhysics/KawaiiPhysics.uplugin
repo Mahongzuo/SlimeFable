@@ -1,0 +1,47 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.21.0",
+	"FriendlyName": "KawaiiPhysics",
+	"Description": "Simple Bone Physics for UnrealEngine4 & 5",
+	"Category": "Animation",
+	"CreatedBy": "pafuhana1213",
+	"CreatedByURL": "https://twitter.com/pafuhana1213",
+	"DocsURL": "https://github.com/pafuhana1213/KawaiiPhysics",
+	"MarketplaceURL": "com.epicgames.launcher://ue/Fab/product/f870c07e-0a02-4a78-a888-e52a22794572",
+	"SupportURL": "https://github.com/pafuhana1213/KawaiiPhysics/issues",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "KawaiiPhysics",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"PlatformDenyList": []
+		},
+		{
+			"Name": "KawaiiPhysicsSequencer",
+			"Type": "Runtime",
+			"LoadingPhase": "PreDefault",
+			"PlatformDenyList": []
+		},
+		{
+			"Name": "KawaiiPhysicsEd",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "PreDefault",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		}
+	],
+	"LocalizationTargets": [
+		{
+			"Name": "KawaiiPhysics",
+			"LoadingPolicy": "Editor"
+		}
+	]
+}

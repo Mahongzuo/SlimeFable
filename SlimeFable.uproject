@@ -22,6 +22,11 @@
 				"DeveloperSettings",
 				"Engine"
 			]
+		},
+		{
+			"Name": "SlimeFableEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -399,6 +404,14 @@
 		},
 		{
 			"Name": "DTLSHandlerComponent",
+			"Enabled": true
+		},
+		{
+			"Name": "KawaiiPhysics",
+			"Enabled": true
+		},
+		{
+			"Name": "USDImporter",
 			"Enabled": true
 		}
 	]

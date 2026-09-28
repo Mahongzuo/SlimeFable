@@ -6,6 +6,7 @@
 #include "EnemyCombatComponent.h"
 #include "Combat/SlimeDevourTarget.h"
 #include "Enemy/LyraShooterEnemy.h"
+#include "Enemy/LyraXinShooterEnemy.h"
 #include "EnemyFighter.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -267,6 +268,35 @@ void USlimeMorphComponent::TickMorphedKeyInput(float DeltaTime)
 	else if (!bDown)
 	{
 		bMorphedKeyDown = false;
+	}
+
+	const bool bTabDown = Settings
+		? Settings->IsKeyDown(PC, ESlimeInputAction::ElementWheel)
+		: PC->IsInputKeyDown(EKeys::Tab);
+	if (bTabDown)
+	{
+		if (!bXinSkinKeyDown)
+		{
+			bXinSkinKeyDown = true;
+			XinSkinHoldSeconds = 0.f;
+			bXinSkinSwitchedThisHold = false;
+		}
+		XinSkinHoldSeconds += DeltaTime;
+		if (!bXinSkinSwitchedThisHold && XinSkinHoldSeconds >= MorphWheelHoldSeconds)
+		{
+			if (ALyraXinShooterEnemy* Xin = Cast<ALyraXinShooterEnemy>(MorphTarget))
+			{
+				Xin->CycleVisualSkin();
+				RefreshMorphedVisualMaterials();
+				bXinSkinSwitchedThisHold = true;
+			}
+		}
+	}
+	else
+	{
+		bXinSkinKeyDown = false;
+		XinSkinHoldSeconds = 0.f;
+		bXinSkinSwitchedThisHold = false;
 	}
 
 	ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner());
@@ -873,6 +903,25 @@ void USlimeMorphComponent::ApplySlimeSkin()
 		// hidden via pointer compare (Substrate slots can report a different interface).
 	}
 	bOriginalMaterialsActive = false;
+}
+
+void USlimeMorphComponent::RefreshMorphedVisualMaterials()
+{
+	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
+	{
+		UMeshComponent* MeshComp = Entry.Mesh.Get();
+		if (!MeshComp)
+		{
+			continue;
+		}
+		Entry.SavedMaterials.Reset();
+		const int32 NumMats = SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp);
+		for (int32 Idx = 0; Idx < NumMats; ++Idx)
+		{
+			Entry.SavedMaterials.Add(MeshComp->GetMaterial(Idx));
+		}
+		Entry.SavedOverlay = MeshComp->GetOverlayMaterial();
+	}
 }
 
 void USlimeMorphComponent::ApplyOriginalMaterials()
@@ -1589,18 +1638,20 @@ void USlimeMorphComponent::SetMorphTargetGameplayEnabled(bool bEnabled)
 	{
 		if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
 		{
-			Movement->StopMovementImmediately();
-			Movement->Velocity = FVector::ZeroVector;
-			if (bEnabled)
+			if (!bEnabled)
 			{
+				Movement->StopMovementImmediately();
+				Movement->Velocity = FVector::ZeroVector;
+				Movement->DisableMovement();
+			}
+			else if (Movement->MovementMode != MOVE_Flying)
+			{
+				Movement->StopMovementImmediately();
+				Movement->Velocity = FVector::ZeroVector;
 				Movement->SetMovementMode(
 					SlimeMorphPolicies::ResolveActivationMovementMode(
 						static_cast<EMovementMode>(CachedMorphTargetMovementMode)),
 					CachedMorphTargetCustomMovementMode);
-			}
-			else
-			{
-				Movement->DisableMovement();
 			}
 		}
 	}

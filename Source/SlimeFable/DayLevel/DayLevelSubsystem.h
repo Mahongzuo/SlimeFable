@@ -63,6 +63,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
 	void TravelToMainMenu(const UObject* WorldContextObject);
 
+	/** Hard-travel to the shared museum hub (TimeMuseum). Not the per-day OperaHouse lobby. */
+	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	bool TravelToMuseumHub(const UObject* WorldContextObject);
+
+	UFUNCTION(BlueprintPure, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
+	bool IsMuseumHubWorld(const UObject* WorldContextObject) const;
+
+	UFUNCTION(BlueprintPure, Category = "Day Level")
+	TSoftObjectPtr<UWorld> GetMuseumHubLevel() const { return MuseumHubLevel; }
+
 	/** Hard-travel to Main and open the level-select calendar overlay. */
 	UFUNCTION(BlueprintCallable, Category = "Day Level", meta = (WorldContext = "WorldContextObject"))
 	void TravelToLevelSelect(const UObject* WorldContextObject);
@@ -83,4 +93,7 @@ protected:
 
 	UPROPERTY()
 	TSoftObjectPtr<UDayLevelRegistry> DefaultRegistryPath;
+
+	UPROPERTY()
+	TSoftObjectPtr<UWorld> MuseumHubLevel;
 };

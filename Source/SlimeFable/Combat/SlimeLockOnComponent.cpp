@@ -16,6 +16,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "SlimeCharacter.h"
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
 #include "SlimeFableCharacter.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockTarget.h"
@@ -108,7 +109,12 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 				bDown = PC->IsInputKeyDown(EKeys::MiddleMouseButton);
 			}
 
-			if (bDown && !bPollLockDown)
+			bool bBuildPlacement = false;
+			if (const USlimeBuildModeComponent* Build = OwnerPawn->FindComponentByClass<USlimeBuildModeComponent>())
+			{
+				bBuildPlacement = Build->IsPlacementActive();
+			}
+			if (!bBuildPlacement && bDown && !bPollLockDown)
 			{
 				ToggleLockOn();
 			}

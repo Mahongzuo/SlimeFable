@@ -2,14 +2,13 @@
 
 #include "LyraDamageLogDebuggerComponent.h"
 
+#include "AbilitySystem/Attributes/LyraHealthSet.h"
 #include "Engine/World.h"
 #include "LyraLogChannels.h"
 #include "Messages/LyraVerbMessage.h"
 #include "NativeGameplayTags.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(LyraDamageLogDebuggerComponent)
-
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Lyra_Damage_Message);
 
 ULyraDamageLogDebuggerComponent::ULyraDamageLogDebuggerComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)

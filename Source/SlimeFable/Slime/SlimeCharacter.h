@@ -20,6 +20,7 @@ class USlimeLockOnComponent;
 class USlimeStatusComponent;
 class USlimeTrailComponent;
 class USlimePlacementComponent;
+class USlimeBuildModeComponent;
 class USlimeInteractComponent;
 class USlimeCheatComponent;
 class USlimeDodgeComponent;
@@ -100,15 +101,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "1.0", ClampMax = "30.0"))
 	float CameraZoomInterpSpeed = 8.f;
 
-	/** Hold Sprint key multiplier on MaxWalkSpeed. Default 1.5. */
+	/** Hold Sprint key multiplier on MaxWalkSpeed. Walk 320 * 1.97 = sprint 630. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Move", meta = (ClampMin = "1.0", ClampMax = "3.0",
-		ToolTip = "按住冲刺键时 MaxWalkSpeed 倍率。默认 1.5。"))
-	float SprintSpeedMul = 1.5f;
+		ToolTip = "按住冲刺键时 MaxWalkSpeed 倍率。默认 1.97，让走路 320 时冲刺仍约 630。"))
+	float SprintSpeedMul = 1.97f;
 
 	/** Base walk speed before sprint / status multipliers. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Move", meta = (ClampMin = "50.0", Units = "cm/s",
-		ToolTip = "基础走路速度（冲刺前）。默认 420。"))
-	float BaseWalkSpeed = 420.f;
+		ToolTip = "基础走路速度（冲刺前）。默认 320。冲刺约 630，不随走路一起变慢。"))
+	float BaseWalkSpeed = 320.f;
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	USlimeBodyComponent* GetSlimeBody() const { return SlimeBody; }
@@ -294,6 +295,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	TObjectPtr<USlimePlacementComponent> SlimePlacement;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	TObjectPtr<USlimeBuildModeComponent> SlimeBuildMode;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	TObjectPtr<USlimeInteractComponent> SlimeInteract;

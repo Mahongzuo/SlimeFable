@@ -363,7 +363,7 @@ protected:
 	void HandleSlimeDied();
 
 	UFUNCTION()
-	void HandleSlimeHealthChanged(float CurrentHP, float MaxHP);
+	virtual void HandleSlimeHealthChanged(float CurrentHP, float MaxHP);
 
 	/** Player-driven body: SlimeHealth is the truth; push its fraction into LyraHealthSet (never below 1). */
 	void SyncLyraHealthFromSlime();
@@ -423,6 +423,10 @@ protected:
 	void SetAIFacingMode(bool bFaceTarget);
 	void BindWorldHealthBar();
 	void RefreshWorldHealthBarVisibility();
+	/** Mesh that ragdolls on death. Default is the Character Mesh (Manny). */
+	virtual USkeletalMeshComponent* GetDeathRagdollMesh() const;
+	/** Enable physics on the death mesh. Xin overrides this to skip hair/dress bones. */
+	virtual void EnableDeathRagdoll(USkeletalMeshComponent* MeshComp);
 
 	UPROPERTY()
 	TArray<FLyraAbilitySet_GrantedHandles> GrantedHandles;

@@ -242,6 +242,9 @@ private:
 	/** Polls the morph key while morphed so a tap unmorphs — the slime has no controller then. */
 	void TickMorphedKeyInput(float DeltaTime);
 
+	/** After Xin Tab skin swap, recapture current slot materials so unmorph does not paint the old form. */
+	void RefreshMorphedVisualMaterials();
+
 	/** The morph target's controller while morphed, otherwise the owner's. */
 	APlayerController* GetActivePlayerController() const;
 
@@ -296,6 +299,9 @@ private:
 	bool bOriginalMaterialsActive = false;
 	bool bShellActive = false;
 	bool bMorphedKeyDown = false;
+	bool bXinSkinKeyDown = false;
+	bool bXinSkinSwitchedThisHold = false;
+	float XinSkinHoldSeconds = 0.f;
 	int32 MorphedSlotIndex = INDEX_NONE;
 	bool bConsumeMorphedSlotOnExit = false;
 	bool bHasCachedSlimeReturnTransform = false;

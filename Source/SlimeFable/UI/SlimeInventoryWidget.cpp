@@ -21,6 +21,7 @@
 #include "Components/PanelSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/Image.h"
+#include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/UniformGridPanel.h"
@@ -49,12 +50,14 @@ void USlimeInventoryWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	EnsureDiscardButton();
+	EnsureSeedTab();
 	ApplyLook();
 
 	if (CloseButton) CloseButton->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnCloseClicked);
 	if (TabConsumable) TabConsumable->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnTabConsumable);
 	if (TabPlaceable) TabPlaceable->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnTabPlaceable);
 	if (TabSouvenir) TabSouvenir->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnTabSouvenir);
+	if (TabSeed) TabSeed->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnTabSeed);
 	if (PrimaryActionButton) PrimaryActionButton->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnPrimaryActionClicked);
 	if (DiscardButton) DiscardButton->OnClicked.AddUniqueDynamic(this, &USlimeInventoryWidget::OnDiscardClicked);
 
@@ -207,6 +210,7 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 	TabConsumable = AddTab(TEXT("TabConsumable"), FText::FromString(TEXT("消耗品")));
 	TabPlaceable = AddTab(TEXT("TabPlaceable"), FText::FromString(TEXT("放置品")));
 	TabSouvenir = AddTab(TEXT("TabSouvenir"), FText::FromString(TEXT("纪念品")));
+	TabSeed = AddTab(TEXT("TabSeed"), FText::FromString(TEXT("种子")));
 
 	UHorizontalBox* Body = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Body"));
 	if (UVerticalBoxSlot* BodySlot = Panel->AddChildToVerticalBox(Body))
@@ -214,13 +218,21 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 		BodySlot->SetPadding(FMargin(0.f, 4.f));
 	}
 
+	USizeBox* GridFrame = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("GridFrame"));
+	GridFrame->SetWidthOverride(GridColumns * (CellSize + 12.f));
+	GridFrame->SetHeightOverride(MinVisibleRows * (CellSize + 12.f));
+	if (UHorizontalBoxSlot* FrameSlot = Body->AddChildToHorizontalBox(GridFrame))
+	{
+		FrameSlot->SetPadding(FMargin(0.f, 0.f, 18.f, 0.f));
+		FrameSlot->SetVerticalAlignment(VAlign_Top);
+	}
+	UScrollBox* GridScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("GridScroll"));
+	GridScroll->SetConsumeMouseWheel(EConsumeMouseWheel::WhenScrollingPossible);
+	GridFrame->AddChild(GridScroll);
+
 	ItemGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("ItemGrid"));
 	ItemGrid->SetSlotPadding(FMargin(6.f));
-	if (UHorizontalBoxSlot* GridSlot = Body->AddChildToHorizontalBox(ItemGrid))
-	{
-		GridSlot->SetPadding(FMargin(0.f, 0.f, 18.f, 0.f));
-		GridSlot->SetVerticalAlignment(VAlign_Top);
-	}
+	GridScroll->AddChild(ItemGrid);
 
 	UVerticalBox* DetailCol = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DetailCol"));
 	if (UHorizontalBoxSlot* DetailSlot = Body->AddChildToHorizontalBox(DetailCol))
@@ -230,8 +242,8 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 	}
 
 	USizeBox* DetailIconBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("DetailIconBox"));
-	DetailIconBox->SetWidthOverride(96.f);
-	DetailIconBox->SetHeightOverride(96.f);
+	DetailIconBox->SetWidthOverride(128.f);
+	DetailIconBox->SetHeightOverride(128.f);
 	if (UVerticalBoxSlot* IconBoxSlot = DetailCol->AddChildToVerticalBox(DetailIconBox))
 	{
 		IconBoxSlot->SetHorizontalAlignment(HAlign_Center);
@@ -246,8 +258,8 @@ void USlimeInventoryWidget::BuildLayoutIfNeeded()
 
 	DetailDesc = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailDesc"));
 	DetailDesc->SetAutoWrapText(true);
-	DetailDesc->SetWrapTextAt(260.f);
-	DetailDesc->SetMinDesiredWidth(220.f);
+	DetailDesc->SetWrapTextAt(340.f);
+	DetailDesc->SetMinDesiredWidth(300.f);
 	if (UVerticalBoxSlot* DescSlot = DetailCol->AddChildToVerticalBox(DetailDesc))
 	{
 		DescSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
@@ -345,6 +357,7 @@ void USlimeInventoryWidget::ApplyLook()
 	StyleBtn(TabConsumable, FVector2D(120.f, 44.f));
 	StyleBtn(TabPlaceable, FVector2D(120.f, 44.f));
 	StyleBtn(TabSouvenir, FVector2D(120.f, 44.f));
+	StyleBtn(TabSeed, FVector2D(120.f, 44.f));
 	StyleBtn(PrimaryActionButton, FVector2D(180.f, 48.f));
 	StyleBtn(DiscardButton, FVector2D(180.f, 48.f));
 	StyleBtn(CloseButton, FVector2D(220.f, 48.f));
@@ -529,7 +542,8 @@ void USlimeInventoryWidget::Refresh()
 	SlotProxies.Reset();
 
 	const TArray<FSlimeInventoryEntry> Entries = Inv->GetEntriesByCategory(ActiveCategory);
-	const int32 SlotCount = GridColumns * GridRows;
+	const int32 FilledRows = FMath::DivideAndRoundUp(FMath::Max(Entries.Num(), 1), GridColumns);
+	const int32 SlotCount = FMath::Max(MinVisibleRows, FilledRows) * GridColumns;
 
 	for (int32 Index = 0; Index < SlotCount; ++Index)
 	{
@@ -646,7 +660,7 @@ void USlimeInventoryWidget::SelectItem(FName ItemId)
 	SelectedItemId = ItemId;
 	USlimeInventorySubsystem* Inv = GetInventory();
 	const USlimeItemDefinition* Def = Inv ? Inv->FindDefinition(ItemId) : nullptr;
-	ApplyItemIcon(DetailIcon, Def, FVector2D(88.f));
+	ApplyItemIcon(DetailIcon, Def, FVector2D(120.f));
 	if (DetailName)
 	{
 		DetailName->SetText(Def ? Def->DisplayName : FText::FromString(TEXT("选择物品")));
@@ -664,6 +678,7 @@ void USlimeInventoryWidget::SelectItem(FName ItemId)
 			{
 			case ESlimeItemCategory::Placeable: Action = TEXT("放置"); break;
 			case ESlimeItemCategory::Souvenir: Action = TEXT("查看"); break;
+			case ESlimeItemCategory::Seed: Action = TEXT("去播种"); break;
 			default: Action = TEXT("使用"); break;
 			}
 		}
@@ -781,6 +796,28 @@ void USlimeInventoryWidget::OnDiscardClicked()
 void USlimeInventoryWidget::OnTabConsumable() { SelectCategory(ESlimeItemCategory::Consumable); }
 void USlimeInventoryWidget::OnTabPlaceable() { SelectCategory(ESlimeItemCategory::Placeable); }
 void USlimeInventoryWidget::OnTabSouvenir() { SelectCategory(ESlimeItemCategory::Souvenir); }
+void USlimeInventoryWidget::OnTabSeed() { SelectCategory(ESlimeItemCategory::Seed); }
+
+void USlimeInventoryWidget::EnsureSeedTab()
+{
+	if (TabSeed || !TabSouvenir || !WidgetTree)
+	{
+		return;
+	}
+	UHorizontalBox* Tabs = Cast<UHorizontalBox>(TabSouvenir->GetParent());
+	if (!Tabs)
+	{
+		return;
+	}
+	TabSeed = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("TabSeed"));
+	UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TabSeed_Lbl"));
+	Text->SetText(FText::FromString(TEXT("种子")));
+	TabSeed->AddChild(Text);
+	if (UHorizontalBoxSlot* TabSlot = Tabs->AddChildToHorizontalBox(TabSeed))
+	{
+		TabSlot->SetPadding(FMargin(6.f, 0.f));
+	}
+}
 
 void USlimeInventoryWidget::OnPrimaryActionClicked()
 {
@@ -812,6 +849,12 @@ void USlimeInventoryWidget::OnPrimaryActionClicked()
 			Interact->CloseInventory();
 		}
 		Inv->OpenSouvenir(SelectedItemId, PC);
+		break;
+	case ESlimeItemCategory::Seed:
+		if (USlimeInteractComponent* Interact = Pawn->FindComponentByClass<USlimeInteractComponent>())
+		{
+			Interact->CloseInventory();
+		}
 		break;
 	default:
 		break;

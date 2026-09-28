@@ -33,6 +33,7 @@
 #include "SlimeSpringArmComponent.h"
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
+#include "Hub/HomeBuild/SlimeBuildModeComponent.h"
 #include "Inventory/SlimePlacementComponent.h"
 #include "Inventory/SlimeInteractComponent.h"
 #include "Settings/SlimeCheatComponent.h"
@@ -90,7 +91,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	JumpMaxCount = 2;
 	GetCharacterMovement()->JumpZVelocity = JumpZVelocity;
 	GetCharacterMovement()->AirControl = 0.4f;
-	GetCharacterMovement()->MaxWalkSpeed = 420.f;
+	GetCharacterMovement()->MaxWalkSpeed = 320.f;
 	GetCharacterMovement()->GravityScale = 1.6f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 1600.f;
 	// Scaled to the capsule: a knee high step is a wall to something this small.
@@ -202,6 +203,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 	SlimeLockOn = CreateDefaultSubobject<USlimeLockOnComponent>(TEXT("SlimeLockOn"));
 	SlimeCling = CreateDefaultSubobject<USlimeClingComponent>(TEXT("SlimeCling"));
 	SlimePlacement = CreateDefaultSubobject<USlimePlacementComponent>(TEXT("SlimePlacement"));
+	SlimeBuildMode = CreateDefaultSubobject<USlimeBuildModeComponent>(TEXT("SlimeBuildMode"));
 	SlimeInteract = CreateDefaultSubobject<USlimeInteractComponent>(TEXT("SlimeInteract"));
 	SlimeCheat = CreateDefaultSubobject<USlimeCheatComponent>(TEXT("SlimeCheat"));
 	SlimeDodge = CreateDefaultSubobject<USlimeDodgeComponent>(TEXT("SlimeDodge"));
@@ -431,10 +433,11 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 		return;
 	}
 
-	// Element wheel and G-charge own the scroll wheel.
+	// Element wheel, G-charge, and build/clear placement own the scroll wheel.
 	const bool bWheelOpen = SlimeAbilities && SlimeAbilities->IsWheelOpen();
 	const bool bChargingLaunch = SlimeAbilities && SlimeAbilities->IsChargingLaunch();
-	if (!bWheelOpen && !bChargingLaunch)
+	const bool bBuildPlacement = SlimeBuildMode && SlimeBuildMode->IsPlacementActive();
+	if (!bWheelOpen && !bChargingLaunch && !bBuildPlacement)
 	{
 		if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 		{

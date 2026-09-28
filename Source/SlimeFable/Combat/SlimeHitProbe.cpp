@@ -20,6 +20,7 @@
 #include "SlimeSliceableComponent.h"
 #include "SlimeSliceUtil.h"
 #include "SlimeStatusComponent.h"
+#include "Farm/SlimeElementReceiver.h"
 #include "EnemyCharacter.h"
 #include "SlimeCharacter.h"
 #include "Settings/SlimeCheatSubsystem.h"
@@ -437,6 +438,7 @@ int32 USlimeHitProbe::PerformHit(
 
 	int32 Count = 0;
 	const FVector Dir = Forward.GetSafeNormal();
+	TSet<TWeakObjectPtr<AActor>> ElementTouched;
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
 		AActor* Target = Overlap.GetActor();
@@ -470,6 +472,12 @@ int32 USlimeHitProbe::PerformHit(
 		{
 			AlreadyHit.Add(Target);
 			continue;
+		}
+
+		if (!ElementTouched.Contains(Target))
+		{
+			ElementTouched.Add(Target);
+			SlimeElementDelivery::NotifyActor(Target, Skill.Element, Instigator, 1.f);
 		}
 
 		if (!IsHostile(Instigator, Target))

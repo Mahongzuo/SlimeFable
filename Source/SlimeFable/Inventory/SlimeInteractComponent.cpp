@@ -7,6 +7,7 @@
 #include "Combat/SlimeDevourTarget.h"
 #include "SlimePlacedActor.h"
 #include "Quest/QuestInteractActor.h"
+#include "Hub/SlimeHubInteractActor.h"
 #include "Quest/QuestSubsystem.h"
 #include "SlimeVehiclePickup.h"
 #include "SlimeInventorySubsystem.h"
@@ -87,6 +88,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 	FocusedPickup.Reset();
 	FocusedPlaced.Reset();
 	FocusedQuest.Reset();
+	FocusedHub.Reset();
 	FocusedDevour.Reset();
 
 	APawn* Pawn = Cast<APawn>(GetOwner());
@@ -110,6 +112,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 	ASlimeWorldPickup* BestPickup = nullptr;
 	ASlimePlacedActor* BestPlaced = nullptr;
 	AQuestInteractActor* BestQuest = nullptr;
+	ASlimeHubInteractActor* BestHub = nullptr;
 
 	for (TActorIterator<ASlimeWorldPickup> It(World); It; ++It)
 	{
@@ -132,6 +135,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 			BestPickup = Pickup;
 			BestPlaced = nullptr;
 			BestQuest = nullptr;
+			BestHub = nullptr;
 		}
 	}
 
@@ -149,6 +153,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 			BestPlaced = Placed;
 			BestPickup = nullptr;
 			BestQuest = nullptr;
+			BestHub = nullptr;
 		}
 	}
 
@@ -166,6 +171,25 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 			BestQuest = QuestActor;
 			BestPickup = nullptr;
 			BestPlaced = nullptr;
+			BestHub = nullptr;
+		}
+	}
+
+	for (TActorIterator<ASlimeHubInteractActor> It(World); It; ++It)
+	{
+		ASlimeHubInteractActor* HubActor = *It;
+		if (!IsValid(HubActor) || !HubActor->CanBeFocused())
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(Loc, HubActor->GetActorLocation());
+		if (DistSq <= RadiusSq && DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			BestHub = HubActor;
+			BestPickup = nullptr;
+			BestPlaced = nullptr;
+			BestQuest = nullptr;
 		}
 	}
 
@@ -177,6 +201,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 			FocusedPickup.Reset();
 			FocusedPlaced.Reset();
 			FocusedQuest.Reset();
+			FocusedHub.Reset();
 			return;
 		}
 	}
@@ -184,6 +209,7 @@ void USlimeInteractComponent::RefreshFocusedTarget()
 	FocusedPickup = BestPickup;
 	FocusedPlaced = BestPlaced;
 	FocusedQuest = BestQuest;
+	FocusedHub = BestHub;
 }
 
 bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation) const
@@ -213,6 +239,11 @@ bool USlimeInteractComponent::GetFocusedPromptWorldLocation(FVector& OutLocation
 		OutLocation = QuestActor->GetPromptWorldLocation();
 		return true;
 	}
+	if (ASlimeHubInteractActor* HubActor = FocusedHub.Get())
+	{
+		OutLocation = HubActor->GetPromptWorldLocation();
+		return true;
+	}
 	return false;
 }
 
@@ -233,6 +264,10 @@ FText USlimeInteractComponent::GetFocusedPromptVerb() const
 	if (AQuestInteractActor* QuestActor = FocusedQuest.Get())
 	{
 		return QuestActor->GetInteractPromptVerb();
+	}
+	if (ASlimeHubInteractActor* HubActor = FocusedHub.Get())
+	{
+		return HubActor->GetInteractPromptVerb();
 	}
 	return FText::GetEmpty();
 }
@@ -278,6 +313,10 @@ bool USlimeInteractComponent::TryInteract()
 	if (AQuestInteractActor* QuestActor = FocusedQuest.Get())
 	{
 		return QuestActor->TryInteract(Pawn);
+	}
+	if (ASlimeHubInteractActor* HubActor = FocusedHub.Get())
+	{
+		return HubActor->TryInteract(Pawn);
 	}
 	return false;
 }

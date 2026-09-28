@@ -2,6 +2,7 @@
 
 #include "DayLevel/DayLevelSubsystem.h"
 #include "SlimeFable.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/DateTime.h"
@@ -11,12 +12,14 @@ namespace DayLevelSubsystemPrivate
 {
 	static const TCHAR* RegistryObjectPath = TEXT("/Game/Data/DayLevels/DA_DayLevelRegistry.DA_DayLevelRegistry");
 	static const TCHAR* MainMenuMapName = TEXT("/Game/Maps/Main");
+	static const TCHAR* MuseumHubPath = TEXT("/Game/_Slime/Models/MapModel/TimeMuseum/Maps/L_TimeMuseum_Environment.L_TimeMuseum_Environment");
 }
 
 void UDayLevelSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 	DefaultRegistryPath = TSoftObjectPtr<UDayLevelRegistry>(FSoftObjectPath(DayLevelSubsystemPrivate::RegistryObjectPath));
+	MuseumHubLevel = TSoftObjectPtr<UWorld>(FSoftObjectPath(DayLevelSubsystemPrivate::MuseumHubPath));
 	LoadDefaultRegistry();
 }
 
@@ -150,6 +153,37 @@ bool UDayLevelSubsystem::TravelToToday(const UObject* WorldContextObject)
 }
 
 const TCHAR* UDayLevelSubsystem::OpenLevelSelectOption = TEXT("OpenLevelSelect");
+
+bool UDayLevelSubsystem::TravelToMuseumHub(const UObject* WorldContextObject)
+{
+	if (MuseumHubLevel.IsNull())
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("DayLevelSubsystem: Museum hub map is not set."));
+		return false;
+	}
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
+	{
+		UGameplayStatics::SetGamePaused(WorldContextObject, false);
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+		PC->bShowMouseCursor = false;
+	}
+
+	UGameplayStatics::OpenLevelBySoftObjectPtr(WorldContextObject, MuseumHubLevel);
+	return true;
+}
+
+bool UDayLevelSubsystem::IsMuseumHubWorld(const UObject* WorldContextObject) const
+{
+	const UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	if (!World || MuseumHubLevel.IsNull())
+	{
+		return false;
+	}
+	const FString PackageName = UWorld::RemovePIEPrefix(World->GetOutermost()->GetName());
+	return PackageName == MuseumHubLevel.ToSoftObjectPath().GetLongPackageName();
+}
 
 void UDayLevelSubsystem::TravelToMainMenu(const UObject* WorldContextObject)
 {

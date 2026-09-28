@@ -30,6 +30,7 @@ protected:
 
 	UFUNCTION() void OnUseClicked();
 	UFUNCTION() void OnDiscardClicked();
+	UFUNCTION() void OnClearModeClicked();
 	UFUNCTION() void OnCancelClicked();
 
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UImage> DimOverlay;
@@ -37,6 +38,7 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> UseButton;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> DiscardButton;
+	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> ClearModeButton;
 	UPROPERTY(meta = (BindWidgetOptional)) TObjectPtr<UButton> CancelButton;
 
 	int32 SlotIndex = INDEX_NONE;

@@ -7,6 +7,36 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
+#include "Hub/HomeBuild/SlimeHomeFluidPad.h"
+
+namespace
+{
+	bool InheritsToken(const UClass* Class, const TCHAR* Token)
+	{
+		for (const UClass* Cursor = Class; Cursor; Cursor = Cursor->GetSuperClass())
+		{
+			if (Cursor->GetName().Contains(Token, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool IsHomeFluidActor(const AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+		if (Actor->IsA(ASlimeHomeFluidPad::StaticClass()))
+		{
+			return true;
+		}
+		const AActor* Parent = Actor->GetAttachParentActor();
+		return Parent && Parent->IsA(ASlimeHomeFluidPad::StaticClass());
+	}
+}
 
 USlimeFluidNinjaContactComponent::USlimeFluidNinjaContactComponent()
 {
@@ -101,7 +131,9 @@ bool USlimeFluidNinjaContactComponent::IsFluidNinjaBlockingSimGeom(const UPrimit
 	const FString OwnerName = Owner->GetName();
 	const FString OwnerClass = Owner->GetClass() ? Owner->GetClass()->GetName() : FString();
 	const bool bNinjaOwner = OwnerName.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase)
-		|| OwnerClass.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase);
+		|| OwnerClass.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase)
+		|| InheritsToken(Owner->GetClass(), TEXT("NinjaLive"))
+		|| IsHomeFluidActor(Owner);
 	if (!bNinjaOwner)
 	{
 		return false;
@@ -140,7 +172,9 @@ void USlimeFluidNinjaContactComponent::ApplyFluidNinjaPawnPassthrough()
 		const FString ActorName = Actor->GetName();
 		const FString ActorClass = Actor->GetClass() ? Actor->GetClass()->GetName() : FString();
 		if (!ActorName.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase)
-			&& !ActorClass.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase))
+			&& !ActorClass.Contains(TEXT("NinjaLive"), ESearchCase::IgnoreCase)
+			&& !InheritsToken(Actor->GetClass(), TEXT("NinjaLive"))
+			&& !IsHomeFluidActor(Actor))
 		{
 			continue;
 		}

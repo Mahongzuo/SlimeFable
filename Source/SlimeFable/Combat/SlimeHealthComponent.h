@@ -13,6 +13,8 @@ class USlimeCombatComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSlimeHealthChanged, float, CurrentHP, float, MaxHP);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSlimeDied);
+/** Return true to absorb a lethal hit (HP already 0) without firing OnDied. Caller must refill. */
+DECLARE_DELEGATE_RetVal_OneParam(bool, FAbsorbLethalDamage, AActor*);
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
 class SLIMEFABLE_API USlimeHealthComponent : public UActorComponent
@@ -65,6 +67,13 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void ResetHP();
+
+	/** Change MaxHP and fill CurrentHP, then broadcast. Used for boss phase swaps. */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	void SetMaxAndRefill(float NewMaxHP);
+
+	/** Bound by two-phase bosses so the first bar can empty without dying. */
+	FAbsorbLethalDamage AbsorbLethalDamage;
 
 	/** Ignore damage (and hit flash) until WorldTimeSeconds reaches this. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
