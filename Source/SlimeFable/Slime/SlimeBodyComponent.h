@@ -185,8 +185,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "4.0"))
 	float SpreadGravityScale = 1.8f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "2.0"))
-	float SpreadRecoverDuration = 0.45f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.05", ClampMax = "3.0",
+		ToolTip = "按下摊开后，从球体压扁成薄饼所需秒数。默认 0.45。越大压得越慢。"))
+	float SpreadFlattenTime = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.05", ClampMax = "3.0",
+		ToolTip = "松开摊开后，从薄饼平滑收回球体所需秒数。默认 0.7。松开立刻开始收，下垂的部分同步被吸回。越大吸回越慢。"))
+	float SpreadRecoverDuration = 0.7f;
 
 	/** Extra XY splat while pancaked so the puddle stays one visual sheet. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "1.0", ClampMax = "4.0"))
@@ -199,6 +204,85 @@ public:
 	/** Concentration multiplier while spread (keeps the centre filled). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.5", ClampMax = "2.0"))
 	float SpreadConcentrationScale = 1.15f;
+
+	/** 越过边缘的粘液最多垂到边缘下方多少厘米（硬上限）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "200.0",
+		ToolTip = "越过柱子/台阶边缘的粘液，最多垂到边缘下方多少厘米。默认 35，是硬上限；平时垂多深主要由 SpreadDrapeTension 决定。下方地面更高时会先落到地面上。"))
+	float SpreadDrapeDepth = 35.f;
+
+	/** 下垂粘液被拉回边缘的张力（1/秒²）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "2000.0",
+		ToolTip = "越过边缘的粘液往上拉回的张力，垂得越深拉得越紧。默认 140：静止时大约垂 18 厘米。越大挂得越浅、越粘；0 = 只受重力。"))
+	float SpreadDrapeTension = 140.f;
+
+	/** 下垂粘液的粘滞（1/秒）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "400.0",
+		ToolTip = "越过边缘的粘液流动的粘稠程度。默认 90：约 0.6 秒慢慢垂到位。越大流得越慢，按住越久垂得越深。"))
+	float SpreadDrapeViscosity = 90.f;
+
+	/** 粘液最多伸出支撑边缘多少厘米（水平）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "100.0",
+		ToolTip = "摊开时粘液最多水平伸出站立面边缘多少厘米，之外会被拉回边缘，保持连成一片。默认 12。平地上没有边缘，不受影响。"))
+	float SpreadMaxOverhang = 12.f;
+
+	/** 相邻两格地面高差不超过这个值算同一块站立面（厘米）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "2.0", ClampMax = "40.0",
+		ToolTip = "相邻两格地面落差不超过多少厘米，仍算同一块可铺开的面（缓坡、小台阶）。默认 8。更大的落差当作边缘，粘液从那里垂下；向上更高的台阶当作墙。"))
+	float SpreadStepHeight = 8.f;
+
+	/** 比脚下地面再高多少仍会被地面射线检测到（厘米）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "80.0",
+		ToolTip = "地面射线从脚下地面往上多少厘米开始打。默认 20。旁边矮于这个高度的物体会被当成墙或可铺开的面；更高的会被忽略。"))
+	float SpreadClimbHeight = 20.f;
+
+	/** 摊开地面高度场的格子边长（厘米）。默认 10。越小越贴边，射线越多。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "4.0", ClampMax = "40.0",
+		ToolTip = "摊开地面高度场的格子边长（厘米）。默认 10。越小越贴柱子边缘，向下射线越多。格子数有上限，设得过小会自动加粗格子以盖住摊开半径。"))
+	float SpreadGroundCellSize = 10.f;
+
+	/** 高度场刷新间隔（秒）。默认 0.1。质心移动超过半格也会立刻刷新。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.02", ClampMax = "0.5",
+		ToolTip = "摊开地面高度场的刷新间隔（秒）。默认 0.1。质心水平移动超过半格时会立刻重采。"))
+	float SpreadGroundRefreshInterval = 0.1f;
+
+	/** 摊开时按局部地面下垂。关掉则恢复以质心为中心的水平薄饼。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread",
+		meta = (ToolTip = "摊开时按脚下局部地面铺开，越过边缘的部分像粘液一样垂下并被拉住。默认开。关掉则恢复整片水平薄饼（悬在碰撞高度上）。"))
+	bool bSpreadFollowTerrain = true;
+
+	// ---- Lighting --------------------------------------------------------------------
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting",
+		meta = (ToolTip = "史莱姆材质里的常数颜色（本体填充色、边缘光、虹彩、气泡、脸）按所处环境光压暗，避免夜间、洞穴里被自动曝光放大而发白。关掉则系数恒为 1（旧效果）。"))
+	bool bAmbientLightResponse = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "0.001",
+		ToolTip = "照度参考值。原始照度（方向光 + 天光，已乘遮挡）达到这个值时系数为 1。用 slime.AmbientDebug 1 在白天露天处读数后，设为读数的一半左右。"))
+	float AmbientReference = 3.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "0.0", ClampMax = "1.0",
+		ToolTip = "系数下限。夜间、洞穴里最暗也保留这么多常数颜色，防止史莱姆完全变黑。默认 0.08。"))
+	float AmbientFloor = 0.08f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "0.0",
+		ToolTip = "天光在原始照度里的权重（乘在天光 Intensity 上）。默认 1。"))
+	float AmbientSkyWeight = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "100.0",
+		ToolTip = "判断露天程度的向上射线长度（厘米）。默认 3000。头顶这么远内有遮挡就算不露天（洞穴、室内）。"))
+	float AmbientSkyTraceLength = 3000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "100.0",
+		ToolTip = "判断是否在太阳 / 月亮阴影里的射线长度（厘米）。默认 20000。"))
+	float AmbientSunTraceLength = 20000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "0.02", ClampMax = "2.0",
+		ToolTip = "光照估算的间隔（秒）。默认 0.15。每次只打一部分射线，轮换完成一整轮。"))
+	float AmbientTraceInterval = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Lighting", meta = (ClampMin = "0.1", ClampMax = "20.0",
+		ToolTip = "系数追随目标的速度。默认 2，约半秒过渡；越大进出洞穴、阴影时变化越快。"))
+	float AmbientSmoothSpeed = 2.f;
 
 	// ---- Landing ---------------------------------------------------------------------
 
@@ -538,6 +622,7 @@ private:
 	void TickFragmentAttacks(float DeltaTime);
 	void RefreshColliders();
 	void UpdateFloor();
+	void UpdateGroundField(float StepDelta);
 	void ProbeSqueeze(float DeltaTime);
 
 	/** FluidNinja TraceMesh / InteractionVolume / ActivationVolume — keep Overlap, skip soft-body squeeze & floor. */
@@ -550,6 +635,9 @@ private:
 	void UpdateMeshFollow();
 	/** Lag-spring the bubble centres toward their rest spots and push shell / bubble params to the body MID. */
 	void UpdateBubblesAndShellParams(float DeltaTime);
+	/** Sky visibility + sun/moon shadow traces -> AmbientScale that dims the unlit colour terms of the skins. */
+	void UpdateAmbientLight(float DeltaTime);
+	float ComputeAmbientTarget(bool bLog) const;
 	void UpdateQuality();
 	void ResolveMaterial();
 	class USlimeGraphicsSettings* GetGraphicsSettings() const;
@@ -636,7 +724,20 @@ private:
 	float SqueezeAmount = 0.f;
 	float ReportedSqueeze = 0.f;
 	float ForcedSqueeze = 0.f;
-	float SpreadRecoverRemaining = 0.f;
+	/** 0 = dome, 1 = fully spread. Rises over SpreadFlattenTime while held, falls over SpreadRecoverDuration. */
+	float SpreadBlend = 0.f;
+	float GroundFieldTimer = 0.f;
+	FVector LastGroundFieldCenter = FVector::ZeroVector;
+
+	static constexpr int32 AmbientSkyRays = 8;
+	/** 1 = open sky, 0 = blocked; one entry per sky ray, refreshed round-robin. */
+	float SkyRayOpen[AmbientSkyRays] = { 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f };
+	int32 SkyRayCursor = 0;
+	float AmbientTimer = 0.f;
+	float AmbientLogTimer = 0.f;
+	float AmbientTarget = 1.f;
+	float AmbientScale = 1.f;
+	bool bAmbientPrimed = false;
 	float RecallElapsed = 0.f;
 	FVector SqueezeFreeDirection = FVector::UpVector;
 

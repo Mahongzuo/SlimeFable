@@ -159,6 +159,8 @@ void FSlimeSolver::BuildDome(const FVector& RestCenter)
 	NextShotId = 1;
 	ContactLoad = 0.f;
 	bSpread = false;
+	SpreadBlend = 0.f;
+	ClearGroundField();
 	bCling = false;
 	SqueezeAmount = 0.f;
 	GravityScale = 1.f;
@@ -400,6 +402,9 @@ void FSlimeSolver::Reset(const FVector& RestCenter)
 	IgnoreWorldShotIds.Reset();
 	bSkipWorldCollision = false;
 	bCling = false;
+	bSpread = false;
+	SpreadBlend = 0.f;
+	ClearGroundField();
 	SpreadRadius = 0.f;
 	SpreadPush = 0.f;
 	AnchorCenter = FVector3f(RestCenter);
@@ -516,9 +521,11 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 {
 	if (bSpread)
 	{
-		// Thin pancake disk: deform into a puddle, never leave the disk.
+		// Sheet inside a disk whose thickness blends from the dome to a thin pancake, so pressing
+		// and releasing both read as a squash rather than a snap.
 		const float Radius = FMath::Max(SpreadRadius, GetScaledRestRadius()) * Params.TetherSlack;
-		const float HalfH = FMath::Max(SpreadHalfHeight, 0.5f);
+		const float HalfH = FMath::Lerp(GetScaledRestRadius() * Params.TetherSlack, FMath::Max(SpreadHalfHeight, 0.5f), SpreadBlend);
+		const FVector3f Before = InOutPoint;
 		FVector3f Local = InOutPoint - Center;
 		FVector3f Radial(Local.X, Local.Y, 0.f);
 		const float R = Radial.Size();
@@ -526,10 +533,21 @@ void FSlimeSolver::ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Cent
 		{
 			Radial *= Radius / R;
 		}
-		Local.X = Radial.X;
-		Local.Y = Radial.Y;
-		Local.Z = FMath::Clamp(Local.Z, -HalfH, HalfH);
-		InOutPoint = Center + Local;
+		InOutPoint.X = Center.X + Radial.X;
+		InOutPoint.Y = Center.Y + Radial.Y;
+		if (bGroundField)
+		{
+			ClampToOverhang(InOutPoint);
+			const float Ground = ResolveGroundStep(InOutPoint, Before);
+			// Floor only pushes up. Gravity and tension, not the clamp, set how far goo hangs.
+			const float MinZ = Ground + ContactRadius;
+			const float MaxZ = FMath::Max(Center.Z + HalfH, MinZ + HalfH * 2.f);
+			InOutPoint.Z = FMath::Clamp(InOutPoint.Z, MinZ, MaxZ);
+		}
+		else
+		{
+			InOutPoint.Z = Center.Z + FMath::Clamp(Local.Z, -HalfH, HalfH);
+		}
 		return;
 	}
 
@@ -602,6 +620,218 @@ void FSlimeSolver::SetAnchor(const FVector& InCenter, const FVector& InVelocity)
 {
 	AnchorCenter = FVector3f(InCenter);
 	AnchorVelocity = FVector3f(InVelocity);
+}
+
+void FSlimeSolver::SetGroundField(const FVector2f& InOrigin, float InCellSize, int32 InDimX, int32 InDimY, TArray<float>&& InHeights,
+	float InDrapeReferenceZ, const FVector2f& FootXY, float InStepHeight)
+{
+	const int32 Count = InDimX * InDimY;
+	if (InCellSize <= KINDA_SMALL_NUMBER || InDimX <= 0 || InDimY <= 0 || InHeights.Num() < Count)
+	{
+		ClearGroundField();
+		return;
+	}
+
+	bGroundField = true;
+	GroundOrigin = InOrigin;
+	GroundCellSize = InCellSize;
+	GroundDimX = InDimX;
+	GroundDimY = InDimY;
+	GroundHeights = MoveTemp(InHeights);
+	DrapeReferenceZ = InDrapeReferenceZ;
+	GroundStepHeight = FMath::Max(InStepHeight, 1.f);
+
+	// Supported region: flood from the foot cell, never stepping down more than StepHeight.
+	TArray<uint8> Supported;
+	Supported.Init(0, Count);
+	const int32 FootX = FMath::Clamp(FMath::FloorToInt((FootXY.X - GroundOrigin.X) / GroundCellSize), 0, GroundDimX - 1);
+	const int32 FootY = FMath::Clamp(FMath::FloorToInt((FootXY.Y - GroundOrigin.Y) / GroundCellSize), 0, GroundDimY - 1);
+	const int32 FootIndex = FootY * GroundDimX + FootX;
+	if (GroundHeights[FootIndex] < -1.e8f)
+	{
+		GroundHeights[FootIndex] = DrapeReferenceZ;
+	}
+	TArray<int32> Queue;
+	Queue.Reserve(Count);
+	Queue.Add(FootIndex);
+	Supported[FootIndex] = 1;
+	for (int32 Head = 0; Head < Queue.Num(); ++Head)
+	{
+		const int32 Cell = Queue[Head];
+		const int32 CX = Cell % GroundDimX;
+		const int32 CY = Cell / GroundDimX;
+		const float H = GroundHeights[Cell];
+		static const int32 Offsets[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+		for (const int32* Off : Offsets)
+		{
+			const int32 NX = CX + Off[0];
+			const int32 NY = CY + Off[1];
+			if (NX < 0 || NY < 0 || NX >= GroundDimX || NY >= GroundDimY)
+			{
+				continue;
+			}
+			const int32 N = NY * GroundDimX + NX;
+			const float NH = GroundHeights[N];
+			if (Supported[N] || NH < -1.e8f || NH < H - GroundStepHeight)
+			{
+				continue;
+			}
+			Supported[N] = 1;
+			Queue.Add(N);
+		}
+	}
+
+	// Nearest supported cell for every cell (two-pass chamfer, propagating seeds).
+	SupportSeeds.SetNumUninitialized(Count);
+	SupportHeights.SetNumUninitialized(Count);
+	SupportDistances.SetNumUninitialized(Count);
+	auto CellCenter = [this](int32 X, int32 Y)
+	{
+		return FVector2f(GroundOrigin.X + (float(X) + 0.5f) * GroundCellSize, GroundOrigin.Y + (float(Y) + 0.5f) * GroundCellSize);
+	};
+	for (int32 Y = 0; Y < GroundDimY; ++Y)
+	{
+		for (int32 X = 0; X < GroundDimX; ++X)
+		{
+			const int32 I = Y * GroundDimX + X;
+			SupportSeeds[I] = CellCenter(X, Y);
+			SupportHeights[I] = Supported[I] ? GroundHeights[I] : DrapeReferenceZ;
+			SupportDistances[I] = Supported[I] ? 0.f : 1.e9f;
+		}
+	}
+	auto Relax = [&](int32 X, int32 Y, int32 NX, int32 NY)
+	{
+		if (NX < 0 || NY < 0 || NX >= GroundDimX || NY >= GroundDimY)
+		{
+			return;
+		}
+		const int32 I = Y * GroundDimX + X;
+		const int32 N = NY * GroundDimX + NX;
+		if (SupportDistances[N] >= 1.e8f)
+		{
+			return;
+		}
+		const float D = FVector2f::Distance(CellCenter(X, Y), SupportSeeds[N]);
+		if (D < SupportDistances[I])
+		{
+			SupportDistances[I] = D;
+			SupportSeeds[I] = SupportSeeds[N];
+			SupportHeights[I] = SupportHeights[N];
+		}
+	};
+	for (int32 Y = 0; Y < GroundDimY; ++Y)
+	{
+		for (int32 X = 0; X < GroundDimX; ++X)
+		{
+			Relax(X, Y, X - 1, Y);
+			Relax(X, Y, X - 1, Y - 1);
+			Relax(X, Y, X, Y - 1);
+			Relax(X, Y, X + 1, Y - 1);
+		}
+	}
+	for (int32 Y = GroundDimY - 1; Y >= 0; --Y)
+	{
+		for (int32 X = GroundDimX - 1; X >= 0; --X)
+		{
+			Relax(X, Y, X + 1, Y);
+			Relax(X, Y, X + 1, Y + 1);
+			Relax(X, Y, X, Y + 1);
+			Relax(X, Y, X - 1, Y + 1);
+		}
+	}
+}
+
+void FSlimeSolver::ClearGroundField()
+{
+	bGroundField = false;
+	GroundHeights.Reset();
+	SupportSeeds.Reset();
+	SupportHeights.Reset();
+	SupportDistances.Reset();
+	GroundDimX = 0;
+	GroundDimY = 0;
+}
+
+void FSlimeSolver::SetDrapeParams(float InMaxDepth, float InTension, float InViscosity, float InMaxOverhang)
+{
+	DrapeDepth = FMath::Max(InMaxDepth, 0.f);
+	DrapeTension = FMath::Max(InTension, 0.f);
+	DrapeViscosity = FMath::Max(InViscosity, 0.f);
+	DrapeMaxOverhang = FMath::Max(InMaxOverhang, 0.f);
+}
+
+int32 FSlimeSolver::GroundCellIndex(float X, float Y) const
+{
+	if (!bGroundField || GroundCellSize <= KINDA_SMALL_NUMBER || GroundDimX <= 0 || GroundDimY <= 0)
+	{
+		return INDEX_NONE;
+	}
+	const int32 IX = FMath::Clamp(FMath::FloorToInt((X - GroundOrigin.X) / GroundCellSize), 0, GroundDimX - 1);
+	const int32 IY = FMath::Clamp(FMath::FloorToInt((Y - GroundOrigin.Y) / GroundCellSize), 0, GroundDimY - 1);
+	return IY * GroundDimX + IX;
+}
+
+float FSlimeSolver::SampleGround(float X, float Y) const
+{
+	if (!bGroundField || GroundCellSize <= KINDA_SMALL_NUMBER || GroundDimX <= 0 || GroundDimY <= 0)
+	{
+		return FloorZ;
+	}
+
+	const int32 IX = FMath::FloorToInt((X - GroundOrigin.X) / GroundCellSize);
+	const int32 IY = FMath::FloorToInt((Y - GroundOrigin.Y) / GroundCellSize);
+	if (IX < 0 || IY < 0 || IX >= GroundDimX || IY >= GroundDimY)
+	{
+		return FloorZ;
+	}
+
+	// Past an edge there is no floor, only the depth limit under the edge the goo hangs from.
+	const int32 Index = IY * GroundDimX + IX;
+	const float Limit = SupportHeights[Index] - DrapeDepth;
+	const float Height = GroundHeights[Index];
+	if (Height < -1.e8f)
+	{
+		return Limit;
+	}
+	return FMath::Max(Height, Limit);
+}
+
+float FSlimeSolver::ResolveGroundStep(FVector3f& InOutPoint, const FVector3f& FromPoint) const
+{
+	float Ground = SampleGround(InOutPoint.X, InOutPoint.Y);
+	const float Feet = InOutPoint.Z - ContactRadius;
+	if (Ground - Feet <= GroundStepHeight)
+	{
+		return Ground;
+	}
+	const float FromGround = SampleGround(FromPoint.X, FromPoint.Y);
+	if (Ground - FromGround <= GroundStepHeight)
+	{
+		return Ground;
+	}
+	// The step face is a wall: slide along it instead of teleporting onto the top.
+	InOutPoint.X = FromPoint.X;
+	InOutPoint.Y = FromPoint.Y;
+	return FromGround;
+}
+
+void FSlimeSolver::ClampToOverhang(FVector3f& InOutPoint) const
+{
+	const int32 Index = GroundCellIndex(InOutPoint.X, InOutPoint.Y);
+	if (Index == INDEX_NONE || SupportDistances[Index] <= 0.f || SupportDistances[Index] >= 1.e8f)
+	{
+		return;
+	}
+	const float Reach = DrapeMaxOverhang + GroundCellSize * 0.5f;
+	const FVector2f Seed = SupportSeeds[Index];
+	FVector2f Offset(InOutPoint.X - Seed.X, InOutPoint.Y - Seed.Y);
+	const float Dist = Offset.Size();
+	if (Dist > Reach && Dist > KINDA_SMALL_NUMBER)
+	{
+		Offset *= Reach / Dist;
+		InOutPoint.X = Seed.X + Offset.X;
+		InOutPoint.Y = Seed.Y + Offset.Y;
+	}
 }
 
 void FSlimeSolver::SetSpread(bool bInSpread, float InSpreadRadius, float InSpreadPush, float InSpreadHalfHeight)
@@ -756,7 +986,9 @@ void FSlimeSolver::Step(float Dt)
 	const float Slack = Params.TetherSlack;
 	if (bSpread)
 	{
-		ShellAxes = FVector3f(MembraneRadius * Slack, MembraneRadius * Slack, FMath::Max(Params.ParticleSpacing * 1.25f, 3.f));
+		const float FlatZ = FMath::Max(Params.ParticleSpacing * 1.25f, 3.f);
+		ShellAxes = FVector3f(MembraneRadius * Slack, MembraneRadius * Slack,
+			FMath::Lerp(GetScaledRestRadius() * Slack, FlatZ, SpreadBlend));
 		ShellBackShift = 0.f;
 	}
 	else if (bCling)
@@ -804,14 +1036,22 @@ void FSlimeSolver::Step(float Dt)
 	const float Omega = 2.f * PI * FMath::Max(Params.AnchorFollowFrequency, 0.1f);
 	const float SpringK = Omega * Omega;
 	const float SpringC = 2.f * Params.AnchorDamping * Omega;
-	const FVector3f AnchorAccel = (AnchorCenter - BodyCenter) * SpringK - (BodyVelocity - AnchorVelocity) * SpringC;
+	FVector3f AnchorAccel = (AnchorCenter - BodyCenter) * SpringK - (BodyVelocity - AnchorVelocity) * SpringC;
+	// A flat sheet on local ground has no vertical rest height; fade the vertical spring with the
+	// squash so pressing sinks and releasing rises smoothly instead of lifting a flat disk.
+	if (bSpread && bGroundField)
+	{
+		AnchorAccel.Z *= 1.f - SpreadBlend;
+	}
 
 	const float MembraneK = Params.MembraneStiffness * (1.f + SqueezeAmount * 1.5f);
 	const float SettleBoost = LandingSettleRemaining > 0.f ? Params.LandingCohesionBoost : 1.f;
 	// Keep the centre filled while spread (no doughnut): boost concentration, do not weaken it.
 	const float Concentration = Params.Concentration * SettleBoost * (bSpread ? SpreadConcentrationScale : 1.f);
 	const float GripRadius = MembraneRadius * Params.GripRadiusScale;
-	const float UpwardRestore = bSpread ? 0.f : Params.UpwardRestore * SettleBoost;
+	const float UpwardRestore = Params.UpwardRestore * SettleBoost * (bSpread ? 1.f - SpreadBlend : 1.f);
+	const bool bDrape = bSpread && bGroundField;
+	const float DrapeDampFactor = FMath::Exp(-DrapeViscosity * Dt);
 	const float Gravity = Params.Gravity * GravityScale;
 	const float DampingFactor = FMath::Exp(-Params.LinearDamping * Dt);
 	const float MiniRadius = FMath::Max(MiniMembraneRadius, Params.ParticleSpacing * 2.f);
@@ -833,9 +1073,10 @@ void FSlimeSolver::Step(float Dt)
 		}
 	}
 
-	ParallelFor(Count, [this, Dt, &AnchorAccel, &BodyCenter, MembraneRadius, MembraneK, GripRadius, Concentration, UpwardRestore, Gravity, DampingFactor, MiniRadius, MiniGrip, MiniConcentration, MiniMembraneK, &ShotCenters, &TargetedShotIds](int32 Index)
+	ParallelFor(Count, [this, Dt, &AnchorAccel, &BodyCenter, MembraneRadius, MembraneK, GripRadius, Concentration, UpwardRestore, Gravity, DampingFactor, bDrape, DrapeDampFactor, MiniRadius, MiniGrip, MiniConcentration, MiniMembraneK, &ShotCenters, &TargetedShotIds](int32 Index)
 	{
 		FSlimeParticle& Particle = Particles[Index];
+		float ExtraDamping = 1.f;
 		const bool bTargetedShot = Particle.IsBallistic() && TargetedShotIds.Contains(Particle.ShotId);
 		FVector3f Accel = bTargetedShot ? FVector3f::ZeroVector : FVector3f(0.f, 0.f, Gravity);
 		if (bCling && !Particle.IsBallistic())
@@ -887,7 +1128,25 @@ void FSlimeSolver::Step(float Dt)
 				}
 			}
 
-			if (bSpread && SpreadPush > 0.f)
+			bool bOverEdge = false;
+			if (bDrape)
+			{
+				const int32 Cell = GroundCellIndex(Particle.Position.X, Particle.Position.Y);
+				if (Cell != INDEX_NONE && SupportDistances[Cell] > 0.f)
+				{
+					bOverEdge = true;
+					// Goo past an edge: tension pulls it back up toward the edge it hangs from,
+					// viscosity makes it ooze rather than drop.
+					const float Depth = SupportHeights[Cell] + ContactRadius - Particle.Position.Z;
+					if (Depth > 0.f)
+					{
+						Accel.Z += DrapeTension * Depth;
+						ExtraDamping = DrapeDampFactor;
+					}
+				}
+			}
+
+			if (bSpread && SpreadPush > 0.f && !bOverEdge)
 			{
 				// Edge-only push: centre stays dense; outer ring expands into a pancake.
 				FVector3f Radial(Offset.X, Offset.Y, 0.f);
@@ -939,7 +1198,7 @@ void FSlimeSolver::Step(float Dt)
 			}
 		}
 
-		Particle.Velocity = (Particle.Velocity + Accel * Dt) * DampingFactor;
+		Particle.Velocity = (Particle.Velocity + Accel * Dt) * (DampingFactor * ExtraDamping);
 		Particle.PredictedPosition = Particle.Position + Particle.Velocity * Dt;
 	}, Count < GParallelMinBatch ? EParallelForFlags::ForceSingleThread : EParallelForFlags::None);
 
@@ -1462,9 +1721,9 @@ void FSlimeSolver::ResolveCollisions()
 				}
 			}
 
-			// Body uses the capsule floor; each clone shot uses its own traced floor.
-			// Cling replaces the horizontal floor for the attached body so it does not
-			// stretch down to the real ground.
+			// Body uses the capsule floor, or the spread height field when one is active.
+			// Each clone shot uses its own traced floor. Cling replaces the horizontal
+			// floor for the attached body so it does not stretch down to the real ground.
 			const bool bBodyCling = bCling && !Particle.IsBallistic();
 			float PlaneZ = FloorZ;
 			if (Particle.IsBallistic())
@@ -1473,6 +1732,17 @@ void FSlimeSolver::ResolveCollisions()
 				if (const float* ShotFloor = ShotFloorOverrides.Find(Particle.ShotId))
 				{
 					PlaneZ = *ShotFloor;
+				}
+			}
+			else if (bGroundField)
+			{
+				const FVector3f BeforeStep = Point;
+				PlaneZ = ResolveGroundStep(Point, Particle.Position);
+				const FVector3f WallPush(Point.X - BeforeStep.X, Point.Y - BeforeStep.Y, 0.f);
+				if (!WallPush.IsNearlyZero())
+				{
+					Accumulated += WallPush.GetSafeNormal();
+					Load += WallPush.Size();
 				}
 			}
 			if (!bBodyCling && !bIgnoreWorldShot && Point.Z - LocalContactRadius < PlaneZ)

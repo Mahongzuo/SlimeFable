@@ -34,6 +34,9 @@
 #include "UI/SlimeFloatingTextWidget.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "UObject/UObjectIterator.h"
 
 using namespace SlimeSim;
 
@@ -43,8 +46,17 @@ static TAutoConsoleVariable<int32> CVarSlimeBodyVisualScaleOnly(
 	TEXT("If 1, devour body scale only inflates the isosurface (no solver SizeScale)."),
 	ECVF_Default);
 
+static TAutoConsoleVariable<int32> CVarSlimeAmbientDebug(
+	TEXT("slime.AmbientDebug"),
+	0,
+	TEXT("1 = slime skins show AmbientScale as grey and the body logs raw illuminance / sky / sun / scale once per second."),
+	ECVF_Default);
+
 namespace SlimeBodyPrivate
 {
+	static const FName ParamAmbientScale(TEXT("AmbientScale"));
+	static const FName ParamAmbientDebug(TEXT("AmbientDebug"));
+
 	/** Clearance kept between the capsule and a ceiling so the sweep does not re-hit it. */
 	constexpr float CeilingSkin = 2.f;
 
@@ -754,9 +766,146 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		UpdateMeshFollow();
 	}
 
+	UpdateAmbientLight(DeltaTime);
 	UpdateBubblesAndShellParams(DeltaTime);
 
 	TickFragmentAttacks(DeltaTime);
+}
+
+float USlimeBodyComponent::ComputeAmbientTarget(bool bLog) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 1.f;
+	}
+
+	const FVector Origin = GetShellCenter();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeAmbientTrace), false, GetOwner());
+	Params.bTraceIntoSubComponents = false;
+
+	float SkyOpen = 0.f;
+	for (int32 i = 0; i < AmbientSkyRays; ++i)
+	{
+		SkyOpen += SkyRayOpen[i];
+	}
+	SkyOpen /= float(AmbientSkyRays);
+
+	float Direct = 0.f;
+	float SunVisLog = -1.f;
+	for (TObjectIterator<UDirectionalLightComponent> It; It; ++It)
+	{
+		const UDirectionalLightComponent* Light = *It;
+		if (!Light || Light->GetWorld() != World || !Light->bAffectsWorld || !Light->IsVisible() || Light->Intensity <= 0.f)
+		{
+			continue;
+		}
+		const FVector ToLight = -Light->GetDirection();
+		const float SinElev = float(ToLight.Z);
+		if (SinElev <= 0.f)
+		{
+			continue;
+		}
+		const float Elev = 0.35f + 0.65f * FMath::SmoothStep(0.f, 0.5f, SinElev);
+		const float Horizon = FMath::SmoothStep(0.f, 0.08f, SinElev);
+		const float Color = Light->GetLightColor().GetLuminance();
+		const float Contribution = Light->Intensity * Color * Elev * Horizon;
+		if (Contribution <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		FHitResult Hit;
+		const bool bBlocked = World->LineTraceSingleByChannel(
+			Hit, Origin, Origin + ToLight * AmbientSunTraceLength, ECC_Visibility, Params);
+		const float Vis = bBlocked ? 0.f : 1.f;
+		SunVisLog = FMath::Max(SunVisLog, Vis);
+		Direct += Contribution * Vis;
+	}
+
+	float Sky = 0.f;
+	for (TObjectIterator<USkyLightComponent> It; It; ++It)
+	{
+		const USkyLightComponent* SkyLight = *It;
+		if (!SkyLight || SkyLight->GetWorld() != World || !SkyLight->bAffectsWorld || !SkyLight->IsVisible())
+		{
+			continue;
+		}
+		Sky += SkyLight->Intensity * SkyLight->GetLightColor().GetLuminance() * AmbientSkyWeight;
+	}
+
+	const float Raw = Direct + Sky * SkyOpen;
+	const float Target = FMath::Clamp(Raw / FMath::Max(AmbientReference, 0.001f), AmbientFloor, 1.f);
+	if (bLog)
+	{
+		UE_LOG(LogSlimeFable, Log, TEXT("SlimeAmbient %s: Raw=%.3f Direct=%.3f Sky=%.3f SkyOpen=%.2f SunVis=%.0f Target=%.3f Scale=%.3f (Reference=%.3f)"),
+			*GetNameSafe(GetOwner()), Raw, Direct, Sky, SkyOpen, SunVisLog, Target, AmbientScale, AmbientReference);
+	}
+	return Target;
+}
+
+void USlimeBodyComponent::UpdateAmbientLight(float DeltaTime)
+{
+	if (!bAmbientLightResponse)
+	{
+		AmbientScale = 1.f;
+		AmbientTarget = 1.f;
+		bAmbientPrimed = false;
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const bool bDebug = CVarSlimeAmbientDebug.GetValueOnGameThread() != 0;
+	AmbientLogTimer += DeltaTime;
+	const bool bLog = bDebug && AmbientLogTimer >= 1.f;
+	if (bLog)
+	{
+		AmbientLogTimer = 0.f;
+	}
+
+	AmbientTimer -= DeltaTime;
+	if (!bAmbientPrimed || AmbientTimer <= 0.f || bLog)
+	{
+		AmbientTimer = AmbientTraceInterval;
+		const FVector Origin = GetShellCenter();
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(SlimeAmbientTrace), false, GetOwner());
+
+		// Straight up plus a ring at ~55 deg from zenith; unprimed bodies fire all rays at once.
+		auto SkyDir = [](int32 Index)
+		{
+			if (Index == 0)
+			{
+				return FVector::UpVector;
+			}
+			const float Angle = 2.f * PI * float(Index - 1) / float(AmbientSkyRays - 1);
+			return FVector(FMath::Cos(Angle) * 0.82f, FMath::Sin(Angle) * 0.82f, 0.57f).GetSafeNormal();
+		};
+		const int32 RaysNow = bAmbientPrimed ? 2 : AmbientSkyRays;
+		for (int32 r = 0; r < RaysNow; ++r)
+		{
+			const int32 Index = bAmbientPrimed ? SkyRayCursor : r;
+			FHitResult Hit;
+			const bool bBlocked = World->LineTraceSingleByChannel(
+				Hit, Origin, Origin + SkyDir(Index) * AmbientSkyTraceLength, ECC_Visibility, Params);
+			SkyRayOpen[Index] = bBlocked ? 0.f : 1.f;
+			if (bAmbientPrimed)
+			{
+				SkyRayCursor = (SkyRayCursor + 1) % AmbientSkyRays;
+			}
+		}
+
+		AmbientTarget = ComputeAmbientTarget(bLog);
+		if (!bAmbientPrimed)
+		{
+			AmbientScale = AmbientTarget;
+			bAmbientPrimed = true;
+		}
+	}
+
+	AmbientScale = FMath::FInterpTo(AmbientScale, AmbientTarget, DeltaTime, AmbientSmoothSpeed);
 }
 
 FVector USlimeBodyComponent::GetBubbleWorldPosition(int32 Index) const
@@ -874,6 +1023,8 @@ void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
 		return;
 	}
 	const FVector Center = GetShellCenter();
+	Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamAmbientScale, AmbientScale);
+	Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamAmbientDebug, CVarSlimeAmbientDebug.GetValueOnGameThread() != 0 ? 1.f : 0.f);
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellCenter, FLinearColor(float(Center.X), float(Center.Y), float(Center.Z), 0.f));
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellAxes, FLinearColor(float(Axes.X), float(Axes.Y), float(Axes.Z), 0.f));
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellForward, FLinearColor(float(Fwd.X), float(Fwd.Y), float(Fwd.Z), 0.f));
@@ -935,27 +1086,47 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 
 	UpdateAnchor();
 
-	// Pancake state, including the soft reform after the key is released.
-	const float HalfHeight = FMath::Max(SpreadHalfHeight, 0.5f);
+	// One squash amount drives shell height, radius, push, gravity and the vertical spring, so
+	// pressing and releasing are the same motion run forwards and backwards.
 	if (bSpread)
 	{
-		Solver.SetSpread(true, SolverParams.RestRadius * SpreadRadiusScale, SpreadPush, HalfHeight);
-		Solver.SetSpreadConcentrationScale(SpreadConcentrationScale);
-		Solver.SetGravityScale(SpreadGravityScale);
+		SpreadBlend = FMath::Min(SpreadBlend + StepDelta / FMath::Max(SpreadFlattenTime, 0.01f), 1.f);
 	}
-	else if (SpreadRecoverRemaining > 0.f)
+	else
 	{
-		SpreadRecoverRemaining = FMath::Max(SpreadRecoverRemaining - StepDelta, 0.f);
-		const float Alpha = SpreadRecoverDuration > 0.f ? SpreadRecoverRemaining / SpreadRecoverDuration : 0.f;
-		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
-		Solver.SetSpreadConcentrationScale(1.f);
-		Solver.SetGravityScale(FMath::Lerp(1.f, SpreadGravityScale, Alpha));
+		SpreadBlend = FMath::Max(SpreadBlend - StepDelta / FMath::Max(SpreadRecoverDuration, 0.01f), 0.f);
+	}
+	const float Eased = FMath::SmoothStep(0.f, 1.f, SpreadBlend);
+	const bool bSpreadActive = bSpread || SpreadBlend > 0.f;
+	const bool bSpreadDrape = bSpreadFollowTerrain && bSpreadActive;
+
+	const float HalfHeight = FMath::Max(SpreadHalfHeight, 0.5f);
+	if (bSpreadActive)
+	{
+		const float Radius = FMath::Lerp(SolverParams.RestRadius, SolverParams.RestRadius * SpreadRadiusScale, Eased);
+		Solver.SetSpread(true, Radius, bSpread ? SpreadPush * Eased : 0.f, HalfHeight);
+		Solver.SetSpreadBlend(Eased);
+		Solver.SetSpreadConcentrationScale(FMath::Lerp(1.f, SpreadConcentrationScale, Eased));
+		Solver.SetGravityScale(FMath::Lerp(1.f, SpreadGravityScale, Eased));
 	}
 	else
 	{
 		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
+		Solver.SetSpreadBlend(0.f);
 		Solver.SetSpreadConcentrationScale(1.f);
 		Solver.SetGravityScale(1.f);
+	}
+
+	if (bSpreadDrape)
+	{
+		UpdateGroundField(StepDelta);
+		// Depth limit shrinks with the squash on release, drawing hanging goo back up.
+		Solver.SetDrapeParams(SpreadDrapeDepth * Eased, SpreadDrapeTension, SpreadDrapeViscosity, SpreadMaxOverhang);
+	}
+	else
+	{
+		Solver.ClearGroundField();
+		GroundFieldTimer = 0.f;
 	}
 
 	// Recall pulls fragments; soft-merge (after Step) finishes the duang before destroy.
@@ -1189,6 +1360,100 @@ void USlimeBodyComponent::UpdateFloor()
 		}
 		Solver.SetShotFloorZ(Shot.Id, ShotFloor);
 	}
+}
+
+void USlimeBodyComponent::UpdateGroundField(float StepDelta)
+{
+	UWorld* World = GetWorld();
+	const UCharacterMovementComponent* Movement = OwnerCharacter ? OwnerCharacter->GetCharacterMovement() : nullptr;
+	// Airborne (or no floor yet): keep the flat disk on the capsule. A sentinel floor far
+	// below the feet would otherwise drop the whole sheet.
+	if (!World || !Movement || !Movement->IsMovingOnGround() || FloorZ < -1.e8f)
+	{
+		Solver.ClearGroundField();
+		GroundFieldTimer = 0.f;
+		return;
+	}
+
+	GroundFieldTimer += StepDelta;
+	const float CellWanted = FMath::Max(SpreadGroundCellSize, 4.f);
+	const FVector Foot = GetFootLocation();
+	const FVector Center(Foot.X, Foot.Y, Solver.GetBodyCenter().Z);
+	const bool bMoved = (Center - LastGroundFieldCenter).SizeSquared2D() > FMath::Square(CellWanted * 0.5f);
+	if (Solver.HasGroundField() && GroundFieldTimer < SpreadGroundRefreshInterval && !bMoved)
+	{
+		return;
+	}
+	GroundFieldTimer = 0.f;
+	LastGroundFieldCenter = Center;
+
+	const float CoverRadius = SolverParams.RestRadius * SpreadRadiusScale * FMath::Max(SolverParams.TetherSlack, 1.f);
+	int32 Dim = FMath::CeilToInt((CoverRadius * 2.f) / CellWanted) + 1;
+	float Cell = CellWanted;
+	constexpr int32 MaxDim = 40;
+	if (Dim > MaxDim)
+	{
+		Dim = MaxDim;
+		Cell = (CoverRadius * 2.f) / float(FMath::Max(Dim - 1, 1));
+	}
+	Dim = FMath::Max(Dim, 3);
+
+	const float OriginX = float(Center.X) - (float(Dim) * Cell) * 0.5f;
+	const float OriginY = float(Center.Y) - (float(Dim) * Cell) * 0.5f;
+	const float StartZ = FloorZ + FMath::Max(SpreadClimbHeight, 0.f);
+	const float EndZ = FloorZ - FMath::Max(SpreadDrapeDepth, 0.f) - Cell;
+
+	TArray<float> Heights;
+	Heights.SetNumUninitialized(Dim * Dim);
+
+	FCollisionQueryParams Query(TEXT("SlimeSpreadGround"), false, GetOwner());
+	FCollisionResponseParams ResponseParams = FCollisionResponseParams::DefaultResponseParam;
+	ResponseParams.CollisionResponse.SetResponse(ECC_Pawn, ECR_Ignore);
+
+	TArray<FHitResult> Hits;
+	Hits.Reserve(8);
+	constexpr float MissZ = -1.e9f;
+
+	for (int32 Y = 0; Y < Dim; ++Y)
+	{
+		const float YPos = OriginY + (float(Y) + 0.5f) * Cell;
+		for (int32 X = 0; X < Dim; ++X)
+		{
+			const FVector Start(OriginX + (float(X) + 0.5f) * Cell, YPos, StartZ);
+			const FVector End(Start.X, Start.Y, EndZ);
+			float HitZ = MissZ;
+			Hits.Reset();
+			if (World->LineTraceMultiByChannel(Hits, Start, End, ECC_Pawn, Query, ResponseParams))
+			{
+				for (const FHitResult& Hit : Hits)
+				{
+					if (ShouldIgnoreFluidNinjaCollider(Hit.GetComponent()))
+					{
+						continue;
+					}
+					if (const AActor* HitActor = Hit.GetActor())
+					{
+						if (Cast<APawn>(HitActor) && HitActor != GetOwner())
+						{
+							continue;
+						}
+					}
+					// Skip ceilings and the underside we exit when the ray started inside a volume.
+					if (Hit.ImpactNormal.Z < 0.2f)
+					{
+						continue;
+					}
+					HitZ = float(Hit.ImpactPoint.Z);
+					break;
+				}
+			}
+			Heights[Y * Dim + X] = HitZ;
+		}
+	}
+
+	Solver.SetGroundField(
+		FVector2f(OriginX, OriginY), Cell, Dim, Dim, MoveTemp(Heights), FloorZ,
+		FVector2f(float(Foot.X), float(Foot.Y)), SpreadStepHeight);
 }
 
 void USlimeBodyComponent::RefreshColliders()
@@ -1870,7 +2135,7 @@ void USlimeBodyComponent::RebuildSurface()
 	}
 
 	FSlimeSurfaceParams ActiveSurface = SurfaceParams;
-	if (bSpread || Solver.GetLandingSettleRemaining() > 0.f)
+	if (bSpread || SpreadBlend > 0.f || Solver.GetLandingSettleRemaining() > 0.f)
 	{
 		// Thin connected sheet: wider XY splat, flatter Z, lower iso, lighter blur.
 		ActiveSurface.SplatRadiusMultiplier = FMath::Max(ActiveSurface.SplatRadiusMultiplier, SpreadSplatMultiplier);
@@ -1894,19 +2159,21 @@ void USlimeBodyComponent::RebuildSurface()
 
 	VisualZLift = 0.f;
 	float ClipZ = -1.e9f;
-	if (bVisualOnly && RequestedBodyScale > 1.05f && FloorZ > -1.e8f)
+	// Draped fluid sits below the capsule floor. Clipping there would slice the sheet off.
+	const bool bSpreadDrape = bSpread || SpreadBlend > 0.f;
+	if (!bSpreadDrape && bVisualOnly && RequestedBodyScale > 1.05f && FloorZ > -1.e8f)
 	{
 		const float VisualR = SolverParams.RestRadius * RequestedBodyScale;
 		VisualZLift = FMath::Max(0.f, VisualR - (RebuildBodyCOM.Z - FloorZ));
 		ClipZ = FloorZ;
 	}
-	else if (!bClingVisual && FloorZ > -1.e8f)
+	else if (!bSpreadDrape && !bClingVisual && FloorZ > -1.e8f)
 	{
 		const float Hang = float(GetFootLocation().Z) - FloorZ;
 		if (Hang > -8.f && Hang < SolverParams.RestRadius)
 		{
+			// Splats reach below the floor and are cut flat there; any lift reads as hovering.
 			ClipZ = FloorZ;
-			VisualZLift = 4.f;
 		}
 	}
 
@@ -2251,14 +2518,12 @@ void USlimeBodyComponent::SetSpread(bool bInSpread)
 	bSpread = bInSpread;
 	if (bSpread)
 	{
-		SpreadRecoverRemaining = 0.f;
 		// Pancaking is a deliberate flatten, so drive the capsule down without waiting for
 		// a probe to notice a ceiling.
 		SetForcedSqueeze(1.f);
 	}
 	else
 	{
-		SpreadRecoverRemaining = SpreadRecoverDuration;
 		SetForcedSqueeze(0.f);
 	}
 }
@@ -2321,7 +2586,11 @@ void USlimeBodyComponent::ResetBody()
 	bRecalling = false;
 	bClingVisual = false;
 	StepHeightBoost = 0.f;
-	SpreadRecoverRemaining = 0.f;
+	SpreadBlend = 0.f;
+	GroundFieldTimer = 0.f;
+	LastGroundFieldCenter = FVector::ZeroVector;
+	bAmbientPrimed = false;
+	AmbientTimer = 0.f;
 	RecallElapsed = 0.f;
 	ForcedSqueeze = 0.f;
 	HeightSqueezeSuppressRemaining = 0.f;

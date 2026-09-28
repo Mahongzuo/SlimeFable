@@ -59,6 +59,29 @@ public:
 	/** Hard floor plane for the attached body. Particles never go below this. */
 	void SetFloorZ(float InFloorZ) { FloorZ = float(InFloorZ); }
 
+	/**
+	 * Local ground heights used while spread (and during the recover after).
+	 * Origin is the world XY of cell (0,0)'s min corner. A height <= -1e8 is a missed trace.
+	 * Cells reachable from FootXY without dropping more than StepHeight are "supported";
+	 * every other cell stores its nearest supported cell so the sheet can hang off an edge
+	 * but stay attached to it. DrapeReferenceZ is the standing floor under the capsule.
+	 */
+	void SetGroundField(const FVector2f& InOrigin, float InCellSize, int32 InDimX, int32 InDimY, TArray<float>&& InHeights,
+		float InDrapeReferenceZ, const FVector2f& FootXY, float InStepHeight);
+	void ClearGroundField();
+	bool HasGroundField() const { return bGroundField; }
+
+	/**
+	 * Goo overhang tuning, fed every step.
+	 * MaxDepth: hard limit below the support edge. Tension (1/s^2) pulls hanging goo back up in
+	 * proportion to its depth; Viscosity (1/s) damps it so it oozes. MaxOverhang: how far the sheet
+	 * may reach horizontally past a supported cell.
+	 */
+	void SetDrapeParams(float InMaxDepth, float InTension, float InViscosity, float InMaxOverhang);
+
+	/** 0 = dome, 1 = fully flattened. Blends shell height, vertical anchor and upward restore. */
+	void SetSpreadBlend(float InBlend) { SpreadBlend = FMath::Clamp(InBlend, 0.f, 1.f); }
+
 	/** Fallback floor when a shot has no per-shot trace yet. */
 	void SetFragmentFloorZ(float InFloorZ) { FragmentFloorZ = float(InFloorZ); }
 
@@ -276,6 +299,22 @@ private:
 	 */
 	void ClampToBodyShell(FVector3f& InOutPoint, const FVector3f& Center) const;
 
+	/** Nearest ground-field cell, or FloorZ when the field is off / the point is outside it. */
+	float SampleGround(float X, float Y) const;
+
+	/** Ground-field cell index for a world XY, clamped into the grid. INDEX_NONE when the field is off. */
+	int32 GroundCellIndex(float X, float Y) const;
+
+	/**
+	 * Height step handling: a particle may not move sideways into a cell whose ground is more
+	 * than StepHeight above its feet, when it came from a lower cell. Reverts XY in that case.
+	 * Returns the ground under the final XY.
+	 */
+	float ResolveGroundStep(FVector3f& InOutPoint, const FVector3f& FromPoint) const;
+
+	/** Keeps a point within MaxOverhang of its nearest supported cell. */
+	void ClampToOverhang(FVector3f& InOutPoint) const;
+
 	/** Projects a point out of one primitive. Returns true on contact. */
 	static bool ProjectOut(const SlimeSim::FSlimeCollider& Collider, float Skin, FVector3f& InOutPoint, FVector3f& OutNormal);
 
@@ -314,6 +353,23 @@ private:
 	FVector3f AnchorVelocity = FVector3f::ZeroVector;
 	FVector3f SqueezeFreeDirection = FVector3f::ZeroVector;
 	float FloorZ = -1.e9f;
+	bool bGroundField = false;
+	FVector2f GroundOrigin = FVector2f::ZeroVector;
+	float GroundCellSize = 10.f;
+	int32 GroundDimX = 0;
+	int32 GroundDimY = 0;
+	TArray<float> GroundHeights;
+	/** Per cell: nearest supported cell centre (itself when supported), its ground height, and the distance to it. */
+	TArray<FVector2f> SupportSeeds;
+	TArray<float> SupportHeights;
+	TArray<float> SupportDistances;
+	float DrapeReferenceZ = 0.f;
+	float DrapeDepth = 35.f;
+	float DrapeTension = 140.f;
+	float DrapeViscosity = 90.f;
+	float DrapeMaxOverhang = 12.f;
+	float GroundStepHeight = 8.f;
+	float SpreadBlend = 0.f;
 	float FragmentFloorZ = -1.e9f;
 	float CeilingZ = 1.e9f;
 	float SqueezeAmount = 0.f;
