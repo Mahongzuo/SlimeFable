@@ -57,6 +57,11 @@ bool ASlimeElementLock::TryInteract(APawn* Interactor)
 
 	bUnlocked = true;
 	ApplyConsumedVisual();
+	if (DoorActor)
+	{
+		DoorActor->SetActorHiddenInGame(true);
+		DoorActor->SetActorEnableCollision(false);
+	}
 	if (Objective && !Objective->ChapterId.IsNone())
 	{
 		Objective->TryContribute();

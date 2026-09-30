@@ -2,7 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "Quest/QuestChapterGate.h"
+#include "Engine/World.h"
 #include "DayChapterPortal.generated.h"
+
+UENUM(BlueprintType)
+enum class EPortalDestination : uint8
+{
+	Story UMETA(DisplayName = "年份故事"),
+	Map UMETA(DisplayName = "指定地图"),
+	Museum UMETA(DisplayName = "返回博物馆")
+};
 
 class UBoxComponent;
 class UChildActorComponent;
@@ -16,6 +25,23 @@ class SLIMEFABLE_API ADayChapterPortal : public AQuestChapterGate
 
 public:
 	ADayChapterPortal();
+	virtual bool RequestEnter(APawn* Interactor) override;
+	virtual FText GetInteractPromptVerb() const override;
+	virtual bool CanBeFocused() const override;
+	void SetPortalEnabled(bool bEnabled);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Destination", meta = (ToolTip = "旧门默认年份故事。指定地图和返回博物馆不检查任务解锁。"))
+	EPortalDestination DestinationMode = EPortalDestination::Story;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Destination", meta = (ToolTip = "指定地图模式使用的地图资产。必须存在，否则拒绝传送。"))
+	TSoftObjectPtr<UWorld> DestinationMap;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Destination", meta = (ToolTip = "目标地图 PlayerStart 的标签；留空使用默认安全出生点。"))
+	FName DestinationArrivalTag;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Destination", meta = (ToolTip = "从此门离开博物馆时记录的返回出生点标签，须位于触发盒外。"))
+	FName MuseumReturnTag;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Destination", meta = (ToolTip = "指定地图门的交互名称，例如 Ruin 户外探索。年份门由管理器绑定章节名称。"))
+	FText DestinationLabel;
+
+	bool IsPortalEnabled() const { return bPortalEnabled; }
 
 	virtual void BeginPlay() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -52,6 +78,7 @@ public:
 	FVector OverlapExtent = FVector(180.f, 80.f, 200.f);
 
 protected:
+	bool bPortalEnabled = true;
 	UFUNCTION()
 	void HandleBeginOverlap(
 		UPrimitiveComponent* OverlappedComp,

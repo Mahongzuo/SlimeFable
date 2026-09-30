@@ -14,6 +14,7 @@
 | `Month` | `int32` | 1–12 |
 | `Day` | `int32` | 月内日 |
 | `Level` | `FSoftObjectPath` | 指向日关卡 World |
+| `ChapterOrder` | `TArray<FName>` | 显式故事排列；第 N 项对应博物馆 N 号门，禁止运行时排序 |
 | `SubLevels` | `TMap<FName, TSoftObjectPtr<UWorld>>` | 可选年份/章节子图，键如 `1920` |
 
 辅助：
@@ -42,7 +43,10 @@
 | `GetTodayLevel` | 今天的关卡 |
 | `GetSaveSlotKeyForDayId` | 日关卡约定 slot 名 = DayId |
 | `GetSubLevelForDayId` | 查 `SubLevels` 里某章的 Soft World |
-| `TravelToSubLevel` | 从当前日关卡 Travel 到某章子图 |
+| `TravelToSubLevel` | 保留所选日期，OpenLevel 到某章子图并记录返回门位 |
+| `GetSelectedDayId` | 当前选择故事日期；与现实日期、地图名解耦 |
+| `TravelToDayId` / `TravelToToday` | 选择日期，进入/原地刷新共用 TimeMuseum |
+| `TravelToMuseumHub` | 保存并返回博物馆来源门位；无来源使用默认出生点 |
 
 ## 路径公式
 

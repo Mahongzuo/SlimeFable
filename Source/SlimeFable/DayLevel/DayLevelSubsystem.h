@@ -7,6 +7,11 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "DayLevelSubsystem.generated.h"
 
+UENUM(BlueprintType)
+enum class EDayDestination : uint8 { Museum, Story, Exploration };
+
+DECLARE_MULTICAST_DELEGATE(FOnMuseumDateChanged);
+
 /**
  * Day-level lookup and travel for "this day in history".
  * Save slot key convention: DayId string (e.g. "0812").
@@ -18,6 +23,20 @@ class SLIMEFABLE_API UDayLevelSubsystem : public UGameInstanceSubsystem
 
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+	FOnMuseumDateChanged OnMuseumDateChanged;
+	UFUNCTION(BlueprintPure, Category = "Day Level")
+	FName GetSelectedDayId() const { return SelectedDayId.IsNone() ? GetTodayDayId().Id : SelectedDayId; }
+	UFUNCTION(BlueprintPure, Category = "Day Level")
+	FName GetStoryChapterId() const { return StoryChapterId; }
+	UFUNCTION(BlueprintPure, Category = "Day Level")
+	EDayDestination GetDestination() const { return Destination; }
+	FName GetArrivalTag(const UWorld* World) const;
+	bool IsTravelPending() const { return bTravelPending; }
+	bool TravelToMap(const UObject* Context, TSoftObjectPtr<UWorld> Level, FName ArrivalTag, FName ReturnTag);
+	static bool IsValidDestination(TSoftObjectPtr<UWorld> Level);
+	void ReportTravelError(const FString& Message) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Day Level")
 	void SetRegistry(UDayLevelRegistry* InRegistry);
@@ -86,6 +105,18 @@ public:
 	static const TCHAR* OpenLevelSelectOption;
 
 protected:
+	bool OpenDestination(const UObject* Context, TSoftObjectPtr<UWorld> Level, EDayDestination Role, FName ArrivalTag);
+	void PrepareDeparture(UWorld* World);
+	void HandleWorldLoaded(UWorld* World);
+	FDelegateHandle WorldLoadedHandle;
+	FName SelectedDayId;
+	FName StoryChapterId;
+	FName MuseumReturnTag;
+	FName PendingArrivalTag;
+	FString DestinationPackage;
+	EDayDestination Destination = EDayDestination::Museum;
+	bool bTravelPending = false;
+	TWeakObjectPtr<UWorld> DepartureWorld;
 	void LoadDefaultRegistry();
 
 	UPROPERTY()

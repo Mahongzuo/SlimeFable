@@ -13,6 +13,7 @@ class ASlimeHubInteractActor;
 class AEnemyCharacter;
 class APawn;
 class USlimeInventoryWidget;
+class USlimeStatsWidget;
 
 UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
 class SLIMEFABLE_API USlimeInteractComponent : public UActorComponent
@@ -74,6 +75,11 @@ protected:
 	TWeakObjectPtr<ASlimeHubInteractActor> FocusedHub;
 	TWeakObjectPtr<APawn> FocusedDevour;
 
+	void ToggleStats();
+
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeInventoryWidget> InventoryWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USlimeStatsWidget> StatsWidget;
 };

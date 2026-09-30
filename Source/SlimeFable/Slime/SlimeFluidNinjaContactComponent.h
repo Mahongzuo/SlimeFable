@@ -7,6 +7,8 @@
 #include "SlimeFluidNinjaContactComponent.generated.h"
 
 class USphereComponent;
+class UAudioComponent;
+class USoundBase;
 class ACharacter;
 
 /**
@@ -86,6 +88,11 @@ protected:
 	void SyncContactTransforms();
 	USphereComponent* CreateContactSphere(const FName& Name);
 	void ApplyFluidNinjaPawnPassthrough();
+	void UpdatePoolAudio();
+	void StartPoolLoop();
+	void StopPoolLoop();
+	bool IsOverlappingPool() const;
+	void ResolvePoolSounds();
 
 	/** TraceMesh / InteractionVolume — move-ignore only (do NOT include ActivationVolume). */
 	static bool IsFluidNinjaBlockingSimGeom(const UPrimitiveComponent* Component);
@@ -99,5 +106,16 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> PassthroughIgnoredComponents;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> PoolLoopAudio;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundBase> PoolSplashSound;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundBase> PoolLoopSound;
+
 	float PassthroughRescanTimer = 0.f;
+	bool bWasInPool = false;
+	bool bPoolSoundsResolved = false;
 };

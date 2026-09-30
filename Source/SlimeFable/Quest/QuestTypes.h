@@ -62,6 +62,10 @@ struct FQuestChapter
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
 	FText Title;
 
+	/** 这天发生了什么。进门横幅和史书显示，左上角不放这一句。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
+	FText Summary;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
 	TArray<FQuestMain> MainQuests;
 
@@ -85,6 +89,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
 	bool bDoNotSave = false;
+
+	/** 为真时，本书每一章在一周目都可以进入。1001 用它让五扇门一起开。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
+	bool bStartAllChaptersUnlocked = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest")
 	TArray<FQuestChapter> Chapters;

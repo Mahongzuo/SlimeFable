@@ -71,6 +71,9 @@ struct FDayLevelEntry
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Day Level")
 	TMap<FName, TSoftObjectPtr<UWorld>> SubLevels;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Day Level", meta = (ToolTip = "年份门按此数组顺序分配，绝不按年份排序。每项须有 SubLevels 映射。"))
+	TArray<FName> ChapterOrder;
+
 	/** Convention: SaveGame slot / exploration progress key uses this DayId string. */
 	FString GetSaveSlotKey() const
 	{

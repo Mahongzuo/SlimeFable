@@ -103,6 +103,8 @@ private:
 		int32 FootX = 1;
 		int32 FootY = 1;
 		int32 Count = 0;
+		FName NpcSpeciesId;
+		int32 NpcLimit = 0;
 		TSoftObjectPtr<UTexture2D> Icon;
 		TSoftObjectPtr<UTexture2D> FamilyIcon;
 		TSoftObjectPtr<UStaticMesh> Mesh;

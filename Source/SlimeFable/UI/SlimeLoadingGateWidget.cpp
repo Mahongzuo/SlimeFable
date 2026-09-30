@@ -3,8 +3,11 @@
 #include "UI/SlimeLoadingGateWidget.h"
 #include "UI/MenuUIStyle.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
@@ -12,7 +15,11 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/Engine.h"
+#include "Engine/LevelStreaming.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerController.h"
 #include "ShaderCompiler.h"
 #include "ShaderPipelineCache.h"
 #include "ContentStreaming.h"
@@ -21,6 +28,13 @@
 #include "Styling/SlateTypes.h"
 #include "Misc/App.h"
 #include "SlimeSkillVfxSubsystem.h"
+
+void USlimeLoadingGateWidget::SetStory(const FText& Title, const FText& Body)
+{
+	PendingTitle = Title;
+	PendingBody = Body;
+	ApplyStoryTexts();
+}
 
 void USlimeLoadingGateWidget::NativeConstruct()
 {
@@ -32,6 +46,7 @@ void USlimeLoadingGateWidget::NativeConstruct()
 	GAreScreenMessagesEnabled = false;
 
 	DisplayedProgress = 0.02f;
+	ShownSeconds = 0.f;
 	ZeroJobStableSeconds = 0.f;
 	ExtraFramesAfterReady = 0;
 	bFinishing = false;
@@ -80,76 +95,178 @@ void USlimeLoadingGateWidget::BuildLayoutIfNeeded()
 	DimOverlay = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("DimOverlay"));
 	if (UCanvasPanelSlot* DimSlot = Root->AddChildToCanvas(DimOverlay))
 	{
-		DimSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		DimSlot->SetAnchors(FAnchors(0.f, 0.86f, 1.f, 1.f));
 		DimSlot->SetOffsets(FMargin(0.f));
 	}
 
-	UVerticalBox* Bottom = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("BottomBox"));
-	if (UCanvasPanelSlot* BottomSlot = Root->AddChildToCanvas(Bottom))
+	StoryPlate = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StoryPlate"));
+	StoryPlate->SetPadding(FMargin(28.f, 18.f, 36.f, 18.f));
+	StoryPlate->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* PlateSlot = Root->AddChildToCanvas(StoryPlate))
 	{
-		BottomSlot->SetAnchors(FAnchors(0.f, 1.f, 1.f, 1.f));
-		BottomSlot->SetAlignment(FVector2D(0.f, 1.f));
-		BottomSlot->SetOffsets(FMargin(96.f, 0.f, 96.f, 72.f));
-		BottomSlot->SetAutoSize(true);
+		PlateSlot->SetAnchors(FAnchors(0.f, 1.f));
+		PlateSlot->SetAlignment(FVector2D(0.f, 1.f));
+		PlateSlot->SetPosition(FVector2D(64.f, -78.f));
+		PlateSlot->SetAutoSize(true);
 	}
 
-	StatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusText"));
-	StatusText->SetText(FText::FromString(TEXT("加载中…")));
-	StatusText->SetJustification(ETextJustify::Center);
-	if (UVerticalBoxSlot* StatusSlot = Bottom->AddChildToVerticalBox(StatusText))
+	UVerticalBox* StoryCol = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("StoryCol"));
+	StoryPlate->SetContent(StoryCol);
+	StoryTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StoryTitle"));
+	StoryTitle->SetJustification(ETextJustify::Left);
+	StoryTitle->SetVisibility(ESlateVisibility::Collapsed);
+	if (UVerticalBoxSlot* TitleSlot = StoryCol->AddChildToVerticalBox(StoryTitle))
 	{
-		StatusSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 14.f));
-		StatusSlot->SetHorizontalAlignment(HAlign_Center);
+		TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+		TitleSlot->SetHorizontalAlignment(HAlign_Left);
+	}
+	StoryBody = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StoryBody"));
+	StoryBody->SetJustification(ETextJustify::Left);
+	StoryBody->SetAutoWrapText(true);
+	StoryBody->SetWrapTextAt(720.f);
+	StoryBody->SetVisibility(ESlateVisibility::Collapsed);
+	if (UVerticalBoxSlot* BodySlot = StoryCol->AddChildToVerticalBox(StoryBody))
+	{
+		BodySlot->SetHorizontalAlignment(HAlign_Left);
+	}
+
+	UHorizontalBox* LineRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("LineRow"));
+	if (UCanvasPanelSlot* LineSlot = Root->AddChildToCanvas(LineRow))
+	{
+		LineSlot->SetAnchors(FAnchors(0.f, 1.f, 1.f, 1.f));
+		LineSlot->SetAlignment(FVector2D(0.f, 1.f));
+		LineSlot->SetOffsets(FMargin(64.f, 0.f, 48.f, 36.f));
+		LineSlot->SetAutoSize(true);
 	}
 
 	USizeBox* BarSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("BarSize"));
-	BarSize->SetHeightOverride(16.f);
-	Bottom->AddChildToVerticalBox(BarSize);
-
+	BarSize->SetHeightOverride(3.f);
+	if (UHorizontalBoxSlot* BarSlot = LineRow->AddChildToHorizontalBox(BarSize))
+	{
+		BarSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		BarSlot->SetVerticalAlignment(VAlign_Center);
+		BarSlot->SetPadding(FMargin(0.f, 0.f, 28.f, 0.f));
+	}
 	ProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("ProgressBar"));
 	ProgressBar->SetPercent(0.02f);
 	BarSize->AddChild(ProgressBar);
+
+	StatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusText"));
+	StatusText->SetText(FText::FromString(TEXT("2%")));
+	StatusText->SetJustification(ETextJustify::Right);
+	if (UHorizontalBoxSlot* PercentSlot = LineRow->AddChildToHorizontalBox(StatusText))
+	{
+		PercentSlot->SetVerticalAlignment(VAlign_Center);
+		PercentSlot->SetHorizontalAlignment(HAlign_Right);
+	}
+
+	ApplyStoryTexts();
 }
 
 void USlimeLoadingGateWidget::ApplyLook()
 {
-	FMenuUIStyle::ApplyMenuBackground(BackgroundImage);
+	ApplyRandomPoster();
 	if (DimOverlay)
 	{
 		FSlateBrush DimBrush;
 		DimBrush.DrawAs = ESlateBrushDrawType::Box;
-		DimBrush.TintColor = FSlateColor(FLinearColor(0.04f, 0.03f, 0.02f, 0.35f));
+		DimBrush.TintColor = FSlateColor(FLinearColor(0.02f, 0.02f, 0.03f, 0.28f));
 		DimBrush.Margin = FMargin(0.f);
 		DimBrush.ImageSize = FVector2D(32.f, 32.f);
 		DimOverlay->SetBrush(DimBrush);
 	}
+	if (StoryPlate)
+	{
+		FSlateBrush Plate;
+		Plate.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Plate.TintColor = FSlateColor(FLinearColor(0.03f, 0.03f, 0.04f, 0.58f));
+		Plate.OutlineSettings.CornerRadii = FVector4(10.f, 10.f, 10.f, 10.f);
+		Plate.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+		Plate.OutlineSettings.Color = FSlateColor(FLinearColor(0.92f, 0.88f, 0.78f, 0.28f));
+		Plate.OutlineSettings.Width = 1.f;
+		Plate.ImageSize = FVector2D(32.f, 32.f);
+		StoryPlate->SetBrush(Plate);
+	}
 
-	FMenuUIStyle::ApplyBrushCJKFont(StatusText, 22.f, FMenuUIStyle::WarmTextColor());
+	FMenuUIStyle::ApplyMarkerFont(StatusText, 42.f, FLinearColor(0.96f, 0.93f, 0.86f, 1.f));
+	ApplyStoryTexts();
 
 	if (ProgressBar)
 	{
 		FProgressBarStyle Style = ProgressBar->GetWidgetStyle();
 		FSlateBrush Track = *FCoreStyle::Get().GetBrush("WhiteBrush");
-		Track.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Track.TintColor = FSlateColor(FLinearColor(0.12f, 0.09f, 0.06f, 0.82f));
-		Track.OutlineSettings.CornerRadii = FVector4(8.f, 8.f, 8.f, 8.f);
-		Track.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-		Track.OutlineSettings.Color = FSlateColor(FLinearColor(0.55f, 0.42f, 0.22f, 0.55f));
-		Track.OutlineSettings.Width = 1.5f;
-		Track.ImageSize = FVector2D(64.f, 16.f);
+		Track.DrawAs = ESlateBrushDrawType::Image;
+		Track.TintColor = FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.22f));
+		Track.ImageSize = FVector2D(64.f, 3.f);
 
 		FSlateBrush Fill = *FCoreStyle::Get().GetBrush("WhiteBrush");
-		Fill.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Fill.TintColor = FSlateColor(FLinearColor(0.82f, 0.66f, 0.34f, 0.95f));
-		Fill.OutlineSettings.CornerRadii = FVector4(6.f, 6.f, 6.f, 6.f);
-		Fill.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-		Fill.ImageSize = FVector2D(64.f, 14.f);
+		Fill.DrawAs = ESlateBrushDrawType::Image;
+		Fill.TintColor = FSlateColor(FLinearColor(0.96f, 0.93f, 0.86f, 0.95f));
+		Fill.ImageSize = FVector2D(64.f, 3.f);
 
 		Style.SetBackgroundImage(Track);
 		Style.SetFillImage(Fill);
+		Style.SetMarqueeImage(Fill);
 		ProgressBar->SetWidgetStyle(Style);
-		ProgressBar->SetFillColorAndOpacity(FLinearColor(0.9f, 0.74f, 0.4f, 1.f));
+		ProgressBar->SetFillColorAndOpacity(FLinearColor(0.96f, 0.93f, 0.86f, 1.f));
 	}
+}
+
+void USlimeLoadingGateWidget::ApplyRandomPoster()
+{
+	if (!BackgroundImage)
+	{
+		return;
+	}
+	const int32 Index = FMath::RandRange(1, 6);
+	const FString Path = FString::Printf(
+		TEXT("/Game/UI/Loading/T_LoadPoster_%02d.T_LoadPoster_%02d"), Index, Index);
+	if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Path))
+	{
+		BackgroundImage->SetBrush(FMenuUIStyle::MakeTextureBrush(Texture, FVector2D(1920.f, 1080.f)));
+		BackgroundImage->SetColorAndOpacity(FLinearColor::White);
+		return;
+	}
+	FMenuUIStyle::ApplyMenuBackground(BackgroundImage);
+}
+
+void USlimeLoadingGateWidget::ApplyStoryTexts()
+{
+	const bool bShow = !PendingTitle.IsEmpty();
+	if (StoryPlate)
+	{
+		StoryPlate->SetVisibility(bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (StoryTitle)
+	{
+		StoryTitle->SetText(PendingTitle);
+		StoryTitle->SetJustification(ETextJustify::Left);
+		StoryTitle->SetVisibility(bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		FMenuUIStyle::ApplyMixedMenuFont(StoryTitle, 32.f, FMenuUIStyle::WarmTitleColor());
+	}
+	if (StoryBody)
+	{
+		StoryBody->SetText(PendingBody);
+		StoryBody->SetJustification(ETextJustify::Left);
+		StoryBody->SetAutoWrapText(true);
+		StoryBody->SetWrapTextAt(720.f);
+		StoryBody->SetVisibility(bShow && !PendingBody.IsEmpty() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		FMenuUIStyle::ApplyBrushCJKFont(StoryBody, 20.f, FMenuUIStyle::WarmTextColor());
+	}
+}
+
+bool USlimeLoadingGateWidget::HasPlayerPawn() const
+{
+	const UWorld* World = GetWorld();
+	const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	return PC && PC->GetPawn();
+}
+
+bool USlimeLoadingGateWidget::NeedsPlayerPawn() const
+{
+	const UWorld* World = GetWorld();
+	const AGameModeBase* GameMode = World ? World->GetAuthGameMode() : nullptr;
+	return GameMode && GameMode->DefaultPawnClass != nullptr;
 }
 
 int32 USlimeLoadingGateWidget::GetShaderJobsRemaining() const
@@ -204,24 +321,32 @@ void USlimeLoadingGateWidget::PollGate()
 	const double Now = FApp::GetCurrentTime();
 	const float InDeltaTime = FMath::Clamp(static_cast<float>(Now - LastPollTimeSeconds), 0.01f, 0.25f);
 	LastPollTimeSeconds = Now;
+	ShownSeconds += InDeltaTime;
 
-	const int32 ShaderJobs = GetShaderJobsRemaining();
-	const int32 StreamJobs = GetStreamingJobsRemaining();
-	const int32 SkillVfxJobs = GetSkillVfxJobsRemaining();
-	const int32 PsoJobs = GetPsoJobsRemaining();
+	if (!bFlushedStreaming)
+	{
+		bFlushedStreaming = true;
+		if (UWorld* World = GetWorld())
+		{
+			World->FlushLevelStreaming(EFlushLevelStreamingType::Full);
+		}
+	}
+
 	const bool bJobsIdle = IsRenderReady();
-
-	if (bJobsIdle)
+	const bool bPawnReady = !NeedsPlayerPawn() || HasPlayerPawn();
+	if (bJobsIdle && bPawnReady)
 	{
 		ZeroJobStableSeconds += InDeltaTime;
 	}
-	else
+	else if (!bFinishing)
 	{
 		ZeroJobStableSeconds = 0.f;
 		ExtraFramesAfterReady = 0;
 	}
 
-	const bool bReady = bJobsIdle && ZeroJobStableSeconds >= 0.3f;
+	const bool bStoryHoldMet = PendingTitle.IsEmpty() || ShownSeconds >= 2.5f;
+	const bool bTimedOut = ShownSeconds >= 12.f;
+	const bool bReady = bTimedOut || (bJobsIdle && bPawnReady && bStoryHoldMet && ZeroJobStableSeconds >= 1.f);
 
 	float Target = DisplayedProgress;
 	if (bReady || bFinishing)
@@ -248,28 +373,8 @@ void USlimeLoadingGateWidget::PollGate()
 	}
 	if (StatusText)
 	{
-		const int32 Pct = FMath::RoundToInt(DisplayedProgress * 100.f);
-		if (SkillVfxJobs > 0)
-		{
-			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（技能特效 %d）"), Pct, SkillVfxJobs)));
-		}
-		else if (PsoJobs > 0)
-		{
-			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（渲染管线 %d）"), Pct, PsoJobs)));
-		}
-		else if (ShaderJobs > 0)
-		{
-			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（着色器 %d）"), Pct, ShaderJobs)));
-		}
-		else if (StreamJobs > 0)
-		{
-			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%（资源 %d）"), Pct, StreamJobs)));
-		}
-		else
-		{
-			StatusText->SetText(FText::FromString(FString::Printf(TEXT("加载中… %d%%"), Pct)));
-		}
-		FMenuUIStyle::ApplyBrushCJKFont(StatusText, 22.f, FMenuUIStyle::WarmTextColor());
+		const int32 Pct = FMath::Clamp(FMath::RoundToInt(DisplayedProgress * 100.f), 0, 100);
+		StatusText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), Pct)));
 	}
 
 	if (bFinishing && DisplayedProgress >= 1.f)

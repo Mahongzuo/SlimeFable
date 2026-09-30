@@ -25,7 +25,7 @@ description: >-
 |------|--------|
 | 编辑器操作、刷资产、查 Actor、跑 Python、MCP | 读并遵循 `slimefable-unreal-mcp` |
 | `/Game/Maps/Days`、`/Game/_Slime/Days`、DayId、Registry、探索 Tag、按日存档 | 读并遵循 `slimefable-day-levels` |
-| 大厅传送门、OperaHouse 共用大厅、年份子图、1/2/3 周目解锁 | 读并遵循 `slimefable-week-cycle` |
+| 大厅传送门、TimeMuseum 共用大厅、年份子图、1/2/3 周目解锁 | 读并遵循 `slimefable-week-cycle` |
 | 主菜单 / 选关 / HUD / 字体与 UI 视觉 | 读并遵循 `slimefable-ui` |
 | 音乐 / 音效 / BGM / SFX / ComfyUI 音频生成 | 读并遵循 `slimefable-audio` |
 | 幻形 / 吞噬变身 / 多槽材质丢失 / WorldGrid Face·Up·头发 | 读并遵循 `slimefable-morph-materials` |

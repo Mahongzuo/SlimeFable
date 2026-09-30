@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Hub/HomeBuild/SlimeHomeBuildCatalog.h"
 #include "Hub/HomeBuild/SlimeHomeBuildManager.h"
+#include "Farm/SlimeFarmPlot.h"
 #include "Hub/HomeBuild/SlimeHomeBuildSubsystem.h"
 #include "Inventory/SlimeInventorySubsystem.h"
 #include "Inventory/SlimeItemDefinition.h"
@@ -17,6 +18,9 @@
 #include "Inventory/SlimePlacedActor.h"
 #include "Settings/SlimeInputSettings.h"
 #include "SlimeFable.h"
+#include "Hub/NPC/SlimeMuseumNpc.h"
+#include "Hub/NPC/SlimeNpcCatalog.h"
+#include "Hub/NPC/SlimeNpcCollectionSubsystem.h"
 #include "SlimeFablePlayerController.h"
 #include "UI/SlimeHomeBuildWidget.h"
 
@@ -61,7 +65,7 @@ namespace
 			Max = Max.ComponentMax(Point);
 		}
 		const FVector BoundsCenter = (Min + Max) * 0.5f;
-		const FVector Origin(CenterXY.X - BoundsCenter.X, CenterXY.Y - BoundsCenter.Y, BaseZ - Min.Z);
+		const FVector Origin(CenterXY.X - BoundsCenter.X, CenterXY.Y - BoundsCenter.Y, BaseZ - 1.f - Min.Z);
 		Out = FTransform(Rotation, Origin, Scale);
 		return true;
 	}
@@ -136,7 +140,7 @@ void USlimeBuildModeComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 			SelectBarIndex(Key);
 		}
 	}
-	if (PC->WasInputKeyJustPressed(EKeys::MiddleMouseButton))
+	if (!GetNpcSpecies() && PC->WasInputKeyJustPressed(EKeys::MiddleMouseButton))
 	{
 		CycleAdjustMode();
 	}
@@ -152,6 +156,7 @@ void USlimeBuildModeComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	{
 		Scroll = -1;
 	}
+	if (GetNpcSpecies() && Scroll != 0) { YawSteps = (YawSteps + (Scroll > 0 ? 1 : 3)) % 4; Scroll = 0; }
 	if (Scroll != 0)
 	{
 		switch (AdjustMode)
@@ -160,10 +165,21 @@ void USlimeBuildModeComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 			YawSteps = (YawSteps + (Scroll > 0 ? 1 : 3)) % 4;
 			break;
 		case EPlaceAdjust::Pitch:
-			PitchDegrees = FMath::Clamp(PitchDegrees + Scroll * 15.f, -90.f, 90.f);
+			if (IsPlacingPool())
+			{
+				PoolDepthCm = FMath::Clamp(PoolDepthCm + Scroll * HeightStep, 40.f, 160.f);
+			}
+			else
+			{
+				PitchDegrees = FMath::Clamp(PitchDegrees + Scroll * 15.f, -90.f, 90.f);
+			}
 			break;
 		case EPlaceAdjust::Scale:
-			if (!IsPlacingFluid())
+			if (IsPlacingPool())
+			{
+				UserScale = FMath::Clamp(UserScale + Scroll * 0.1f, 0.5f, 2.f);
+			}
+			else if (!IsPlacingFluid())
 			{
 				UserScale = FMath::Clamp(UserScale + Scroll * 0.1f, 0.25f, 4.f);
 			}
@@ -239,7 +255,15 @@ void USlimeBuildModeComponent::BeginClearMode()
 
 void USlimeBuildModeComponent::NotifyCatalogChosen(FName EntryId, bool bFromBag)
 {
-	ActiveId = EntryId;
+	if (!bFromBag)
+ {
+  auto* Home = GetHome();
+  const auto* Entry = Home && Home->GetCatalog() ? Home->GetCatalog()->FindEntry(EntryId) : nullptr;
+  if (Entry && !Entry->NpcSpeciesId.IsNone() && !Home->CanPlaceNpc(Entry->NpcSpeciesId))
+  { Screen(TEXT("NPC尚未收录或已达到放置上限")); return; }
+ }
+ DestroyNpcPreview();
+ ActiveId = EntryId;
 	bActiveFromBag = bFromBag;
 	bPlacing = true;
 	bClearMode = false;
@@ -247,7 +271,8 @@ void USlimeBuildModeComponent::NotifyCatalogChosen(FName EntryId, bool bFromBag)
 	HeightOffset = 0.f;
 	PitchDegrees = 0.f;
 	UserScale = 1.f;
-	if (IsPlacingFluid() && AdjustMode == EPlaceAdjust::Scale)
+	PoolDepthCm = 80.f;
+	if (IsPlacingFluid() && !IsPlacingPool() && AdjustMode == EPlaceAdjust::Scale)
 	{
 		AdjustMode = EPlaceAdjust::Height;
 	}
@@ -312,7 +337,7 @@ void USlimeBuildModeComponent::NotifyCatalogChosen(FName EntryId, bool bFromBag)
 			}
 		}
 	}
-	if (!Mesh)
+	if (!Mesh && !GetNpcSpecies())
 	{
 		UE_LOG(LogSlimeFable, Warning, TEXT("[HomeBuild] entry %s has no mesh"), *EntryId.ToString());
 	}
@@ -432,6 +457,7 @@ void USlimeBuildModeComponent::CloseCatalog()
 void USlimeBuildModeComponent::ExitPlacement(const TCHAR* Reason)
 {
 	UE_LOG(LogSlimeFable, Log, TEXT("[HomeBuild] exit placement (%s)"), Reason ? Reason : TEXT("unknown"));
+	DestroyNpcPreview();
 	bPlacing = false;
 	bClearMode = false;
 	ActiveId = NAME_None;
@@ -452,6 +478,8 @@ void USlimeBuildModeComponent::ExitPlacement(const TCHAR* Reason)
 
 void USlimeBuildModeComponent::UpdateAim()
 {
+ if (!bClearMode && GetNpcSpecies()) { UpdateNpcAim(); return; }
+ if (NpcPreview) NpcPreview->SetActorHiddenInGame(true);
 	USlimeHomeBuildSubsystem* Home = GetHome();
 	ASlimeHomeBuildManager* Manager = Home ? Home->GetManager() : nullptr;
 	const USlimeHomeBuildCatalog* Catalog = Home ? Home->GetCatalog() : nullptr;
@@ -464,6 +492,7 @@ void USlimeBuildModeComponent::UpdateAim()
 	UStaticMesh* Mesh = nullptr;
 	float MaxSlope = 12.f;
 	bool bFluidPad = false;
+	bool bFarmPlot = false;
 	float Uniform = 1.f;
 	if (!bActiveFromBag && Catalog)
 	{
@@ -475,6 +504,12 @@ void USlimeBuildModeComponent::UpdateAim()
 			Uniform = Entry->UniformScale;
 			Scale = FVector(Uniform);
 			bFluidPad = Entry->bFluidPad;
+			bFarmPlot = Entry->bFarmPlot;
+			if (SlimeHomeIsPool(Entry->EntryId))
+			{
+				FootX = SlimeHomePoolCells(FootX, UserScale);
+				FootY = SlimeHomePoolCells(FootY, UserScale);
+			}
 			Mesh = Entry->Mesh.Get();
 			if (!Mesh)
 			{
@@ -580,8 +615,16 @@ void USlimeBuildModeComponent::UpdateAim()
 		return;
 	}
 
-	bool bSlopeOk = bOnBuild;
-	if (!bOnBuild && GetWorld())
+	bool bSlopeOk = bOnBuild && !bFarmPlot;
+	if (bFarmPlot && !bOnBuild && GetWorld() && Mesh)
+	{
+		const FVector BedCenter((AnchorX + FootX * 0.5f) * Cell, (AnchorY + FootY * 0.5f) * Cell, BaseZ);
+		const bool bPlanter = Mesh->GetName().Contains(TEXT("Planter"));
+		const FSlimeBedPlacement Bed = ASlimeFarmPlot::ComputeBedPlacement(
+			GetWorld(), PreviewActor, Mesh, !bPlanter, BedCenter, YawSteps * 90.f);
+		bSlopeOk = Bed.bValid;
+	}
+	else if (!bOnBuild && !bFarmPlot && GetWorld())
 	{
 		APawn* Pawn = Cast<APawn>(GetOwner());
 		APlayerController* PC = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
@@ -604,7 +647,9 @@ void USlimeBuildModeComponent::UpdateAim()
 		}
 	}
 
-	const bool bOccupied = Manager && Manager->IsBlocked(AnchorX, AnchorY, FootX, FootY, BaseZ, Height, INDEX_NONE, bFluidPad);
+	const bool bPool = SlimeHomeIsPool(ActiveId);
+	const bool bOccupied = Manager && Manager->IsBlocked(
+		AnchorX, AnchorY, FootX, FootY, BaseZ, Height, INDEX_NONE, bFluidPad, bPool, PoolDepthCm);
 	bAimValid = bHit && bSlopeOk && !bOccupied && !ActiveId.IsNone();
 
 	const FVector Center((AnchorX + FootX * 0.5f) * Cell, (AnchorY + FootY * 0.5f) * Cell, BaseZ);
@@ -622,6 +667,27 @@ void USlimeBuildModeComponent::UpdateAim()
 			? FLinearColor(0.15f, 0.95f, 0.35f)
 			: FLinearColor(0.95f, 0.16f, 0.12f);
 		PreviewActor->SetAimVisual(GetOwner()->GetActorLocation(), bHit ? Impact : FVector(Center.X, Center.Y, BaseZ), Color, bHit);
+		PreviewActor->SetFootprintHighlight(bHit, FootX * Cell, FootY * Cell, bAimValid);
+		return;
+	}
+	if (bFarmPlot && PreviewActor && Mesh)
+	{
+		const bool bPlanter = Mesh->GetName().Contains(TEXT("Planter"));
+		const FSlimeBedPlacement Bed = ASlimeFarmPlot::ComputeBedPlacement(
+			GetWorld(), PreviewActor, Mesh, !bPlanter, Center, YawSteps * 90.f);
+		PreviewActor->SetActorHiddenInGame(false);
+		PreviewActor->SetActorLocation(FVector(Center.X, Center.Y, Bed.ActorLocation.Z + Bed.SoilRelativeZ));
+		PreviewActor->SetActorRotation(FRotator(0.f, YawSteps * 90.f, 0.f));
+		if (PreviewActor->Mesh)
+		{
+			PreviewActor->Mesh->SetVisibility(bHit, false);
+			PreviewActor->Mesh->SetRelativeScale3D(Bed.SoilScale);
+		}
+		PreviewActor->SetValidPlacement(bAimValid);
+		const FLinearColor Color = bAimValid
+			? FLinearColor(0.62f, 0.48f, 0.22f)
+			: FLinearColor(0.95f, 0.16f, 0.12f);
+		PreviewActor->SetAimVisual(GetOwner()->GetActorLocation(), bHit ? Impact : Center, Color, bHit);
 		PreviewActor->SetFootprintHighlight(bHit, FootX * Cell, FootY * Cell, bAimValid);
 		return;
 	}
@@ -653,6 +719,10 @@ void USlimeBuildModeComponent::Confirm()
 {
 	if (!bAimValid || ActiveId.IsNone())
 	{
+		if (GetNpcSpecies() && !NpcRejectReason.IsEmpty())
+		{
+			Screen(NpcRejectReason);
+		}
 		return;
 	}
 	USlimeHomeBuildSubsystem* Home = GetHome();
@@ -680,6 +750,7 @@ void USlimeBuildModeComponent::Confirm()
 		Record.YawSteps = YawSteps;
 		Record.PitchDegrees = PitchDegrees;
 		Record.UserScale = 1.f;
+		Record.PoolDepthCm = 0.f;
 		if (!bActiveFromBag)
 		{
 			if (const USlimeHomeBuildCatalog* Catalog = Home->GetCatalog())
@@ -687,7 +758,13 @@ void USlimeBuildModeComponent::Confirm()
 				if (const FSlimeHomeBuildEntry* Entry = Catalog->FindEntry(ActiveId))
 				{
 					Record.bFluid = Entry->bFluidPad;
-					if (!Entry->bFluidPad)
+					if (SlimeHomeIsPool(Entry->EntryId))
+					{
+						Record.UserScale = SlimeHomePoolPlanScale(UserScale);
+						Record.PoolDepthCm = SlimeHomePoolDepthCm(PoolDepthCm);
+						Record.PitchDegrees = 0.f;
+					}
+					else if (!Entry->bFluidPad)
 					{
 						Record.UserScale = UserScale;
 					}
@@ -842,7 +919,14 @@ void USlimeBuildModeComponent::RefreshStatus()
 	{
 		return;
 	}
-	const TCHAR* Adjust = AdjustModeLabel();
+	if (!bClearMode) if (const auto* Npc = GetNpcSpecies())
+ {
+  const auto* Home = GetHome();
+  CatalogWidget->SetModeHint(FText::FromString(TEXT("NPC放置")));
+  CatalogWidget->SetStatusLine(FText::FromString(FString::Printf(TEXT("%s  %d/%d　左键放置　R/滚轮转向　X清除　F1退出"), *Npc->DisplayName.ToString(), Home ? Home->CountNpc(Npc->SpeciesId) : 0, Npc->Limit())));
+  return;
+ }
+ const TCHAR* Adjust = AdjustModeLabel();
 	const TCHAR* Prefix = bClearMode ? TEXT("清除模式") : TEXT("建造模式");
 	CatalogWidget->SetModeHint(FText::FromString(FString::Printf(TEXT("%s　%s　中键切换"), Prefix, Adjust)));
 	FString Text = bClearMode
@@ -852,13 +936,19 @@ void USlimeBuildModeComponent::RefreshStatus()
 	{
 		Text += FString::Printf(TEXT("   高度 %+.0fcm"), HeightOffset);
 	}
+	else if (AdjustMode == EPlaceAdjust::Pitch && IsPlacingPool())
+	{
+		Text += FString::Printf(TEXT("   深度 %.0fcm"), SlimeHomePoolDepthCm(PoolDepthCm));
+	}
 	else if (AdjustMode == EPlaceAdjust::Pitch && FMath::Abs(PitchDegrees) > 0.1f)
 	{
 		Text += FString::Printf(TEXT("   俯仰 %+.0f°"), PitchDegrees);
 	}
 	else if (AdjustMode == EPlaceAdjust::Scale)
 	{
-		Text += FString::Printf(TEXT("   缩放 %.1f"), UserScale);
+		Text += IsPlacingPool()
+			? FString::Printf(TEXT("   长宽 %.1f"), SlimeHomePoolPlanScale(UserScale))
+			: FString::Printf(TEXT("   缩放 %.1f"), UserScale);
 	}
 	CatalogWidget->SetStatusLine(FText::FromString(Text));
 }
@@ -874,7 +964,7 @@ void USlimeBuildModeComponent::CycleAdjustMode()
 		AdjustMode = EPlaceAdjust::Pitch;
 		break;
 	case EPlaceAdjust::Pitch:
-		AdjustMode = IsPlacingFluid() ? EPlaceAdjust::Height : EPlaceAdjust::Scale;
+		AdjustMode = (IsPlacingFluid() && !IsPlacingPool()) ? EPlaceAdjust::Height : EPlaceAdjust::Scale;
 		break;
 	case EPlaceAdjust::Scale:
 	default:
@@ -891,10 +981,10 @@ void USlimeBuildModeComponent::CycleAdjustMode()
 			Toast = TEXT("已切换左右旋转模式");
 			break;
 		case EPlaceAdjust::Pitch:
-			Toast = TEXT("已切换上下旋转模式");
+			Toast = IsPlacingPool() ? TEXT("已切换深度调整模式") : TEXT("已切换上下旋转模式");
 			break;
 		case EPlaceAdjust::Scale:
-			Toast = TEXT("已切换缩放模式");
+			Toast = IsPlacingPool() ? TEXT("已切换长宽缩放模式") : TEXT("已切换缩放模式");
 			break;
 		default:
 			break;
@@ -916,6 +1006,11 @@ bool USlimeBuildModeComponent::IsPlacingFluid() const
 	return Entry && Entry->bFluidPad;
 }
 
+bool USlimeBuildModeComponent::IsPlacingPool() const
+{
+	return IsPlacingFluid() && SlimeHomeIsPool(ActiveId);
+}
+
 const TCHAR* USlimeBuildModeComponent::AdjustModeLabel() const
 {
 	switch (AdjustMode)
@@ -923,9 +1018,9 @@ const TCHAR* USlimeBuildModeComponent::AdjustModeLabel() const
 	case EPlaceAdjust::Yaw:
 		return TEXT("左右旋转");
 	case EPlaceAdjust::Pitch:
-		return TEXT("上下旋转");
+		return IsPlacingPool() ? TEXT("深度调整") : TEXT("上下旋转");
 	case EPlaceAdjust::Scale:
-		return TEXT("缩放调整");
+		return IsPlacingPool() ? TEXT("长宽缩放") : TEXT("缩放调整");
 	case EPlaceAdjust::Height:
 	default:
 		return TEXT("高度调整");
@@ -959,4 +1054,85 @@ void USlimeBuildModeComponent::Screen(const FString& Text) const
 	{
 		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 2.5f, FColor::White, Text);
 	}
+}
+
+const FSlimeNpcSpecies* USlimeBuildModeComponent::GetNpcSpecies() const
+{
+ if (bActiveFromBag) return nullptr;
+ const auto* Home = GetHome();
+ const auto* Entry = Home && Home->GetCatalog() ? Home->GetCatalog()->FindEntry(ActiveId) : nullptr;
+ if (!Entry || Entry->NpcSpeciesId.IsNone()) return nullptr;
+ auto* Collection = GetWorld()->GetGameInstance()->GetSubsystem<USlimeNpcCollectionSubsystem>();
+ auto* Catalog = Collection ? Collection->GetCatalog() : nullptr;
+ return Catalog ? Catalog->Find(Entry->NpcSpeciesId) : nullptr;
+}
+
+void USlimeBuildModeComponent::DestroyNpcPreview()
+{
+ if (NpcPreview) { NpcPreview->Destroy(); NpcPreview = nullptr; }
+}
+
+void USlimeBuildModeComponent::UpdateNpcAim()
+{
+ const auto* Species = GetNpcSpecies();
+ auto* Home = GetHome();
+ auto* Pawn = Cast<APawn>(GetOwner());
+ auto* PC = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+ bAimValid = false;
+ NpcRejectReason.Reset();
+ if (!Species || !Home || !PC) return;
+ HeightOffset = 0.f; PitchDegrees = 0.f; UserScale = 1.f;
+ EnsurePreview();
+ if (Home->GetManager()) Home->GetManager()->SetHighlight(INDEX_NONE);
+ FVector Start; FRotator Rotation;
+ PC->GetPlayerViewPoint(Start, Rotation);
+ FCollisionQueryParams Params(SCENE_QUERY_STAT(NpcBuildAim), false, GetOwner());
+ if (PreviewActor) Params.AddIgnoredActor(PreviewActor);
+ if (NpcPreview) Params.AddIgnoredActor(NpcPreview);
+ FHitResult Hit;
+ const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, Start + Rotation.Vector() * TraceDistance, ECC_Visibility, Params);
+ const float Cell = Home->GetCatalog()->CellSize;
+ AimAnchorX = FMath::FloorToInt(Hit.ImpactPoint.X / Cell);
+ AimAnchorY = FMath::FloorToInt(Hit.ImpactPoint.Y / Cell);
+ AimBaseZ = Hit.ImpactPoint.Z;
+ const FVector Feet((AimAnchorX + 0.5f) * Cell, (AimAnchorY + 0.5f) * Cell, AimBaseZ);
+ FVector Center = Feet + FVector(0, 0, Species->HalfHeight + 3.f);
+ FString PlaceReason;
+ const bool bCollected = Home->CanPlaceNpc(Species->SpeciesId);
+ const bool bRoom = ASlimeMuseumNpc::ValidateLocation(GetWorld(), *Species, Feet, Center, NpcPreview, &PlaceReason);
+ const bool bFlat = Hit.ImpactNormal.Z >= FMath::Cos(FMath::DegreesToRadians(12.f));
+ bAimValid = bHit && bFlat && bCollected && bRoom;
+ if (!bAimValid)
+ {
+  if (!bHit) NpcRejectReason = TEXT("没打到能放的地面");
+  else if (!bFlat) NpcRejectReason = TEXT("这块地太斜");
+  else if (!bCollected) NpcRejectReason = TEXT("NPC尚未收录或已达到放置上限");
+  else NpcRejectReason = PlaceReason.IsEmpty() ? TEXT("这里放不下") : PlaceReason;
+ }
+ if (!NpcPreview)
+ {
+  const FTransform Transform(FRotator::ZeroRotator, Center);
+  NpcPreview = GetWorld()->SpawnActorDeferred<ASlimeMuseumNpc>(ASlimeMuseumNpc::StaticClass(), Transform, GetOwner(), nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+  if (NpcPreview)
+  {
+   if (!NpcPreview->Configure(*Species, true))
+   { DestroyNpcPreview(); Screen(TEXT("NPC外观配置缺失，无法放置")); ExitPlacement(TEXT("npc-visual-missing")); return; }
+   NpcPreview->FinishSpawning(Transform);
+  }
+ }
+ if (NpcPreview)
+ {
+  NpcPreview->SetActorLocationAndRotation(Center, FRotator(0, YawSteps * 90.f, 0));
+  NpcPreview->SetActorHiddenInGame(!bHit);
+ }
+ if (PreviewActor)
+ {
+  PreviewActor->SetActorHiddenInGame(false);
+  PreviewActor->SetActorLocation(Feet);
+  if (PreviewActor->Mesh) PreviewActor->Mesh->SetVisibility(false);
+  PreviewActor->SetFootprintHighlight(bHit, Species->Radius * 2, Species->Radius * 2, bAimValid);
+  PreviewActor->SetAimVisual(GetOwner()->GetActorLocation(), Hit.ImpactPoint,
+   bAimValid ? FLinearColor(0.62f, 0.48f, 0.22f) : FLinearColor(0.95f, 0.16f, 0.12f), bHit);
+ }
+ RefreshStatus();
 }

@@ -2,6 +2,11 @@
 
 #include "DayLevel/DayLevelSubsystem.h"
 #include "SlimeFable.h"
+#include "Quest/QuestSubsystem.h"
+#include "Quest/QuestChapterGate.h"
+#include "Hub/SlimeMuseumDayGate.h"
+#include "EngineUtils.h"
+#include "Misc/PackageName.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -13,6 +18,16 @@ namespace DayLevelSubsystemPrivate
 	static const TCHAR* RegistryObjectPath = TEXT("/Game/Data/DayLevels/DA_DayLevelRegistry.DA_DayLevelRegistry");
 	static const TCHAR* MainMenuMapName = TEXT("/Game/Maps/Main");
 	static const TCHAR* MuseumHubPath = TEXT("/Game/_Slime/Models/MapModel/TimeMuseum/Maps/L_TimeMuseum_Environment.L_TimeMuseum_Environment");
+
+	TSoftObjectPtr<UWorld> StripPieWorld(TSoftObjectPtr<UWorld> Level)
+	{
+		if (Level.IsNull())
+		{
+			return Level;
+		}
+		const FString Clean = UWorld::RemovePIEPrefix(Level.ToSoftObjectPath().ToString());
+		return TSoftObjectPtr<UWorld>(FSoftObjectPath(Clean));
+	}
 }
 
 void UDayLevelSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -21,6 +36,8 @@ void UDayLevelSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	DefaultRegistryPath = TSoftObjectPtr<UDayLevelRegistry>(FSoftObjectPath(DayLevelSubsystemPrivate::RegistryObjectPath));
 	MuseumHubLevel = TSoftObjectPtr<UWorld>(FSoftObjectPath(DayLevelSubsystemPrivate::MuseumHubPath));
 	LoadDefaultRegistry();
+	SelectedDayId = GetTodayDayId().Id;
+	WorldLoadedHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &UDayLevelSubsystem::HandleWorldLoaded);
 }
 
 void UDayLevelSubsystem::LoadDefaultRegistry()
@@ -128,23 +145,22 @@ void UDayLevelSubsystem::GetEntriesForMonth(int32 Month, TArray<FDayLevelEntry>&
 
 bool UDayLevelSubsystem::TravelToDayId(const UObject* WorldContextObject, FName DayId)
 {
-	TSoftObjectPtr<UWorld> Level;
-	if (!GetLevelForDayId(DayId, Level))
+	FDayLevelEntry Entry;
+	if (bTravelPending || !Registry || !Registry->FindEntry(DayId, Entry)) return false;
+	UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	if (!World) return false;
+	PrepareDeparture(World);
+	SelectedDayId = DayId;
+	StoryChapterId = NAME_None;
+	MuseumReturnTag = NAME_None;
+	if (IsMuseumHubWorld(World))
 	{
-		UE_LOG(LogSlimeFable, Warning, TEXT("DayLevelSubsystem: No level for DayId %s"), *DayId.ToString());
-		return false;
+		Destination = EDayDestination::Museum;
+		GetGameInstance()->GetSubsystem<UQuestSubsystem>()->RefreshMuseumDate(World);
+		OnMuseumDateChanged.Broadcast();
+		return true;
 	}
-
-	// Clear menu UIOnly before hard travel so the new world's viewport is not left IgnoreInput.
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
-	{
-		FInputModeGameOnly InputMode;
-		PC->SetInputMode(InputMode);
-		PC->bShowMouseCursor = false;
-	}
-
-	UGameplayStatics::OpenLevelBySoftObjectPtr(WorldContextObject, Level);
-	return true;
+	return OpenDestination(World, MuseumHubLevel, EDayDestination::Museum, NAME_None);
 }
 
 bool UDayLevelSubsystem::TravelToToday(const UObject* WorldContextObject)
@@ -156,22 +172,8 @@ const TCHAR* UDayLevelSubsystem::OpenLevelSelectOption = TEXT("OpenLevelSelect")
 
 bool UDayLevelSubsystem::TravelToMuseumHub(const UObject* WorldContextObject)
 {
-	if (MuseumHubLevel.IsNull())
-	{
-		UE_LOG(LogSlimeFable, Warning, TEXT("DayLevelSubsystem: Museum hub map is not set."));
-		return false;
-	}
-
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
-	{
-		UGameplayStatics::SetGamePaused(WorldContextObject, false);
-		FInputModeGameOnly InputMode;
-		PC->SetInputMode(InputMode);
-		PC->bShowMouseCursor = false;
-	}
-
-	UGameplayStatics::OpenLevelBySoftObjectPtr(WorldContextObject, MuseumHubLevel);
-	return true;
+	if (IsMuseumHubWorld(WorldContextObject)) return false;
+	return OpenDestination(WorldContextObject, MuseumHubLevel, EDayDestination::Museum, MuseumReturnTag);
 }
 
 bool UDayLevelSubsystem::IsMuseumHubWorld(const UObject* WorldContextObject) const
@@ -187,6 +189,7 @@ bool UDayLevelSubsystem::IsMuseumHubWorld(const UObject* WorldContextObject) con
 
 void UDayLevelSubsystem::TravelToMainMenu(const UObject* WorldContextObject)
 {
+	if (WorldContextObject && WorldContextObject->GetWorld()) PrepareDeparture(WorldContextObject->GetWorld());
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
 	{
 		UGameplayStatics::SetGamePaused(WorldContextObject, false);
@@ -199,6 +202,7 @@ void UDayLevelSubsystem::TravelToMainMenu(const UObject* WorldContextObject)
 
 void UDayLevelSubsystem::TravelToLevelSelect(const UObject* WorldContextObject)
 {
+	if (WorldContextObject && WorldContextObject->GetWorld()) PrepareDeparture(WorldContextObject->GetWorld());
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
 	{
 		UGameplayStatics::SetGamePaused(WorldContextObject, false);
@@ -242,13 +246,111 @@ bool UDayLevelSubsystem::TravelToSubLevel(const UObject* WorldContextObject, FNa
 		return false;
 	}
 
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(WorldContextObject, 0))
+	if (bTravelPending || !IsValidDestination(Level)) return false;
+	SelectedDayId = DayId;
+	StoryChapterId = ChapterId;
+	FDayLevelEntry Entry;
+	MuseumReturnTag = NAME_None;
+	if (Registry && Registry->FindEntry(DayId, Entry))
 	{
-		FInputModeGameOnly InputMode;
-		PC->SetInputMode(InputMode);
-		PC->bShowMouseCursor = false;
+		const int32 Index = Entry.ChapterOrder.IndexOfByKey(ChapterId);
+		if (Index != INDEX_NONE) MuseumReturnTag = FName(*FString::Printf(TEXT("MuseumYear_%d"), Index + 1));
 	}
+	return OpenDestination(WorldContextObject, Level, EDayDestination::Story, NAME_None);
+}
 
-	UGameplayStatics::OpenLevelBySoftObjectPtr(WorldContextObject, Level);
+void UDayLevelSubsystem::Deinitialize()
+{
+	FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(WorldLoadedHandle);
+	Super::Deinitialize();
+}
+
+bool UDayLevelSubsystem::IsValidDestination(TSoftObjectPtr<UWorld> Level)
+{
+	Level = DayLevelSubsystemPrivate::StripPieWorld(Level);
+	return !Level.IsNull() && FPackageName::DoesPackageExist(Level.ToSoftObjectPath().GetLongPackageName());
+}
+
+void UDayLevelSubsystem::ReportTravelError(const FString& Message) const
+{
+	UE_LOG(LogSlimeFable, Error, TEXT("MuseumTravel: %s"), *Message);
+	if (UQuestSubsystem* Quests = GetGameInstance()->GetSubsystem<UQuestSubsystem>())
+		Quests->ShowCenterBanner(FText::FromString(TEXT("传送配置错误")), FText::FromString(Message), 6.f);
+}
+
+void UDayLevelSubsystem::PrepareDeparture(UWorld* World)
+{
+	for (TActorIterator<AQuestChapterGate> It(World); It; ++It) It->CancelPendingEnter();
+	if (UQuestSubsystem* Quests = GetGameInstance()->GetSubsystem<UQuestSubsystem>()) Quests->SaveBeforeTravel();
+	ASlimeMuseumDayGate::CloseOpenCalendar();
+	UGameplayStatics::SetGamePaused(World, false);
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->bShowMouseCursor = false;
+		PC->ResetIgnoreMoveInput();
+		PC->ResetIgnoreLookInput();
+	}
+}
+
+bool UDayLevelSubsystem::OpenDestination(const UObject* Context, TSoftObjectPtr<UWorld> Level, EDayDestination Role, FName ArrivalTag)
+{
+	UWorld* World = Context ? Context->GetWorld() : nullptr;
+	if (!World || bTravelPending) return false;
+	Level = DayLevelSubsystemPrivate::StripPieWorld(Level);
+	if (!IsValidDestination(Level))
+	{
+		ReportTravelError(FString::Printf(TEXT("目的地图不存在：%s"), *Level.ToString()));
+		return false;
+	}
+	PrepareDeparture(World);
+	Destination = Role;
+	PendingArrivalTag = ArrivalTag;
+	DestinationPackage = Level.ToSoftObjectPath().GetLongPackageName();
+	DepartureWorld = World;
+	bTravelPending = true;
+	const FString Options = Role == EDayDestination::Story
+		? TEXT("game=/Script/SlimeFable.SlimePlayGameMode")
+		: FString();
+	UGameplayStatics::OpenLevelBySoftObjectPtr(World, Level, true, Options);
 	return true;
+}
+
+bool UDayLevelSubsystem::TravelToMap(const UObject* Context, TSoftObjectPtr<UWorld> Level, FName ArrivalTag, FName ReturnTag)
+{
+	Level = DayLevelSubsystemPrivate::StripPieWorld(Level);
+	if (!IsValidDestination(Level))
+	{
+		ReportTravelError(FString::Printf(TEXT("目的地图不存在：%s"), *Level.ToString()));
+		return false;
+	}
+	if (bTravelPending) return false;
+	if (IsMuseumHubWorld(Context)) MuseumReturnTag = ReturnTag;
+	StoryChapterId = NAME_None;
+	return OpenDestination(Context, Level, EDayDestination::Exploration, ArrivalTag);
+}
+
+FName UDayLevelSubsystem::GetArrivalTag(const UWorld* World) const
+{
+	return World && UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) == DestinationPackage ? PendingArrivalTag : NAME_None;
+}
+
+void UDayLevelSubsystem::HandleWorldLoaded(UWorld* World)
+{
+	if (!World || World->GetGameInstance() != GetGameInstance() || !World->IsGameWorld()) return;
+	bTravelPending = false;
+	DepartureWorld.Reset();
+	if (IsMuseumHubWorld(World)) Destination = EDayDestination::Museum;
+	else if (UWorld::RemovePIEPrefix(World->GetOutermost()->GetName()) != DestinationPackage)
+	{
+		// Direct map start: derive legacy story identity, never import museum quests into Ruin.
+		const FString Name = UWorld::RemovePIEPrefix(World->GetMapName());
+		if (Name.StartsWith(TEXT("SL_")) && Name.Len() > 8)
+		{
+			SelectedDayId = FName(*Name.Mid(3, 4));
+			StoryChapterId = FName(*Name.Mid(8));
+			Destination = EDayDestination::Story;
+		}
+		else Destination = EDayDestination::Exploration;
+	}
 }

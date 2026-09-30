@@ -31,6 +31,7 @@ public class SlimeFable : ModuleRules
 			"AssetRegistry",
 			"AnimGraphRuntime",
 			"AnimationCore",
+			"IKRig",
 			"PoseSearch",
 			"Chooser",
 			"AnimationLocomotionLibraryRuntime",
@@ -52,6 +53,7 @@ public class SlimeFable : ModuleRules
 			"PixelStreaming2",
 			"DLSSBlueprint",
 			"Landscape",
+			"Foliage",
 			"ApplicationCore",
 			"Sockets"
 		});

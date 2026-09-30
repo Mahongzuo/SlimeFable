@@ -24,6 +24,7 @@ public:
 
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void StartPlay() override;
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
 protected:
 	/**

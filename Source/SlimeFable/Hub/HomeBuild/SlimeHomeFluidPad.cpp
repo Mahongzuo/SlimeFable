@@ -2,6 +2,8 @@
 
 #include "Hub/HomeBuild/SlimeHomeFluidPad.h"
 
+#include "Hub/HomeBuild/SlimeHomeBuildTypes.h"
+
 #include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -338,10 +340,13 @@ void ASlimeHomeFluidPad::SyncSurface()
 	}
 }
 
-void ASlimeHomeFluidPad::Configure(TSubclassOf<AActor> InFluidClass, int32 InHomePieceId)
+void ASlimeHomeFluidPad::Configure(TSubclassOf<AActor> InFluidClass, int32 InHomePieceId, float InPlanScale, float InDepthCm, bool bInSwapPlanAxes)
 {
 	FluidClass = InFluidClass;
 	HomePieceId = InHomePieceId;
+	PlanScale = InPlanScale;
+	RequestedDepthCm = InDepthCm;
+	bSwapPlanAxes = bInSwapPlanAxes;
 }
 
 namespace
@@ -457,10 +462,11 @@ void ASlimeHomeFluidPad::DropDemoBalls() const
 		{
 			continue;
 		}
+		Niagara->SetAutoDestroy(false);
 		Niagara->DeactivateImmediate();
-		Niagara->SetAsset(nullptr);
 		Niagara->SetVisibility(false);
-		UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] removed demo balls from %s"), *FluidActor->GetClass()->GetName());
+		UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] hid demo balls %s on %s"),
+			*Niagara->GetName(), *FluidActor->GetClass()->GetName());
 	}
 }
 
@@ -556,7 +562,21 @@ void ASlimeHomeFluidPad::BeginPlay()
 	FluidActor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
 	if (Look && Look->WidthCm > 0.f)
 	{
-		ApplySize(Look->WidthCm, Look->LengthCm, Look->DepthCm);
+		float Width = Look->WidthCm;
+		float Length = Look->LengthCm;
+		float Depth = Look->DepthCm;
+		if (FluidClass && FluidClass->GetName().Contains(TEXT("Pool")))
+		{
+			const float Plan = SlimeHomePoolPlanScale(PlanScale);
+			Width = SlimeHomePoolCells(FMath::RoundToInt(Width / 50.f), Plan) * 50.f;
+			Length = SlimeHomePoolCells(FMath::RoundToInt(Length / 50.f), Plan) * 50.f;
+			Depth = SlimeHomePoolDepthCm(RequestedDepthCm);
+			if (bSwapPlanAxes)
+			{
+				Swap(Width, Length);
+			}
+		}
+		ApplySize(Width, Length, Depth);
 	}
 	if (Look && Look->bSitOnFloor)
 	{

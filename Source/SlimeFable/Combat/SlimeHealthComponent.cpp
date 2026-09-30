@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeHealthComponent.h"
+#include "Hub/NPC/SlimeNpcCollectionSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
 #include "AIController.h"
@@ -170,6 +171,9 @@ float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, con
 
 void USlimeHealthComponent::HandleDeath(AActor* DamageCauser)
 {
+	// Final death only: lethal phase absorption has already returned before this point.
+	if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+		if (auto* Collection = GI->GetSubsystem<USlimeNpcCollectionSubsystem>()) Collection->ReportDefeat(GetOwner());
 	OnDied.Broadcast();
 	if (DamageCauser && DamageCauser != GetOwner())
 	{

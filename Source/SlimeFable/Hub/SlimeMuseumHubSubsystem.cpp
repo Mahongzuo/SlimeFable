@@ -11,7 +11,8 @@
 
 namespace SlimeMuseumHubPrivate
 {
-	static const FVector DefaultFieldLocation(18.259277f, 2173.568171f, 4.f);
+	// North of the courtyard, on the open terrain, so the starter beds do not sit on the decorative soil blocks.
+	static const FVector DefaultFieldLocation(0.f, 4200.f, 20.f);
 }
 
 void USlimeMuseumHubSubsystem::OnWorldBeginPlay(UWorld& InWorld)

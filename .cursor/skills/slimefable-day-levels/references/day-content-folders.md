@@ -49,7 +49,7 @@ py Content/Python/create_0815_blueprints.py  # 机关 BP + 1945 三战 BP
 |------|------|
 | `DAYS_IN_MONTH` | 与 `create_day_levels.py` 相同，二月 29 天 |
 | `DAY_DIRS` | 每天 6 类：Quests / Actors / NPCs / Enemies / Audio / FX |
-| `MULTI_CHAPTER_DAYS` | `0815` → 1920…2026；自动加 `Hub/` + `Y{Year}/` |
+| `MULTI_CHAPTER_DAYS` | `0815` → 1920…2026；`1001` → 1949、1969、2010、1890、1958（故事顺序，不是年份顺序）。自动加 `Hub/` + `Y{Year}/` |
 | `create_day_kit(day_id)` | 建一天 |
 | `create_all_day_kits()` | 扫 366，已存在则跳过 |
 | `try_create_quest_book(day_id)` | 仅编辑器、仅指定日；不要对 366 天调用 |

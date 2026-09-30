@@ -31,6 +31,8 @@
 #include "EnemyCharacter.h"
 #include "EnemyCombatComponent.h"
 #include "SlimeDevourTarget.h"
+#include "Hub/NPC/SlimeNpcCollectionSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -1386,6 +1388,14 @@ void USlimeDevourComponent::SwallowTarget()
 	CaptureEnemy(Target, ActiveCapture);
 	PushPhantomSlot(ActiveCapture);
 	SpawnInnerMesh(ActiveCapture);
+
+	if (UGameInstance* GI = Target->GetGameInstance())
+	{
+		if (USlimeNpcCollectionSubsystem* Collection = GI->GetSubsystem<USlimeNpcCollectionSubsystem>())
+		{
+			Collection->ReportDevour(Target);
+		}
+	}
 
 	if (ISlimeDevourTarget* DevourIface = SlimeDevourUtil::As(Target))
 	{

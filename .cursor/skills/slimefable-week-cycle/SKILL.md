@@ -7,93 +7,55 @@ description: >-
   BP_DayChapterPortal, AdvancedPortals, OperaHouse, or a shared hub for all dates.
 ---
 
-# SlimeFable 周目与大厅传送门
+# SlimeFable 周目与时光博物馆
 
-任意日期共用同一份剧院大厅，只在该日持久关摆 N 扇门。不要为 366 天各做一套大厅美术，也不要复制 `Demonstration`。0815 摆法见 [`0815_PlaceableGuide.md`](../../../Content/_Slime/Days/08/0815/0815_PlaceableGuide.md)。
+所有日期共用 `/Game/_Slime/Models/MapModel/TimeMuseum/Maps/L_TimeMuseum_Environment`。日期与地图解耦；农田、家园和建筑只有这一份。旧日地图、OperaHouse 资产保留作兼容，不再批量套剧院或复制大厅。
 
-## 新日期怎么做（大厅 + N 门 + Registry 子图）
+## 新日期内容
 
-以后每个日期只做三件事：
+1. Registry `/Game/Data/DayLevels/DA_DayLevelRegistry`：`SubLevels` 登记故事键到地图；`ChapterOrder` 显式填写故事顺序。按数组分配门位，禁止遍历 Map 或按年份排序。
+2. 制作 `SL_{DayId}_{Chapter}` 年份地图和对应任务书。不要为新日期复制博物馆或摆一套日专属门。
+3. 博物馆的 `MuseumYearPortal` 有六个室内门位，`SlotNumber` 为 1～6。当日第 N 项绑定 N 号门；未使用的门隐藏并禁用碰撞/交互。
+4. 超容量、重复编号、遗漏顺序、缺少地图会明确报错。要扩容，在博物馆补放新的唯一编号门，并补放标签 `MuseumYear_N` 的 PlayerStart，落点在触发区域外。
 
-1. **Registry**：该日 `SubLevels` 登记故事键 → 子图。0815 有 6 个年份；0816 可以 8 个。子图名 `SL_{DayId}_{Chapter}`，例如 `/Game/_Slime/Days/08/0816/SL_0816_xxxx`。
-2. **大厅摆门**：编辑器打开 `/Game/Maps/Days/MM/MMDD`（剧院会作为 AlwaysLoaded 子关卡叠进来）。在视口里对着舞台选位置，把 `BP_DayChapterPortal` 拖进**当前日关卡**（Outliner 属于 `0816`，不是 `Demonstration`）。`TargetChapterId` 各填一个 Registry 故事键。
-3. **做子图内容**：对应 `SL_{DayId}_{Chapter}`。关末再放一扇 `TargetChapterId=Hub` 的门。
+`Content/Python/setup_museum_travel.py` 是幂等迁移脚本：备份、重新读盘、校验磁盘指纹后才保存；保留现有 Actor 的位置。该脚本不重建农田，不得以 `setup_timemuseum_hub.py` 代替。
 
-不想玩某年：ESC →「回到大厅」→ 走另一扇门。
+已有顺序优先来自任务书；0815 无资产书时来自 `UDayQuestBook::Make0815Book`。有地图但无书序的剩余项只在迁移时固定排序，结果记录 `Saved/MuseumTravel/setup.json`。新内容必须显式配置。
 
-## 共用大厅（禁止再做一套）
+## 门与到达点
 
-365 张空日关卡（**跳过已有内容的 `0812`**）流送同一份 [`/Game/OperaHouse/Maps/Demonstration`](../../../Content/OperaHouse/Maps)。不整图复制。
+`/Game/_Slime/Quest/Actors/BP_DayChapterPortal` 保留原外观，`DestinationMode`：
 
-批处理（禁止 MCP 逐关）：
+- `Story`：旧门默认，沿用 `TargetChapterId`、故事解锁、周目选择；`bUseHostDayId` 使用当前选择日期。
+- `Map`：`DestinationMap` 指定独立探索地图；`DestinationArrivalTag` 指定目标 PlayerStart；`MuseumReturnTag` 记录返回点。无需完成任务。
+- `Museum`：返回时光博物馆，无任务限制。无来源记录时使用博物馆默认出生点。
 
-```text
-UnrealEditor-Cmd.exe "E:/UE/SlimeFable/SlimeFable.uproject" -ExecutePythonScript="E:/UE/SlimeFable/Content/Python/apply_operahouse_lobby.py" -unattended -nop4 -nullrhi -nosound
-```
+博物馆原有门固定通往 Ruin，不占年份门位。Ruin 北侧有返回门。走入与 F 均支持；只受理一次切图。到达点必须落在触发盒外并通过导航、胶囊净空检查。
 
-脚本：清空图自带地板/灯/天空雾，保留 PlayerStart；若尚未挂 `Demonstration` 则 `LevelStreamingAlwaysLoaded`。已挂过的关跳过，可重跑。不改 `create_day_levels.py` 的「已存在则跳过」。
+## 日期、切图和存档
 
-### 已套大厅（下次批处理先看这里）
-
-| 日关卡 | 状态 | 何时 |
-|--------|------|------|
-| `0101`–`0209` | 已挂 `Demonstration` | 2026-08-15 全量跑到一半后停下 |
-| `0210` | **未完成**（停下时正在 flush） | — |
-| `0211`–`0811` | **未做** | — |
-| `0812` | **永不套**（已有内容） | — |
-| `0813`–`0814` | **未做** | — |
-| `0815`–`0831` | 已挂并核对（`0815`/`0831` lobby=True，`0812` 仍无剧院） | 2026-08-15 指定切片 |
-| `0901`–`1231` | **未做** | — |
-
-补其余关卡：把 `apply_operahouse_lobby.py` 的 `ONLY_DAY_IDS` 留空后重跑（已挂的会 `skip`）。只跑一段时写成 `{"0901", "0902", ...}`。禁止 MCP 逐关。
-
-**不要**打开/保存 `OperaHouse/Maps/Demonstration` 去摆门。门必须属于日关卡持久层，否则每天都会看到 0815 的门。
-
-从 Main 选关读的是磁盘上的日关卡：摆完必须保存 **0815**（或当天 MMDD）。Outliner World 列必须是日关卡名。点过剧院 Actor 后，Levels 窗口把日关卡设回 Current 再摆。刚打开日关卡时当前关一般就是持久关。
-
-## 摆件
-
-路径：`/Game/_Slime/Quest/Actors/BP_DayChapterPortal`
-
-Details `0_Config`：
-
-| 字段 | 含义 |
-|------|------|
-| `TargetChapterId` | **下拉**选当天 Registry 年份/故事，或 `Hub`（关末回大厅）。悬停看说明。不要手打 |
-| `bUseHostDayId` | 默认 true：进门用当前日关卡。勾选时不显示 `DayId` |
-| `DayId` | 仅取消宿主日时手填 MMDD |
-| `PortalStyle` | 1–10，套用 `BP_Portal_1`…`10` 外观（只换皮） |
-| `bEnterOnOverlap` | 走近也进 |
-
-Quest 栏的 Chapter/Quest/Branch **不用填**（那是拾取/到达用的）。新 `0_Config` 字段必须有中文 `ToolTip`，见 `slimefable-spec` coding-conventions。
-
-走近或 F 进入。未解锁：中央横幅角标「未解锁」，正文「先完成 XXXX」或关末「先完成主线」。不要静默失败。解锁：书序；任意一章到二周目后该日全部门可进。
-
-## 切图
-
-有子图就 `UDayLevelSubsystem::TravelToSubLevel`（`OpenLevel`）。大厅 World 卸掉，灯光不叠。回大厅用 `TravelToHub` / `TravelToDayId`。有子图的日子通关**不自动切图**；关末再放一扇 `TargetChapterId=Hub` 的门。Lab 等无子图日子仍可走 `NextChapterId`。
-
-加载页复用选关：`USlimeFableGameInstance` MoviePlayer + `USlimeLoadingGateWidget`（着色器 + 贴图流送就绪再放行）。
-
-ESC 暂停：仅在年份子图（`SL_*`）显示墨迹按钮「回到大厅」，走 `UQuestSubsystem::TravelToHub(ActiveDayId)`。已在大厅则隐藏。
+- `TravelToToday` 选择现实当天再进入博物馆；`TravelToDayId` 选择指定日期。博物馆内切日期只刷新任务和门位，不 OpenLevel，不重建农田/家园。
+- GI 的 `UDayLevelSubsystem` 保留所选日期、目的地类型、返回门位。直接博物馆 PIE 默认今天；午夜不自动切故事日期。
+- 年份地图仍使用 OpenLevel，独立灯光及原有资产。Ruin 不加载所选日期任务。
+- 返回统一用 `TravelToMuseumHub`；旧 `QuestSubsystem::TravelToHub` 也转到该入口。Esc 在博物馆外显示「返回时光博物馆」，合并旧「回到大厅」，保留其他暂停功能。
+- 返回年份门旁：标签 `MuseumYear_N`；Ruin 返回：`MuseumRuin`；无有效标签退回默认 PlayerStart。
+- 先保存进度、取消待进入门与周目界面、解除暂停、恢复输入，再切图。加载页沿用 `USlimeFableGameInstance` + `USlimeLoadingGateWidget`。
+- 任务存档仍按 MMDD；Ruin 强化使用现实日期，和所选故事日期互不影响。
+- 0812 从博物馆 `Legacy0812` 兼容入口进入原地图，保留原场景/玩法/存档。0815 等原年份资产不复制。
 
 ## 周目（按年分开）
 
-存档 `HighestWeekByChapter`：打通 **该年** 第 N 周目且 N 已是该年最高 → 该年开 N+1（封顶 3）。
+`HighestWeekByChapter`：打通该年最高 N 周目后，该年开 N+1，封顶 3。
 
-- 只打 1945 二周目 → 只开 1945 三周目。其它年可以一直停在一周目。
-- 该年最高仍为 1：直接进一周目。
-- 该年已通一周目：弹出 `UWeekSelectWidget`，按该年解锁亮/灰。
-- 任意一章最高 ≥ 2：该日所有年份门可进（书序锁解除）。
-- 本局难度 `WeekIndex` 由面板写入；敌人 `ApplyWeekDifficulty`。周 1/2/3 倍率 0.85 / 1.0 / 1.40。
+- 最高仍为 1：直接进入一周目；已通一周目则打开 `UWeekSelectWidget`。
+- 按任务书顺序解锁；任一章达到二周目后，该日所有年份解锁。
+- 未解锁显示原因；不通过切日期/返回清空周目。
+- 难度 `WeekIndex` 的敌人倍率 0.85 / 1.0 / 1.40，仅应用于故事地图。
 
-入口：`UQuestSubsystem::TravelToChapter` / `GetHighestWeek` / `IsChapterUnlocked` / `ShowLockedChapterBanner`。
+## 并行工作和脚本
 
-## 不要做
+TimeMuseum 是共享二进制：保存串行，先备份最新磁盘版，保存前校验未被外部改动；不保存旧加载副本覆盖别人。完整 UBT 与编辑器占用错开。
 
-- 不要再做一套大厅，不要复制 `Demonstration`
-- 不要打开剧院图去摆门（门属于日关卡）
-- 不要用 MCP 逐关处理 366 张图或逐关摆 366 扇门
-- 不要把周目做成全局一条，绑死非战斗年
-- 不要用关卡流送叠大厅灯光进年份子图
-- 不要另做一套霓虹加载页
+`create_day_levels.py` 必须保留已有 Level、SubLevels 和 ChapterOrder；`create_0815_sublevels.py` 保留已有映射与顺序。`apply_operahouse_lobby.py` 默认退出，仅显式历史维护才可启用。不要再为 366 天套大厅，不改原农田/家园生成逻辑。
+
+位置、外观与走动观感交用户在 PIE 确认；自动验证负责碰撞、导航、流程和存档。

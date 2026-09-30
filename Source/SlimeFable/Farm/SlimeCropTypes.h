@@ -6,6 +6,10 @@
 #include "Engine/DataAsset.h"
 #include "Inventory/SlimeItemDefinition.h"
 #include "SlimeElementTypes.h"
+
+class UStaticMesh;
+class UTexture2D;
+
 #include "SlimeCropTypes.generated.h"
 
 UENUM(BlueprintType)
@@ -26,6 +30,36 @@ enum class ESlimeCropQuality : uint8
 };
 
 /** Procedural silhouette for one crop. Units are centimeters. */
+UENUM(BlueprintType)
+enum class ESlimeCropCategory : uint8
+{
+	Vegetable UMETA(DisplayName = "蔬菜"),
+	Fruit UMETA(DisplayName = "水果"),
+	Grain UMETA(DisplayName = "谷物"),
+	Flower UMETA(DisplayName = "花草"),
+	Cash UMETA(DisplayName = "经济作物")
+};
+
+/** One growth band. Meshes in the array are shape variants, not later stages. */
+USTRUCT(BlueprintType)
+struct SLIMEFABLE_API FSlimeCropStage
+{
+	GENERATED_BODY()
+
+	/** Growth01 where this band begins. The next band's start ends it. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float StartGrowth = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage")
+	TArray<TSoftObjectPtr<UStaticMesh>> Meshes;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage", meta = (ClampMin = "0.05"))
+	float ScaleFrom = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Stage", meta = (ClampMin = "0.05"))
+	float ScaleTo = 1.f;
+};
+
 USTRUCT(BlueprintType)
 struct SLIMEFABLE_API FSlimePlantShape
 {
@@ -87,9 +121,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
 	bool bPrefersNight = false;
 
-	/** Real seconds from sprout to mature at rate 1. Default is about one 10 minute day. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop", meta = (ClampMin = "10.0", Units = "s"))
+	/** Real seconds from sprout to mature at rate 1. Clamped to 30 minutes in the growth rate. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop", meta = (ClampMin = "10.0", ClampMax = "1800.0", Units = "s"))
 	float GrowSeconds = 600.f;
+
+	/** Phrase placed after 现实里, such as 大约三个月 or 要等两三年以上. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	FText RealWorldSpan;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
 	ESlimeElement PreferredElement = ESlimeElement::Water;
@@ -111,6 +149,41 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
 	FSlimePlantShape Shape;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	ESlimeCropCategory Category = ESlimeCropCategory::Vegetable;
+
+	/** Ordered growth bands. Empty falls back to the procedural plant. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	TArray<FSlimeCropStage> Stages;
+
+	/** Shown after a regrowing crop is picked, until it reaches the last stage again. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	TArray<TSoftObjectPtr<UStaticMesh>> HarvestedMeshes;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	bool bRegrowAfterHarvest = false;
+
+	/** Growth01 the crop returns to when it regrows. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop", meta = (ClampMin = "0.0", ClampMax = "0.9"))
+	float RegrowFromGrowth = 0.35f;
+
+	/** How many plants to try along each side. The bed shrinks this if the soil is narrow. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop", meta = (ClampMin = "1", ClampMax = "4"))
+	int32 PlantGrid = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop", meta = (ClampMin = "0.2"))
+	float SizeMin = 0.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop", meta = (ClampMin = "0.2"))
+	float SizeMax = 1.7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	TSoftObjectPtr<UTexture2D> Icon;
+
+	/** Loose produce mesh, used for the harvest pop. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Crop")
+	TSoftObjectPtr<UStaticMesh> ProduceMesh;
 
 	FName ResolveYieldItemId() const;
 
@@ -151,6 +224,14 @@ struct FSlimeFarmPlotRecord
 
 	UPROPERTY()
 	int64 LastUpdateUnix = 0;
+
+	/** 0 on old saves. The plot then derives a stable seed from PlotId. */
+	UPROPERTY()
+	int32 PlantSeed = 0;
+
+	/** Regrowing crops show the harvested mesh until they reach the last stage again. */
+	UPROPERTY()
+	bool bHarvestedLook = false;
 };
 
 UCLASS(BlueprintType)

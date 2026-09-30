@@ -9,6 +9,8 @@
 class USlimePlaceableDefinition;
 class USlimeHomeBuildWidget;
 class ASlimePlacePreview;
+class ASlimeMuseumNpc;
+struct FSlimeNpcSpecies;
 class USlimeHomeBuildCatalog;
 class ASlimeHomeBuildManager;
 class USlimeHomeBuildSubsystem;
@@ -51,6 +53,9 @@ private:
 		Scale
 	};
 
+	const FSlimeNpcSpecies* GetNpcSpecies() const;
+	void UpdateNpcAim();
+	void DestroyNpcPreview();
 	void ToggleCatalog();
 	void OpenCatalog();
 	void CloseCatalog();
@@ -58,6 +63,7 @@ private:
 	void ExitPlacement(const TCHAR* Reason);
 	void CycleAdjustMode();
 	bool IsPlacingFluid() const;
+	bool IsPlacingPool() const;
 	const TCHAR* AdjustModeLabel() const;
 	void UpdateAim();
 	void Confirm();
@@ -75,11 +81,14 @@ private:
 	UPROPERTY()
 	TObjectPtr<ASlimePlacePreview> PreviewActor;
 
+	UPROPERTY()
+	TObjectPtr<ASlimeMuseumNpc> NpcPreview;
 	bool bCatalogOpen = false;
 	bool bPlacing = false;
 	bool bClearMode = false;
 	bool bAimOnBuild = false;
 	bool bAimValid = false;
+	FString NpcRejectReason;
 	int32 AimAnchorX = 0;
 	int32 AimAnchorY = 0;
 	float AimBaseZ = 0.f;
@@ -88,6 +97,7 @@ private:
 	float HeightOffset = 0.f;
 	float PitchDegrees = 0.f;
 	float UserScale = 1.f;
+	float PoolDepthCm = 80.f;
 	float ModeToastLeft = 0.f;
 	EPlaceAdjust AdjustMode = EPlaceAdjust::Height;
 

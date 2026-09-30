@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "EnemyCombatComponent.h"
+#include "Exploration/SlimeEncounterMember.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -1526,7 +1527,7 @@ float UEnemyCombatComponent::ResolveDamage(const FEnemySkillDef& Skill) const
 			Damage *= Status->GetOutgoingDamageMul();
 		}
 	}
-	return Damage * FMath::Max(OutgoingDamageMul, 0.f);
+	return Damage * FMath::Max(OutgoingDamageMul, 0.f) * USlimeEncounterMember::DamageMultiplier(GetOwner());
 }
 
 void UEnemyCombatComponent::ApplyOutgoingDamageMul(float Mul, float DurationSeconds)

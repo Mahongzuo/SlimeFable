@@ -397,6 +397,15 @@ void ALyraXinShooterEnemy::CycleVisualSkin()
 	UE_LOG(LogSlimeFable, Log, TEXT("LyraXin %s cycled visual form to %d"), *GetName(), VisualForm);
 }
 
+void ALyraXinShooterEnemy::RestoreExplorationPhase(int32 InPhase)
+{
+	if (InPhase >= 2 && HealthPhase < 2)
+	{
+		BeginPhase2();
+		if (Health) Health->InvulnerableUntil = -1.f;
+	}
+}
+
 bool ALyraXinShooterEnemy::AbsorbLethalDamage(AActor* DamageCauser)
 {
 	(void)DamageCauser;

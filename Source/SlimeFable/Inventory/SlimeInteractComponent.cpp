@@ -13,6 +13,8 @@
 #include "SlimeInventorySubsystem.h"
 #include "SlimePlacementComponent.h"
 #include "UI/SlimeInventoryWidget.h"
+#include "UI/SlimeSeedPickerWidget.h"
+#include "UI/SlimeStatsWidget.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "SlimeAbilityComponent.h"
@@ -386,6 +388,27 @@ void USlimeInteractComponent::CloseInventory()
 	}
 }
 
+void USlimeInteractComponent::ToggleStats()
+{
+	if (StatsWidget)
+	{
+		StatsWidget->RemoveFromParent();
+		StatsWidget = nullptr;
+		return;
+	}
+	APawn* Pawn = Cast<APawn>(GetOwner());
+	APlayerController* PC = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	if (!PC)
+	{
+		return;
+	}
+	StatsWidget = CreateWidget<USlimeStatsWidget>(PC, USlimeStatsWidget::StaticClass());
+	if (StatsWidget)
+	{
+		StatsWidget->AddToViewport(12);
+	}
+}
+
 void USlimeInteractComponent::PollKeys()
 {
 	APawn* Pawn = Cast<APawn>(GetOwner());
@@ -438,6 +461,11 @@ void USlimeInteractComponent::PollKeys()
 		}
 	}
 
+	if (WasPressed(ESlimeInputAction::Stats, EKeys::K))
+	{
+		ToggleStats();
+	}
+
 	if (USlimeDevourComponent* Devour = Pawn->FindComponentByClass<USlimeDevourComponent>())
 	{
 		if (Devour->GetPhase() == ESlimeDevourPhase::Charging && !IsDown(ESlimeInputAction::Interact, EKeys::F))
@@ -448,7 +476,14 @@ void USlimeInteractComponent::PollKeys()
 
 	if (WasPressed(ESlimeInputAction::Interact, EKeys::F))
 	{
-		TryInteract();
+		if (USlimeSeedPickerWidget::IsOpen())
+		{
+			USlimeSeedPickerWidget::CloseOpen();
+		}
+		else
+		{
+			TryInteract();
+		}
 	}
 
 	static const ESlimeInputAction HotbarActions[6] = {

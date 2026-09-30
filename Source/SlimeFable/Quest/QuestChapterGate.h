@@ -20,6 +20,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Quest")
 	virtual bool RequestEnter(APawn* Interactor);
+	void CancelPendingEnter();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Gate",
 		meta = (GetOptions = "GetTargetChapterIdOptions",

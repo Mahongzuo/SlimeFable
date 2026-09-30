@@ -47,6 +47,7 @@ enum class ESlimeInputAction : uint8
 	BodySkin UMETA(DisplayName = "史莱姆皮肤"),
 	BuildCatalog UMETA(DisplayName = "建造目录"),
 	BuildClearMode UMETA(DisplayName = "建造清除"),
+	Stats UMETA(DisplayName = "属性"),
 	COUNT UMETA(Hidden)
 };
 

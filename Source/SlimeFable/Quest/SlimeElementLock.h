@@ -22,6 +22,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Lock")
 	bool bUnlocked = false;
 
+	/** 解开后隐藏并关掉碰撞。用来挡住楼梯，检查完成才放行。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Lock")
+	TObjectPtr<AActor> DoorActor;
+
 protected:
 	bool HasRequiredElement(const APawn* Interactor) const;
 	FText MakeSwapHint() const;

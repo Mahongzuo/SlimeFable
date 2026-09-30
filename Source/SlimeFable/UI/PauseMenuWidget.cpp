@@ -214,7 +214,7 @@ void UPauseMenuWidget::BuildLayoutIfNeeded()
 	TitleText = AddText(TEXT("TitleText"), FText::FromString(TEXT("暂停")));
 	ContinueButton = AddButton(TEXT("ContinueButton"), FText::FromString(TEXT("继续游戏")));
 	ReturnToHubButton = AddButton(TEXT("ReturnToHubButton"), FText::FromString(TEXT("回到大厅")));
-	ReturnToMuseumButton = AddButton(TEXT("ReturnToMuseumButton"), FText::FromString(TEXT("回到博物馆")));
+	ReturnToMuseumButton = AddButton(TEXT("ReturnToMuseumButton"), FText::FromString(TEXT("返回时光博物馆")));
 	ResetDayButton = AddButton(TEXT("ResetDayButton"), FText::FromString(TEXT("重制本关进度")));
 	LevelSelectButton = AddButton(TEXT("LevelSelectButton"), FText::FromString(TEXT("返回选关")));
 	KeybindButton = AddButton(TEXT("KeybindButton"), FText::FromString(TEXT("自定义按键")));
@@ -316,7 +316,7 @@ void UPauseMenuWidget::EnsureReturnToMuseumButton()
 	ReturnToMuseumButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ReturnToMuseumButton"));
 	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(
 		UTextBlock::StaticClass(), TEXT("ReturnToMuseumButton_Label"));
-	Label->SetText(FText::FromString(TEXT("回到博物馆")));
+	Label->SetText(FText::FromString(TEXT("返回时光博物馆")));
 	Label->SetJustification(ETextJustify::Center);
 	ReturnToMuseumButton->AddChild(Label);
 	SizeBox->AddChild(ReturnToMuseumButton);
@@ -387,19 +387,7 @@ void UPauseMenuWidget::EnsureResetDayButton()
 
 void UPauseMenuWidget::RefreshHubButtonVisibility()
 {
-	bool bShow = false;
-	if (UWorld* World = GetWorld())
-	{
-		if (UGameInstance* GI = World->GetGameInstance())
-		{
-			if (const UQuestSubsystem* Quests = GI->GetSubsystem<UQuestSubsystem>())
-			{
-				bShow = Quests->IsInStorySubLevel();
-			}
-		}
-	}
-
-	const ESlateVisibility Vis = bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed;
+	const ESlateVisibility Vis = ESlateVisibility::Collapsed;
 	if (ReturnToHubButton)
 	{
 		ReturnToHubButton->SetVisibility(Vis);
@@ -423,6 +411,7 @@ void UPauseMenuWidget::RefreshHubButtonVisibility()
 	const ESlateVisibility MuseumVis = bInMuseum ? ESlateVisibility::Collapsed : ESlateVisibility::Visible;
 	if (ReturnToMuseumButton)
 	{
+		if (UTextBlock* Label = Cast<UTextBlock>(ReturnToMuseumButton->GetChildAt(0))) Label->SetText(FText::FromString(TEXT("返回时光博物馆")));
 		ReturnToMuseumButton->SetVisibility(MuseumVis);
 		if (UWidget* Parent = ReturnToMuseumButton->GetParent())
 		{

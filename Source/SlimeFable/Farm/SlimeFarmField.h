@@ -36,8 +36,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Farm",
 		meta = (ClampMin = "80.0", Units = "cm",
-			ToolTip = "相邻两块地中心的间距，单位厘米。默认 280。土块本身大约 220 宽。"))
-	float Spacing = 280.f;
+			ToolTip = "沿田地长边的中心间距，厘米。默认 720，对应约 7 米的土垄再留一条缝，避免两块土面贴在一起。"))
+	float Spacing = 720.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Farm",
+		meta = (ClampMin = "50.0", Units = "cm",
+			ToolTip = "沿田地短边的中心间距，厘米。默认 120，土垄窄边大约 1 米。"))
+	float SpacingY = 120.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Farm",
 		meta = (ToolTip = "地块存档键前缀。实际键是 前缀_00、前缀_01。同一块田不要改这个名字，否则进度读不回来。默认 MuseumPlot。"))
@@ -45,7 +50,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Farm",
 		meta = (ToolTip = "勾选后，进游戏时如果关卡里还没有种子箱，就在这块田旁边生成一个。已经摆过种子箱就不会再生成。"))
-	bool bSpawnSeedCrate = true;
+	bool bSpawnSeedCrate = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Farm",
 		meta = (ToolTip = "种子箱相对这块田原点的位置，厘米，跟随着田的朝向。默认在田的前方偏左。"))

@@ -1,4 +1,6 @@
 #include "Quest/DayChapterPortal.h"
+#include "DayLevel/DayLevelSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "SlimeFable.h"
 #include "Components/BoxComponent.h"
 #include "Components/ChildActorComponent.h"
@@ -228,4 +230,52 @@ void ADayChapterPortal::HandleBeginOverlap(
 		return;
 	}
 	RequestEnter(Pawn);
+}
+
+void ADayChapterPortal::SetPortalEnabled(bool bEnabled)
+{
+	CancelPendingEnter();
+	bPortalEnabled = bEnabled;
+	SetActorHiddenInGame(!bEnabled);
+	SetActorEnableCollision(bEnabled);
+	if (VisualPortal && VisualPortal->GetChildActor()) VisualPortal->GetChildActor()->SetActorHiddenInGame(!bEnabled);
+}
+
+bool ADayChapterPortal::CanBeFocused() const
+{
+	return bPortalEnabled && Super::CanBeFocused();
+}
+
+FText ADayChapterPortal::GetInteractPromptVerb() const
+{
+	if (DestinationMode == EPortalDestination::Museum) return FText::FromString(TEXT("返回时光博物馆"));
+	if (DestinationMode == EPortalDestination::Map)
+	{
+		const FString Label = DestinationLabel.ToString();
+		if (Label.Contains(TEXT("RUIN")) || Label.Contains(TEXT("户外探索")))
+		{
+			return FText::FromString(TEXT("进入野外探索"));
+		}
+		return DestinationLabel.IsEmpty() ? FText::FromString(TEXT("进入探索地图")) : DestinationLabel;
+	}
+	if (!DestinationLabel.IsEmpty() && IsUnlocked())
+	{
+		const FString Label = DestinationLabel.ToString();
+		if (Label.StartsWith(TEXT("穿越到")))
+		{
+			return DestinationLabel;
+		}
+		return FText::FromString(TEXT("进入 ") + Label);
+	}
+	return Super::GetInteractPromptVerb();
+}
+
+bool ADayChapterPortal::RequestEnter(APawn* Interactor)
+{
+	if (!bPortalEnabled || !Interactor || !Interactor->IsPlayerControlled()) return false;
+	UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>();
+	if (!Days || Days->IsTravelPending()) return false;
+	if (DestinationMode == EPortalDestination::Museum) return Days->TravelToMuseumHub(this);
+	if (DestinationMode == EPortalDestination::Map) return Days->TravelToMap(this, DestinationMap, DestinationArrivalTag, MuseumReturnTag);
+	return Super::RequestEnter(Interactor);
 }

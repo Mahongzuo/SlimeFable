@@ -17,6 +17,8 @@ class SLIMEFABLE_API UQuestSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
+	void SaveBeforeTravel();
+	void RefreshMuseumDate(UWorld* World);
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 

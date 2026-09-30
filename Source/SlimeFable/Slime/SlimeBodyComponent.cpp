@@ -603,13 +603,16 @@ void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
 		WorldParams.AddObjectTypesToQuery(ECC_WorldStatic);
 		WorldParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 		TArray<FOverlapResult> WorldOverlaps;
-		World->OverlapMultiByObjectType(
-			WorldOverlaps,
-			Center,
-			FQuat::Identity,
-			WorldParams,
-			FCollisionShape::MakeSphere(FMath::Max(FragmentMeleeRange, 80.f)),
-			QueryParams);
+		if (Shot.Id != 0)
+		{
+			World->OverlapMultiByObjectType(
+				WorldOverlaps,
+				Center,
+				FQuat::Identity,
+				WorldParams,
+				FCollisionShape::MakeSphere(FMath::Max(FragmentMeleeRange, 80.f)),
+				QueryParams);
+		}
 		for (const FOverlapResult& Overlap : WorldOverlaps)
 		{
 			AActor* Candidate = Overlap.GetActor();

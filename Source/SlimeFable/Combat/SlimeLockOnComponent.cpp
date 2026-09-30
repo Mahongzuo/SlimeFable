@@ -17,6 +17,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "SlimeCharacter.h"
 #include "Hub/HomeBuild/SlimeBuildModeComponent.h"
+#include "UI/SlimeSeedPickerWidget.h"
 #include "SlimeFableCharacter.h"
 #include "SlimeHealthComponent.h"
 #include "SlimeLockTarget.h"
@@ -114,7 +115,7 @@ void USlimeLockOnComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			{
 				bBuildPlacement = Build->IsPlacementActive();
 			}
-			if (!bBuildPlacement && bDown && !bPollLockDown)
+			if (!bBuildPlacement && !USlimeSeedPickerWidget::IsOpen() && bDown && !bPollLockDown)
 			{
 				ToggleLockOn();
 			}

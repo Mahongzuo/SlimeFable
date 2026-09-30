@@ -86,6 +86,8 @@ public:
 	virtual void HandleDeath() override;
 	virtual void ApplyHealing(float Healing, AActor* Healer) override;
 	virtual void NotifyDanger(const FVector& DangerLocation, AActor* DangerSource) override;
+	/** Called once by the exploration population after initialization; leaves AI behavior unchanged. */
+	void RefreshExplorationStats(float DamageScale);
 
 	// ISlimeLockTarget: middle-mouse lock-on + HUD health bar, same as the GASP bodies.
 	virtual bool CanBeLockedOn() const override;

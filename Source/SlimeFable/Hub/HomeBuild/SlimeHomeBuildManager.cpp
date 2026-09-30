@@ -11,9 +11,13 @@
 #include "Hub/HomeBuild/SlimeHomeFluidPad.h"
 #include "Inventory/SlimeItemDefinition.h"
 #include "Inventory/SlimeInventorySubsystem.h"
+#include "Farm/SlimeFarmPlot.h"
+#include "Farm/SlimeFarmSubsystem.h"
 #include "Inventory/SlimePlacedActor.h"
 #include "Materials/MaterialInterface.h"
 #include "SlimeFable.h"
+#include "Hub/NPC/SlimeMuseumNpc.h"
+#include "Hub/NPC/SlimeNpcCatalog.h"
 
 namespace
 {
@@ -57,7 +61,25 @@ bool ASlimeHomeBuildManager::AddRecord(const FSlimeHomeBuildRecord& Record)
 		return false;
 	}
 
-	FTransform Transform = FTransform::Identity;
+	if (!Record.NpcSpeciesId.IsNone())
+ {
+  const auto* Npcs = USlimeNpcCatalog::Load();
+  const auto* Species = Npcs ? Npcs->Find(Record.NpcSpeciesId) : nullptr;
+  if (!Species || !Entry || Entry->NpcSpeciesId != Record.NpcSpeciesId) return false;
+  const FVector Feet((Record.AnchorX + 0.5f) * Catalog->CellSize, (Record.AnchorY + 0.5f) * Catalog->CellSize, Record.BaseZ);
+  FVector Center;
+  if (!ASlimeMuseumNpc::ValidateLocation(GetWorld(), *Species, Feet, Center)) return false;
+  const FTransform SpawnTransform(FRotator(0, Record.YawSteps * 90.f, 0), Center);
+  auto* Npc = GetWorld()->SpawnActorDeferred<ASlimeMuseumNpc>(ASlimeMuseumNpc::StaticClass(), SpawnTransform, this, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+  if (!Npc) return false;
+  Npc->RecordId = Record.Id;
+  if (!Npc->Configure(*Species)) { Npc->Destroy(); return false; }
+  Npc->FinishSpawning(SpawnTransform);
+  SpawnedActors.Add(Record.Id, Npc);
+  Records.Add(Record);
+  return true;
+ }
+ FTransform Transform = FTransform::Identity;
 	if (Entry)
 	{
 		if (!ComputeTransform(*Entry, Record, Transform))
@@ -74,6 +96,10 @@ bool ASlimeHomeBuildManager::AddRecord(const FSlimeHomeBuildRecord& Record)
 	if (Record.bFluid && Entry)
 	{
 		SpawnFluid(Record, *Entry, Transform);
+	}
+	else if (Entry && Entry->bFarmPlot)
+	{
+		SpawnFarmPlot(Record, *Entry);
 	}
 	else if (Record.bFromBag)
 	{
@@ -119,9 +145,17 @@ void ASlimeHomeBuildManager::RemoveRecord(int32 RecordId)
 	{
 		if (AActor* Actor = Found->Get())
 		{
+			ForgetFarmPlot(Actor);
 			Actor->Destroy();
 		}
 		SpawnedActors.Remove(RecordId);
+	}
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeFarmSubsystem* Farm = GI->GetSubsystem<USlimeFarmSubsystem>())
+		{
+			Farm->RequestFlush();
+		}
 	}
 	Records.RemoveAll([RecordId](const FSlimeHomeBuildRecord& Record) { return Record.Id == RecordId; });
 	if (HighlightMesh)
@@ -141,9 +175,17 @@ void ASlimeHomeBuildManager::ClearAll()
 	}
 	for (const TPair<int32, TObjectPtr<AActor>>& Pair : SpawnedActors)
 	{
-		if (Pair.Value)
+		if (AActor* Actor = Pair.Value.Get())
 		{
-			Pair.Value->Destroy();
+			ForgetFarmPlot(Actor);
+			Actor->Destroy();
+		}
+	}
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeFarmSubsystem* Farm = GI->GetSubsystem<USlimeFarmSubsystem>())
+		{
+			Farm->RequestFlush();
 		}
 	}
 	SpawnedActors.Reset();
@@ -164,7 +206,7 @@ int32 ASlimeHomeBuildManager::NumFluidPads() const
 	return Count;
 }
 
-bool ASlimeHomeBuildManager::IsBlocked(int32 AnchorX, int32 AnchorY, int32 FootX, int32 FootY, float BaseZ, float HeightCm, int32 IgnoreId, bool bIgnoreNonFluid) const
+bool ASlimeHomeBuildManager::IsBlocked(int32 AnchorX, int32 AnchorY, int32 FootX, int32 FootY, float BaseZ, float HeightCm, int32 IgnoreId, bool bIgnoreNonFluid, bool bIncomingPool, float IncomingPoolDepthCm) const
 {
 	if (!Catalog)
 	{
@@ -175,10 +217,10 @@ bool ASlimeHomeBuildManager::IsBlocked(int32 AnchorX, int32 AnchorY, int32 FootX
 	const float MinY = AnchorY * Cell;
 	const float MaxX = MinX + FootX * Cell;
 	const float MaxY = MinY + FootY * Cell;
-	const float Top = BaseZ + HeightCm;
 
 	for (const FSlimeHomeBuildRecord& Other : Records)
 	{
+		if (!Other.NpcSpeciesId.IsNone()) continue;
 		if (Other.Id == IgnoreId || (bIgnoreNonFluid && !Other.bFluid))
 		{
 			continue;
@@ -186,19 +228,35 @@ bool ASlimeHomeBuildManager::IsBlocked(int32 AnchorX, int32 AnchorY, int32 FootX
 		int32 OtherFootX = 1;
 		int32 OtherFootY = 1;
 		float OtherHeight = Cell;
+		bool bOtherPool = false;
 		if (!Other.bFromBag)
 		{
 			if (const FSlimeHomeBuildEntry* Entry = Catalog->FindEntry(Other.EntryId))
 			{
-				OtherFootX = FMath::Max(Entry->FootprintX, 1);
-				OtherFootY = FMath::Max(Entry->FootprintY, 1);
+				bOtherPool = SlimeHomeIsPool(Entry->EntryId);
+				if (bOtherPool)
+				{
+					OtherFootX = SlimeHomePoolCells(Entry->FootprintX, Other.UserScale);
+					OtherFootY = SlimeHomePoolCells(Entry->FootprintY, Other.UserScale);
+				}
+				else
+				{
+					OtherFootX = FMath::Max(Entry->FootprintX, 1);
+					OtherFootY = FMath::Max(Entry->FootprintY, 1);
+				}
 				if ((Other.YawSteps & 1) != 0)
 				{
 					Swap(OtherFootX, OtherFootY);
 				}
-				OtherHeight = FMath::Max(Entry->HeightCm, 1.f);
+				OtherHeight = (bIncomingPool && bOtherPool)
+					? SlimeHomePoolDepthCm(Other.PoolDepthCm)
+					: FMath::Max(Entry->HeightCm, 1.f);
 			}
 		}
+		const float IncomingHeight = (bIncomingPool && bOtherPool)
+			? SlimeHomePoolDepthCm(IncomingPoolDepthCm)
+			: HeightCm;
+		const float Top = BaseZ + IncomingHeight;
 		const float OMinX = Other.AnchorX * Cell;
 		const float OMinY = Other.AnchorY * Cell;
 		const bool bOverlapXY = MinX < OMinX + OtherFootX * Cell && MaxX > OMinX
@@ -251,6 +309,41 @@ bool ASlimeHomeBuildManager::GetRecordStack(int32 RecordId, float& OutBaseZ, flo
 int32 ASlimeHomeBuildManager::FindRecordAtHit(const FHitResult& Hit) const
 {
 	const AActor* HitActor = Hit.GetActor();
+	if (const auto* Npc = Cast<ASlimeMuseumNpc>(HitActor)) return SpawnedActors.FindRef(Npc->RecordId) == Npc ? Npc->RecordId : INDEX_NONE;
+	auto FindPlotRecord = [this](const ASlimeFarmPlot* Plot) -> int32
+	{
+		if (!Plot)
+		{
+			return INDEX_NONE;
+		}
+		for (const TPair<int32, TObjectPtr<AActor>>& Pair : SpawnedActors)
+		{
+			if (Pair.Value.Get() == Plot)
+			{
+				return Pair.Key;
+			}
+		}
+		return INDEX_NONE;
+	};
+	if (const ASlimeFarmPlot* Plot = Cast<ASlimeFarmPlot>(HitActor))
+	{
+		const int32 PlotRecord = FindPlotRecord(Plot);
+		if (PlotRecord != INDEX_NONE)
+		{
+			return PlotRecord;
+		}
+	}
+	else if (HitActor)
+	{
+		if (const ASlimeFarmPlot* Owned = Cast<ASlimeFarmPlot>(HitActor->GetOwner()))
+		{
+			const int32 PlotRecord = FindPlotRecord(Owned);
+			if (PlotRecord != INDEX_NONE)
+			{
+				return PlotRecord;
+			}
+		}
+	}
 	const ASlimeHomeFluidPad* Pad = Cast<ASlimeHomeFluidPad>(HitActor);
 	if (!Pad && HitActor)
 	{
@@ -332,13 +425,15 @@ bool ASlimeHomeBuildManager::GetRecordTransform(const FSlimeHomeBuildRecord& Rec
 		Max = Max.ComponentMax(Point);
 	}
 	const FVector BoundsCenter = (Min + Max) * 0.5f;
-	const FVector Origin(Center.X - BoundsCenter.X, Center.Y - BoundsCenter.Y, Record.BaseZ - Min.Z);
+	const FVector Origin(Center.X - BoundsCenter.X, Center.Y - BoundsCenter.Y, Record.BaseZ - 1.f - Min.Z);
 	OutTransform = FTransform(Rotation, Origin, Scale);
 	return true;
 }
 
 void ASlimeHomeBuildManager::SetHighlight(int32 RecordId)
 {
+	for (const auto& Pair : SpawnedActors)
+		if (auto* Npc = Cast<ASlimeMuseumNpc>(Pair.Value)) Npc->SetHighlighted(Pair.Key == RecordId);
 	if (!HighlightMesh)
 	{
 		return;
@@ -371,6 +466,30 @@ void ASlimeHomeBuildManager::SetHighlight(int32 RecordId)
 		{
 			Placed->SetHighlight(bThis);
 		}
+	}
+
+	for (const TPair<int32, TObjectPtr<AActor>>& Pair : SpawnedActors)
+	{
+		if (Pair.Key != RecordId)
+		{
+			continue;
+		}
+		const ASlimeFarmPlot* Plot = Cast<ASlimeFarmPlot>(Pair.Value.Get());
+		const UStaticMeshComponent* SoilComp = Plot ? Plot->GetSoilComponent() : nullptr;
+		UStaticMesh* SoilMesh = SoilComp ? SoilComp->GetStaticMesh() : nullptr;
+		if (!SoilMesh)
+		{
+			break;
+		}
+		HighlightMesh->SetStaticMesh(SoilMesh);
+		HighlightMesh->SetWorldTransform(SoilComp->GetComponentTransform());
+		HighlightMesh->SetHiddenInGame(false);
+		if (UMaterialInterface* Overlay = LoadObject<UMaterialInterface>(
+				nullptr, TEXT("/Game/Materials/M_PickupOutline.M_PickupOutline")))
+		{
+			HighlightMesh->SetOverlayMaterial(Overlay);
+		}
+		return;
 	}
 
 	for (const FInstancePiece& Piece : Instances)
@@ -410,6 +529,7 @@ UInstancedStaticMeshComponent* ASlimeHomeBuildManager::GetBucket(FName MeshKey, 
 	Bucket->SetupAttachment(GetRootComponent());
 	Bucket->SetMobility(EComponentMobility::Movable);
 	Bucket->SetStaticMesh(Mesh);
+	Bucket->SetCanEverAffectNavigation(true);
 	Bucket->SetCollisionProfileName(TEXT("BlockAll"));
 	Bucket->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 	Bucket->RegisterComponent();
@@ -476,7 +596,7 @@ bool ASlimeHomeBuildManager::ComputeTransform(const FSlimeHomeBuildEntry& Entry,
 		Max = Max.ComponentMax(Point);
 	}
 	const FVector BoundsCenter = (Min + Max) * 0.5f;
-	const FVector Origin(Center.X - BoundsCenter.X, Center.Y - BoundsCenter.Y, Record.BaseZ - Min.Z);
+	const FVector Origin(Center.X - BoundsCenter.X, Center.Y - BoundsCenter.Y, Record.BaseZ - 1.f - Min.Z);
 	OutTransform = FTransform(Rotation, Origin, Scale);
 	return true;
 }
@@ -492,13 +612,21 @@ void ASlimeHomeBuildManager::SpawnFluid(const FSlimeHomeBuildRecord& Record, con
 	UClass* FluidClass = Entry.FluidClass.LoadSynchronous();
 	int32 FootX = FMath::Max(Entry.FootprintX, 1);
 	int32 FootY = FMath::Max(Entry.FootprintY, 1);
+	const bool bPool = SlimeHomeIsPool(Entry.EntryId);
+	if (bPool)
+	{
+		FootX = SlimeHomePoolCells(Entry.FootprintX, Record.UserScale);
+		FootY = SlimeHomePoolCells(Entry.FootprintY, Record.UserScale);
+	}
 	if ((Record.YawSteps & 1) != 0)
 	{
 		Swap(FootX, FootY);
 	}
 	const float Cell = Catalog ? Catalog->CellSize : 50.f;
 	const FVector Center((Record.AnchorX + FootX * 0.5f) * Cell, (Record.AnchorY + FootY * 0.5f) * Cell, Record.BaseZ);
-	const FTransform ActorXform(FRotator(Record.PitchDegrees, Record.YawSteps * 90.f, 0.f), Center);
+	const float Pitch = bPool ? 0.f : Record.PitchDegrees;
+	const float Yaw = bPool ? 0.f : Record.YawSteps * 90.f;
+	const FTransform ActorXform(FRotator(Pitch, Yaw, 0.f), Center);
 	ASlimeHomeFluidPad* Pad = World->SpawnActorDeferred<ASlimeHomeFluidPad>(
 		ASlimeHomeFluidPad::StaticClass(), ActorXform, this, nullptr,
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
@@ -506,9 +634,63 @@ void ASlimeHomeBuildManager::SpawnFluid(const FSlimeHomeBuildRecord& Record, con
 	{
 		return;
 	}
-	Pad->Configure(FluidClass, Record.Id);
+	const float Plan = bPool ? SlimeHomePoolPlanScale(Record.UserScale) : 1.f;
+	const float Depth = bPool ? Record.PoolDepthCm : 0.f;
+	const bool bSwapPlanAxes = bPool && (Record.YawSteps & 1) != 0;
+	Pad->Configure(FluidClass, Record.Id, Plan, Depth, bSwapPlanAxes);
 	Pad->FinishSpawning(ActorXform);
 	SpawnedActors.Add(Record.Id, Pad);
+}
+
+void ASlimeHomeBuildManager::ForgetFarmPlot(AActor* Actor)
+{
+	ASlimeFarmPlot* Plot = Cast<ASlimeFarmPlot>(Actor);
+	if (!Plot)
+	{
+		return;
+	}
+	Plot->MarkRemoved();
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (USlimeFarmSubsystem* Farm = GI->GetSubsystem<USlimeFarmSubsystem>())
+		{
+			Farm->RemovePlotRecord(Plot->PlotId);
+		}
+	}
+}
+
+void ASlimeHomeBuildManager::SpawnFarmPlot(const FSlimeHomeBuildRecord& Record, const FSlimeHomeBuildEntry& Entry)
+{
+	UWorld* World = GetWorld();
+	if (!World || !Catalog)
+	{
+		return;
+	}
+	int32 FootX = FMath::Max(Entry.FootprintX, 1);
+	int32 FootY = FMath::Max(Entry.FootprintY, 1);
+	if ((Record.YawSteps & 1) != 0)
+	{
+		Swap(FootX, FootY);
+	}
+	const float Cell = Catalog->CellSize;
+	const FVector Center((Record.AnchorX + FootX * 0.5f) * Cell, (Record.AnchorY + FootY * 0.5f) * Cell, Record.BaseZ);
+	const float Yaw = Record.YawSteps * 90.f;
+	UStaticMesh* Mesh = Entry.Mesh.LoadSynchronous();
+	const bool bPlanter = Mesh && Mesh->GetName().Contains(TEXT("Planter"));
+	const FSlimeBedPlacement Bed = ASlimeFarmPlot::ComputeBedPlacement(World, this, Mesh, !bPlanter, Center, Yaw);
+	const FVector SpawnAt = Bed.bValid ? Bed.ActorLocation : Center;
+	const FTransform ActorXform(FRotator(0.f, Yaw, 0.f), SpawnAt);
+	ASlimeFarmPlot* Plot = World->SpawnActorDeferred<ASlimeFarmPlot>(
+		ASlimeFarmPlot::StaticClass(), ActorXform, this, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!Plot)
+	{
+		return;
+	}
+	Plot->PlotId = FName(*FString::Printf(TEXT("HomePlot_%d"), Record.Id));
+	Plot->ConfigureSoil(Mesh, !bPlanter);
+	Plot->FinishSpawning(ActorXform);
+	SpawnedActors.Add(Record.Id, Plot);
 }
 
 void ASlimeHomeBuildManager::SpawnBag(const FSlimeHomeBuildRecord& Record, const FTransform& Transform)

@@ -12,6 +12,24 @@
 #include "SlimeElementComponent.h"
 #include "SlimeEnemyCharacter.h"
 #include "SlimeFable.h"
+#include "DayLevel/DayLevelSubsystem.h"
+#include "GameFramework/PlayerStart.h"
+#include "Engine/GameInstance.h"
+#include "EngineUtils.h"
+
+AActor* ASlimePlayGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	const UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>();
+	const FName Tag = Days ? Days->GetArrivalTag(GetWorld()) : NAME_None;
+	APlayerStart* DefaultStart = nullptr;
+	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+	{
+		if (!Tag.IsNone() && It->PlayerStartTag == Tag) return *It;
+		if (It->PlayerStartTag.IsNone() && !DefaultStart) DefaultStart = *It;
+	}
+	// Dedicated arrival starts must not become random default spawns.
+	return DefaultStart ? DefaultStart : Super::ChoosePlayerStart_Implementation(Player);
+}
 
 ASlimePlayGameMode::ASlimePlayGameMode()
 {

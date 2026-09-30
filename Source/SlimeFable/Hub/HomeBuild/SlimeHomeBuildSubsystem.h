@@ -50,10 +50,16 @@ public:
 	void ForgetRecord(int32 RecordId);
 
 	int32 CountFluid() const;
+	int32 CountNpc(FName SpeciesId) const;
+	bool CanPlaceNpc(FName SpeciesId) const;
 
 	void ScreenMessage(const FString& Text) const;
 
 private:
+	void RestoreNpcs();
+	FTimerHandle NpcRestoreTimer;
+	TArray<FSlimeHomeBuildRecord> PendingNpcs;
+	float NpcRestoreStarted = 0.f;
 	void Load();
 	void Save() const;
 	bool IsMuseumWorld(const UWorld& World) const;
@@ -68,6 +74,7 @@ private:
 	TObjectPtr<ASlimeHomeBuildManager> Manager;
 
 	bool bMuseum = false;
+	bool bLoadedFromDisk = false;
 
 	static const TCHAR* SaveSlot;
 };

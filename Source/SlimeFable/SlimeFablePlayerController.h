@@ -25,7 +25,8 @@ enum class ESlimeUIInputReason : uint8
 	HotbarConfirm,
 	CheatConsole,
 	MuseumCalendar,
-	HomeBuild
+	HomeBuild,
+	SeedPicker
 };
 
 struct FSlimeUIInputEntry
@@ -48,6 +49,8 @@ public:
 	void PopUIInput(ESlimeUIInputReason Reason);
 	bool HasUIInput(ESlimeUIInputReason Reason) const;
 	bool HasModalUI() const;
+	/** 背包、建造、暂停、种植和 Tab 轮盘打开时，藏起跟着地块走的提示。 */
+	bool ShouldHideWorldPrompts() const;
 
 	/** Force GameOnly + hide cursor + clear keyboard focus when UI stack is empty. */
 	void RestoreGameplayInput();

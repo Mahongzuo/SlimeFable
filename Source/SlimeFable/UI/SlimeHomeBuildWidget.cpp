@@ -29,6 +29,8 @@
 #include "InputCoreTypes.h"
 #include "Hub/HomeBuild/SlimeBuildModeComponent.h"
 #include "Hub/HomeBuild/SlimeHomeBuildCatalog.h"
+#include "Hub/NPC/SlimeNpcCollectionSubsystem.h"
+#include "Hub/NPC/SlimeNpcCatalog.h"
 #include "Hub/HomeBuild/SlimeHomeBuildSubsystem.h"
 #include "Inventory/SlimeInventorySubsystem.h"
 #include "Inventory/SlimeItemDefinition.h"
@@ -432,7 +434,10 @@ void USlimeHomeBuildWidget::BuildCatalogLayout()
 		{ESlimeHomeBuildCategory::Rock, TEXT("岩石")},
 		{ESlimeHomeBuildCategory::Crystal, TEXT("水晶")},
 		{ESlimeHomeBuildCategory::Sky, TEXT("天空")},
-		{ESlimeHomeBuildCategory::Bag, TEXT("背包")}
+		{ESlimeHomeBuildCategory::Bag, TEXT("背包")},
+		{ESlimeHomeBuildCategory::Farm, TEXT("农田")},
+		{ESlimeHomeBuildCategory::Fence, TEXT("栅栏")},
+		{ESlimeHomeBuildCategory::NPC, TEXT("NPC")}
 	};
 	TabCategories.Reset();
 	for (int32 Index = 0; Index < TabDefs.Num(); ++Index)
@@ -583,7 +588,7 @@ void USlimeHomeBuildWidget::BuildHotbarLayout()
 	{
 		BarSlot->SetAnchors(FAnchors(0.5f, 1.f));
 		BarSlot->SetAlignment(FVector2D(0.5f, 1.f));
-		BarSlot->SetPosition(FVector2D(0.f, -24.f));
+		BarSlot->SetPosition(FVector2D(0.f, -154.f));
 		BarSlot->SetAutoSize(true);
 	}
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -646,7 +651,14 @@ void USlimeHomeBuildWidget::RefreshCatalog()
 	{
 		for (const FSlimeHomeBuildEntry& Entry : Catalog->Entries)
 		{
-			if (Entry.Category != Category)
+			if (!Entry.NpcSpeciesId.IsNone())
+   {
+    auto* Collection = GI ? GI->GetSubsystem<USlimeNpcCollectionSubsystem>() : nullptr;
+    const USlimeNpcCatalog* NpcCatalog = Collection ? Collection->GetCatalog() : nullptr;
+    const FSlimeNpcSpecies* Species = NpcCatalog ? NpcCatalog->Find(Entry.NpcSpeciesId) : nullptr;
+    if (!Collection || !Collection->IsUnlocked(Entry.NpcSpeciesId) || !Species || Species->Layers.IsEmpty()) continue;
+   }
+   if (Entry.Category != Category)
 			{
 				continue;
 			}
@@ -668,6 +680,15 @@ void USlimeHomeBuildWidget::RefreshCatalog()
 			Row.Icon = Entry.Icon;
 			Row.FamilyIcon = Entry.FamilyIcon;
 			Row.Mesh = Entry.Mesh;
+   Row.NpcSpeciesId = Entry.NpcSpeciesId;
+   if (!Row.NpcSpeciesId.IsNone())
+   {
+    auto* Collection = GI->GetSubsystem<USlimeNpcCollectionSubsystem>();
+    const auto* Species = Collection->GetCatalog()->Find(Row.NpcSpeciesId);
+    Row.NpcLimit = Species && !Species->Layers.IsEmpty() ? Species->Limit() : 0;
+    Row.Count = Home->CountNpc(Row.NpcSpeciesId);
+    Row.Name = FText::FromString(FString::Printf(TEXT("%s %d/%d"), *Entry.DisplayName.ToString(), Row.Count, Row.NpcLimit));
+   }
 			Rows.Add(Row);
 		}
 	}
@@ -790,7 +811,7 @@ void USlimeHomeBuildWidget::RefreshCatalog()
 	}
 	else if (DetailName)
 	{
-		DetailName->SetText(FText::FromString(TEXT("没有物品")));
+		DetailName->SetText(FText::FromString(Category == ESlimeHomeBuildCategory::NPC ? TEXT("击败敌人后可在这里放置NPC") : TEXT("没有物品")));
 		if (DetailDesc)
 		{
 			DetailDesc->SetText(FText::GetEmpty());
@@ -798,6 +819,11 @@ void USlimeHomeBuildWidget::RefreshCatalog()
 		if (DetailFoot)
 		{
 			DetailFoot->SetText(FText::GetEmpty());
+		}
+		if (PreviewImage)
+		{
+			PreviewImage->SetBrush(FSlateBrush());
+			PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
 }
@@ -822,7 +848,8 @@ void USlimeHomeBuildWidget::ShowDetail(int32 Index, bool bCommit)
 		return;
 	}
 	const FRow& Row = Rows[Index];
-	if (DetailName)
+ if (BuildButton) BuildButton->SetIsEnabled(Row.NpcSpeciesId.IsNone() || Row.Count < Row.NpcLimit);
+ if (DetailName)
 	{
 		DetailName->SetText(Row.Name);
 	}
@@ -833,6 +860,7 @@ void USlimeHomeBuildWidget::ShowDetail(int32 Index, bool bCommit)
 		{
 			Foot += FString::Printf(TEXT("    剩余 %d"), Row.Count);
 		}
+		if (!Row.NpcSpeciesId.IsNone()) Foot = FString::Printf(TEXT("已放置 %d / %d　闲逛范围10米"), Row.Count, Row.NpcLimit);
 		DetailFoot->SetText(FText::FromString(Foot));
 	}
 	if (DetailDesc)
@@ -856,6 +884,12 @@ void USlimeHomeBuildWidget::ShowDetail(int32 Index, bool bCommit)
 		if (IconTex)
 		{
 			PreviewImage->SetBrush(FMenuUIStyle::MakeTextureBrush(IconTex, FVector2D(220.f, 220.f)));
+			PreviewImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+		else
+		{
+			PreviewImage->SetBrush(FSlateBrush());
+			PreviewImage->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
 }

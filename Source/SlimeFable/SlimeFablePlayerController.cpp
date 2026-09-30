@@ -23,6 +23,7 @@
 #include "Hub/HomeBuild/SlimeBuildModeComponent.h"
 #include "Hub/SlimeMuseumDayGate.h"
 #include "UI/SlimeTouchHUDWidget.h"
+#include "UI/SlimeSeedPickerWidget.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
@@ -32,7 +33,8 @@ namespace
 	{
 		return Reason == ESlimeUIInputReason::QuestLog
 			|| Reason == ESlimeUIInputReason::AltCursor
-			|| Reason == ESlimeUIInputReason::CheatConsole;
+			|| Reason == ESlimeUIInputReason::CheatConsole
+			|| Reason == ESlimeUIInputReason::SeedPicker;
 	}
 
 	bool ShouldPauseReason(ESlimeUIInputReason Reason)
@@ -458,6 +460,28 @@ bool ASlimeFablePlayerController::HasModalUI() const
 	return false;
 }
 
+bool ASlimeFablePlayerController::ShouldHideWorldPrompts() const
+{
+	for (const FSlimeUIInputEntry& Entry : UIInputStack)
+	{
+		if (Entry.Reason != ESlimeUIInputReason::AltCursor)
+		{
+			return true;
+		}
+	}
+	if (const APawn* Controlled = GetPawn())
+	{
+		if (const USlimeAbilityComponent* Ability = Controlled->FindComponentByClass<USlimeAbilityComponent>())
+		{
+			if (Ability->IsWheelOpen())
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 void ASlimeFablePlayerController::RestoreGameplayInput()
 {
 	if (!IsLocalPlayerController())
@@ -538,6 +562,11 @@ void ASlimeFablePlayerController::ApplyTopUIInput()
 
 bool ASlimeFablePlayerController::DismissOverlayUI()
 {
+	if (HasUIInput(ESlimeUIInputReason::SeedPicker))
+	{
+		USlimeSeedPickerWidget::CloseOpen();
+		return true;
+	}
 	if (HasUIInput(ESlimeUIInputReason::HomeBuild))
 	{
 		if (APawn* ControlledPawn = GetPawn())

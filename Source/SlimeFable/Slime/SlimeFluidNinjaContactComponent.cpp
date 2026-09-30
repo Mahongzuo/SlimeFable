@@ -2,12 +2,17 @@
 
 #include "SlimeFluidNinjaContactComponent.h"
 
+#include "Components/AudioComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
 #include "Hub/HomeBuild/SlimeHomeFluidPad.h"
+#include "Kismet/GameplayStatics.h"
+#include "Settings/SlimeAudioPlay.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 
 namespace
 {
@@ -82,6 +87,7 @@ void USlimeFluidNinjaContactComponent::EndPlay(const EEndPlayReason::Type EndPla
 	}
 	PassthroughIgnoredComponents.Reset();
 
+	StopPoolLoop();
 	DestroyContacts();
 	Super::EndPlay(EndPlayReason);
 }
@@ -104,6 +110,7 @@ void USlimeFluidNinjaContactComponent::TickComponent(float DeltaTime, ELevelTick
 		{
 			DestroyContacts();
 		}
+		UpdatePoolAudio();
 		return;
 	}
 
@@ -113,6 +120,7 @@ void USlimeFluidNinjaContactComponent::TickComponent(float DeltaTime, ELevelTick
 	}
 
 	SyncContactTransforms();
+	UpdatePoolAudio();
 }
 
 bool USlimeFluidNinjaContactComponent::IsFluidNinjaBlockingSimGeom(const UPrimitiveComponent* Component)
@@ -144,6 +152,155 @@ bool USlimeFluidNinjaContactComponent::IsFluidNinjaBlockingSimGeom(const UPrimit
 	return CompName.Contains(TEXT("TraceMesh"), ESearchCase::IgnoreCase)
 		|| CompName.Contains(TEXT("InteractionVolume"), ESearchCase::IgnoreCase)
 		|| CompName.Contains(TEXT("InteractionVol"), ESearchCase::IgnoreCase);
+}
+
+namespace
+{
+	bool IsPoolActor(const AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+		const FString ActorName = Actor->GetName();
+		const FString ActorClass = Actor->GetClass() ? Actor->GetClass()->GetName() : FString();
+		return ActorName.Contains(TEXT("Pool"), ESearchCase::IgnoreCase)
+			|| ActorClass.Contains(TEXT("Pool"), ESearchCase::IgnoreCase)
+			|| InheritsToken(Actor->GetClass(), TEXT("Pool"));
+	}
+
+	/** Upright capsule against the water cube. The cube is not expanded. */
+	bool CapsuleOverlapsBox(const UCapsuleComponent* Capsule, const FBox& Box)
+	{
+		if (!Capsule || !Box.IsValid)
+		{
+			return false;
+		}
+		const FVector Center = Capsule->GetComponentLocation();
+		const float Radius = Capsule->GetScaledCapsuleRadius();
+		const float InnerHalf = FMath::Max(Capsule->GetScaledCapsuleHalfHeight() - Radius, 0.f);
+		const float UseZ = FMath::Clamp(FMath::Clamp(Center.Z, Box.Min.Z, Box.Max.Z), Center.Z - InnerHalf, Center.Z + InnerHalf);
+		const FVector OnCapsule(Center.X, Center.Y, UseZ);
+		const FVector OnBox(
+			FMath::Clamp(OnCapsule.X, Box.Min.X, Box.Max.X),
+			FMath::Clamp(OnCapsule.Y, Box.Min.Y, Box.Max.Y),
+			FMath::Clamp(OnCapsule.Z, Box.Min.Z, Box.Max.Z));
+		return FVector::DistSquared(OnCapsule, OnBox) <= FMath::Square(Radius);
+	}
+}
+
+bool USlimeFluidNinjaContactComponent::IsOverlappingPool() const
+{
+	UWorld* World = GetWorld();
+	const UCapsuleComponent* Capsule = OwnerCharacter ? OwnerCharacter->GetCapsuleComponent() : nullptr;
+	if (!World || !Capsule)
+	{
+		return false;
+	}
+
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		const AActor* Actor = *It;
+		if (!IsPoolActor(Actor))
+		{
+			continue;
+		}
+		TArray<UPrimitiveComponent*> Prims;
+		Actor->GetComponents<UPrimitiveComponent>(Prims);
+		for (const UPrimitiveComponent* Prim : Prims)
+		{
+			if (!Prim || !Prim->GetName().Contains(TEXT("TraceMesh"), ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+			const FBox Water = Prim->CalcBounds(Prim->GetComponentTransform()).GetBox();
+			if (CapsuleOverlapsBox(Capsule, Water))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void USlimeFluidNinjaContactComponent::ResolvePoolSounds()
+{
+	if (bPoolSoundsResolved)
+	{
+		return;
+	}
+	bPoolSoundsResolved = true;
+	PoolSplashSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/SFX/Movement/sfx_water_in.sfx_water_in"));
+	PoolLoopSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/SFX/Movement/sfx_water_loop.sfx_water_loop"));
+}
+
+void USlimeFluidNinjaContactComponent::StartPoolLoop()
+{
+	if (PoolLoopAudio && PoolLoopAudio->IsPlaying())
+	{
+		return;
+	}
+	ResolvePoolSounds();
+	if (!PoolLoopSound || !OwnerCharacter)
+	{
+		return;
+	}
+	if (USoundWave* Wave = Cast<USoundWave>(PoolLoopSound))
+	{
+		Wave->bLooping = true;
+	}
+	PoolLoopAudio = UGameplayStatics::SpawnSoundAttached(
+		PoolLoopSound,
+		OwnerCharacter->GetRootComponent(),
+		NAME_None,
+		FVector::ZeroVector,
+		EAttachLocation::KeepRelativeOffset,
+		false,
+		SlimeAudioPlay::SfxMul(this),
+		1.f,
+		0.f,
+		nullptr,
+		nullptr,
+		true);
+}
+
+void USlimeFluidNinjaContactComponent::StopPoolLoop()
+{
+	if (!PoolLoopAudio)
+	{
+		return;
+	}
+	if (PoolLoopAudio->IsPlaying())
+	{
+		PoolLoopAudio->FadeOut(0.12f, 0.f);
+	}
+	PoolLoopAudio = nullptr;
+}
+
+void USlimeFluidNinjaContactComponent::UpdatePoolAudio()
+{
+	if (!OwnerCharacter || !OwnerCharacter->IsLocallyControlled())
+	{
+		StopPoolLoop();
+		bWasInPool = false;
+		return;
+	}
+
+	const bool bInPool = IsOverlappingPool();
+	if (bInPool && !bWasInPool)
+	{
+		ResolvePoolSounds();
+		SlimeAudioPlay::PlaySfxAt(this, PoolSplashSound, OwnerCharacter->GetActorLocation());
+	}
+	if (bInPool)
+	{
+		StartPoolLoop();
+	}
+	else
+	{
+		StopPoolLoop();
+	}
+	bWasInPool = bInPool;
 }
 
 void USlimeFluidNinjaContactComponent::ApplyFluidNinjaPawnPassthrough()

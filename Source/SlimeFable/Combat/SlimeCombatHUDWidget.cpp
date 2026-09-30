@@ -47,9 +47,11 @@
 #include "Types/SlateEnums.h"
 #include "UI/MenuUIStyle.h"
 #include "Quest/QuestSubsystem.h"
+#include "Settings/SlimeGraphicsSettings.h"
 #include "Settings/SlimeInputSettings.h"
 #include "Settings/SlimeInputTypes.h"
 #include "Slime/SlimeElementProgressSubsystem.h"
+#include "SlimeFablePlayerController.h"
 #include "SlimeCombatTypes.h"
 #include "Engine/GameInstance.h"
 
@@ -165,7 +167,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 4 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 6 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 4 && PlayerHealthBar && DeathText)
+	if (SlotKeys.Num() == 4 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 7 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 4 && PlayerHealthBar && DeathText)
 	{
 		EnsureClickableSlots();
 		ApplyCombatHudSizes();
@@ -445,7 +447,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		HotbarSlot->SetAutoSize(true);
 	}
 	HotbarLabels.Reset();
-	for (int32 Index = 0; Index < 6; ++Index)
+	for (int32 Index = 0; Index < 7; ++Index)
 	{
 		USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("HotBox%d"), Index));
 		Box->SetWidthOverride(84.f);
@@ -829,6 +831,25 @@ void USlimeCombatHUDWidget::Refresh()
 		{
 			continue;
 		}
+		if (Index >= 6)
+		{
+			FString SkinName = TEXT("光谱");
+			if (UGameInstance* SkinGI = GetGameInstance())
+			{
+				if (const USlimeGraphicsSettings* Graphics = SkinGI->GetSubsystem<USlimeGraphicsSettings>())
+				{
+					switch (Graphics->GetBodySkin())
+					{
+					case ESlimeBodySkin::Classic: SkinName = TEXT("果冻"); break;
+					case ESlimeBodySkin::Volumetric: SkinName = TEXT("体积"); break;
+					default: SkinName = TEXT("光谱"); break;
+					}
+				}
+			}
+			Label->SetText(FText::FromString(FString::Printf(TEXT("7\n%s"), *SkinName)));
+			FMenuUIStyle::ApplyMixedMenuFont(Label, 20.f, FMenuUIStyle::TodayEdgeColor());
+			continue;
+		}
 		FString KeyName = FString::FromInt(Index + 1);
 		if (InputSettings)
 		{
@@ -855,6 +876,9 @@ void USlimeCombatHUDWidget::Refresh()
 		bool bShow = false;
 		FText Prompt = FText::GetEmpty();
 		FVector2D ScreenPos = FVector2D::ZeroVector;
+		const ASlimeFablePlayerController* SlimePC = Cast<ASlimeFablePlayerController>(GetOwningPlayer());
+		const bool bHidePrompts = SlimePC && SlimePC->ShouldHideWorldPrompts();
+		if (!bHidePrompts)
 		if (APlayerController* PC = GetOwningPlayer())
 		{
 			if (APawn* Pawn = PC->GetPawn())
@@ -1387,6 +1411,17 @@ void USlimeCombatHUDWidget::SetVirtualSkill(int32 Index, bool bDown)
 
 void USlimeCombatHUDWidget::ActivateElementSlot(int32 Index)
 {
+	if (Index >= 6)
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (USlimeGraphicsSettings* Graphics = GI->GetSubsystem<USlimeGraphicsSettings>())
+			{
+				Graphics->CycleBodySkin();
+			}
+		}
+		return;
+	}
 	APawn* Pawn = GetOwningPlayerPawn();
 	if (USlimeAbilityComponent* Ability = Pawn ? Pawn->FindComponentByClass<USlimeAbilityComponent>() : nullptr)
 	{

@@ -80,6 +80,9 @@ public:
 	float GetOutgoingDamageMul() const { return OutgoingDamageMul; }
 
 	UFUNCTION(BlueprintPure, Category = "Combat")
+	float GetDamageBuffRemaining() const { return DamageBuffRemaining; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
 	FSlimeElementKitData GetCurrentKit() const;
 
 	UFUNCTION(BlueprintPure, Category = "Combat")

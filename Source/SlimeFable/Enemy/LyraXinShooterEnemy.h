@@ -127,6 +127,9 @@ public:
 
 	/** Swap Form1 / Form2 look without changing HealthPhase (morph Tab hold). */
 	void CycleVisualSkin();
+	/** Restore saved exploration phase without granting a new encounter or changing AI behavior. */
+	void RestoreExplorationPhase(int32 InPhase);
+	int32 GetHealthPhase() const { return HealthPhase; }
 
 	virtual void HandleDeath() override;
 

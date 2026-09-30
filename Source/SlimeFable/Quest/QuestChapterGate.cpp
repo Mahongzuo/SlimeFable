@@ -14,6 +14,13 @@ AQuestChapterGate::AQuestChapterGate()
 	}
 }
 
+void AQuestChapterGate::CancelPendingEnter()
+{
+	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(EnterDelayHandle);
+	bEnterPending = false;
+	PendingTravelDayId = NAME_None;
+}
+
 void AQuestChapterGate::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (UWorld* World = GetWorld())

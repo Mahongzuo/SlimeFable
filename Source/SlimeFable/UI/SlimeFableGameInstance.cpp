@@ -2,6 +2,7 @@
 
 #include "UI/SlimeFableGameInstance.h"
 #include "UI/SlimeLoadingGateWidget.h"
+#include "Quest/QuestTypes.h"
 #include "Blueprint/UserWidget.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -60,6 +61,60 @@ void USlimeFableGameInstance::EndLoadingScreen(UWorld* LoadedWorld)
 	ShowLoadingGate(LoadedWorld);
 }
 
+static bool ParseYearStoryMap(const UWorld* World, FString& OutDay, FString& OutChapter)
+{
+	if (!World)
+	{
+		return false;
+	}
+	TArray<FString> Names;
+	Names.Add(UWorld::RemovePIEPrefix(World->GetMapName()));
+	if (const UPackage* Package = World->GetOutermost())
+	{
+		Names.Add(FPackageName::GetShortName(UWorld::RemovePIEPrefix(Package->GetName())));
+	}
+	for (const FString& Name : Names)
+	{
+		if (!Name.StartsWith(TEXT("SL_")) || Name.Len() <= 8)
+		{
+			continue;
+		}
+		const FString Day = Name.Mid(3, 4);
+		const FString Chapter = Name.Mid(8);
+		if (Day.Len() == 4 && Day.IsNumeric() && Chapter.Len() == 4 && Chapter.IsNumeric())
+		{
+			OutDay = Day;
+			OutChapter = Chapter;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void ResolveYearStory(const UWorld* World, FText& OutTitle, FText& OutBody)
+{
+	OutTitle = FText::GetEmpty();
+	OutBody = FText::GetEmpty();
+	FString Day;
+	FString Chapter;
+	if (!ParseYearStoryMap(World, Day, Chapter))
+	{
+		return;
+	}
+	const FString Month = Day.Left(2);
+	const FString ObjectPath = FString::Printf(
+		TEXT("/Game/_Slime/Days/%s/%s/Quests/DA_Quest_%s.DA_Quest_%s"),
+		*Month, *Day, *Day, *Day);
+	const UDayQuestBook* Book = LoadObject<UDayQuestBook>(nullptr, *ObjectPath);
+	const FQuestChapter* Story = Book ? Book->FindChapter(FName(*Chapter)) : nullptr;
+	if (!Story || Story->Summary.IsEmpty())
+	{
+		return;
+	}
+	OutTitle = FText::FromString(FString::Printf(TEXT("穿越到%s年"), *Chapter));
+	OutBody = Story->Summary;
+}
+
 void USlimeFableGameInstance::ShowLoadingGate(UWorld* LoadedWorld)
 {
 	// -nullrhi (headless verification): Slate never ticks the widget, so the gate would pause the world forever.
@@ -89,6 +144,10 @@ void USlimeFableGameInstance::ShowLoadingGate(UWorld* LoadedWorld)
 		return;
 	}
 
+	FText StoryTitle;
+	FText StoryBody;
+	ResolveYearStory(LoadedWorld, StoryTitle, StoryBody);
+	ActiveLoadingGate->SetStory(StoryTitle, StoryBody);
 	ActiveLoadingGate->OnGateFinished.AddDynamic(this, &USlimeFableGameInstance::HandleLoadingGateFinished);
 	ActiveLoadingGate->AddToViewport(100);
 

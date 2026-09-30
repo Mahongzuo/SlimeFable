@@ -74,7 +74,7 @@ void ASlimeFarmField::RebuildPreview()
 			const FTransform InstanceTransform(
 				FRotator::ZeroRotator,
 				PlotLocalOffset(Row, Col) + FVector(0.f, 0.f, 6.f),
-				FVector(2.2f, 2.2f, 0.12f));
+				FVector(6.96f, 0.96f, 0.43f));
 			PreviewSoil->AddInstance(InstanceTransform);
 		}
 	}
@@ -85,8 +85,8 @@ FVector ASlimeFarmField::PlotLocalOffset(int32 Row, int32 Col) const
 	const int32 RowCount = FMath::Clamp(Rows, 1, 8);
 	const int32 ColCount = FMath::Clamp(Cols, 1, 12);
 	const float SpanX = (RowCount - 1) * Spacing;
-	const float SpanY = (ColCount - 1) * Spacing;
-	return FVector(Row * Spacing - SpanX * 0.5f, Col * Spacing - SpanY * 0.5f, 0.f);
+	const float SpanY = (ColCount - 1) * SpacingY;
+	return FVector(Row * Spacing - SpanX * 0.5f, Col * SpacingY - SpanY * 0.5f, 0.f);
 }
 
 FVector ASlimeFarmField::ResolveWorldLocation(const FVector& LocalOffset) const

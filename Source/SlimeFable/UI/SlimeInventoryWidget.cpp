@@ -800,22 +800,9 @@ void USlimeInventoryWidget::OnTabSeed() { SelectCategory(ESlimeItemCategory::See
 
 void USlimeInventoryWidget::EnsureSeedTab()
 {
-	if (TabSeed || !TabSouvenir || !WidgetTree)
+	if (TabSeed)
 	{
-		return;
-	}
-	UHorizontalBox* Tabs = Cast<UHorizontalBox>(TabSouvenir->GetParent());
-	if (!Tabs)
-	{
-		return;
-	}
-	TabSeed = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("TabSeed"));
-	UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TabSeed_Lbl"));
-	Text->SetText(FText::FromString(TEXT("种子")));
-	TabSeed->AddChild(Text);
-	if (UHorizontalBoxSlot* TabSlot = Tabs->AddChildToHorizontalBox(TabSeed))
-	{
-		TabSlot->SetPadding(FMargin(6.f, 0.f));
+		TabSeed->SetVisibility(ESlateVisibility::Collapsed);
 	}
 }
 

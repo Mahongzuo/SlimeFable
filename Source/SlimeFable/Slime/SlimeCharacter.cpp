@@ -34,6 +34,7 @@
 #include "SlimeStatusComponent.h"
 #include "SlimeTrailComponent.h"
 #include "Hub/HomeBuild/SlimeBuildModeComponent.h"
+#include "UI/SlimeSeedPickerWidget.h"
 #include "Inventory/SlimePlacementComponent.h"
 #include "Inventory/SlimeInteractComponent.h"
 #include "Settings/SlimeCheatComponent.h"
@@ -437,7 +438,8 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 	const bool bWheelOpen = SlimeAbilities && SlimeAbilities->IsWheelOpen();
 	const bool bChargingLaunch = SlimeAbilities && SlimeAbilities->IsChargingLaunch();
 	const bool bBuildPlacement = SlimeBuildMode && SlimeBuildMode->IsPlacementActive();
-	if (!bWheelOpen && !bChargingLaunch && !bBuildPlacement)
+	const bool bSeedPicker = USlimeSeedPickerWidget::IsOpen();
+	if (!bWheelOpen && !bChargingLaunch && !bBuildPlacement && !bSeedPicker)
 	{
 		if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 		{

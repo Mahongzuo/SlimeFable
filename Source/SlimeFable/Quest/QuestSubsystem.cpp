@@ -74,6 +74,15 @@ FName UQuestSubsystem::InferDayIdFromWorld(UWorld* World)
 		return NAME_None;
 	}
 
+	if (UGameInstance* GI = World->GetGameInstance())
+	{
+		if (UDayLevelSubsystem* Days = GI->GetSubsystem<UDayLevelSubsystem>())
+		{
+			if (Days->IsMuseumHubWorld(World)) return Days->GetSelectedDayId();
+			if (Days->GetDestination() == EDayDestination::Story) return Days->GetSelectedDayId();
+		}
+	}
+
 	TArray<FString> Candidates;
 	Candidates.Add(World->GetMapName());
 	if (const UPackage* Package = World->GetOutermost())
@@ -119,6 +128,12 @@ FName UQuestSubsystem::InferChapterIdFromWorld(UWorld* World)
 	if (!World)
 	{
 		return NAME_None;
+	}
+	if (UGameInstance* GI = World->GetGameInstance())
+	{
+		if (const UDayLevelSubsystem* Days = GI->GetSubsystem<UDayLevelSubsystem>())
+			if (!Days->IsMuseumHubWorld(World) && Days->GetDestination() == EDayDestination::Story)
+				return Days->GetStoryChapterId();
 	}
 
 	FString Name = World->GetMapName();
@@ -182,9 +197,9 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 	{
 		return;
 	}
-	if (ActiveWorld.Get() == World && Book)
+	if (ActiveWorld.Get() == World && ActiveDayId == InferDayIdFromWorld(World))
 	{
-		if (!HUDWidget)
+		if (Book && !HUDWidget)
 		{
 			TryCreateHUD(World, 10);
 		}
@@ -260,7 +275,13 @@ void UQuestSubsystem::BeginForWorld(UWorld* World)
 	}
 
 	TryCreateHUD(World, 10);
-	ApplyWeekDifficultyToEnemies(World);
+	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
+	{
+		if (!Days->IsMuseumHubWorld(World))
+		{
+			ApplyWeekDifficultyToEnemies(World);
+		}
+	}
 	if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(World, 0))
 	{
 		if (USlimeHealthComponent* Health = Pawn->FindComponentByClass<USlimeHealthComponent>())
@@ -467,6 +488,10 @@ FText UQuestSubsystem::GetTrackedChapterLabel() const
 {
 	if (const FQuestChapter* Chapter = GetTrackedChapter())
 	{
+		if (!Chapter->Title.IsEmpty())
+		{
+			return Chapter->Title;
+		}
 		return FText::FromName(Chapter->ChapterId);
 	}
 	return FText::GetEmpty();
@@ -544,6 +569,7 @@ void UQuestSubsystem::ShowCenterBanner(const FText& Kicker, const FText& TaskNam
 	if (UWorld* World = ActiveWorld.Get())
 	{
 		ToastUntilSeconds = World->GetTimeSeconds() + DurationSeconds;
+		if (!HUDWidget) TryCreateHUD(World, 10);
 	}
 }
 
@@ -717,6 +743,7 @@ void UQuestSubsystem::SetTracked(FName ChapterId, FName QuestId, FName BranchId,
 
 bool UQuestSubsystem::CanContribute(FName ChapterId, FName QuestId, FName BranchId) const
 {
+	if (GetGameInstance()->GetSubsystem<UDayLevelSubsystem>()->IsMuseumHubWorld(GetWorld())) return false;
 	if (!Book)
 	{
 		return false;
@@ -1195,9 +1222,20 @@ bool UQuestSubsystem::HasAnyChapterReachedWeek2() const
 
 bool UQuestSubsystem::IsChapterUnlocked(FName ChapterId) const
 {
-	if (!Book || ChapterId.IsNone())
+	if (ChapterId.IsNone())
 	{
 		return false;
+	}
+	if (!Book)
+	{
+		// A mapped sandbox without a task book has no story prerequisite to enforce.
+		TSoftObjectPtr<UWorld> Level;
+		const UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>();
+		return Days && Days->GetSubLevelForDayId(GetHostDayId(), ChapterId, Level) && Days->IsValidDestination(Level);
+	}
+	if (Book->bStartAllChaptersUnlocked && Book->FindChapter(ChapterId))
+	{
+		return true;
 	}
 	if (IsChapterComplete(ChapterId) || HasAnyChapterReachedWeek2())
 	{
@@ -1367,7 +1405,7 @@ bool UQuestSubsystem::TravelToHub(FName DayId)
 	PersistProgress();
 	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
 	{
-		return Days->TravelToDayId(World, DayId);
+		return Days->TravelToMuseumHub(World);
 	}
 	return false;
 }
@@ -1423,27 +1461,21 @@ bool UQuestSubsystem::ResetDayProgressAndReload()
 bool UQuestSubsystem::TravelToChapter(FName DayId, FName ChapterId, int32 Week)
 {
 	UWorld* World = ActiveWorld.Get();
-	if (!World || ChapterId.IsNone() || DayId.IsNone())
+	UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>();
+	TSoftObjectPtr<UWorld> Level;
+	if (!World || !Days || Days->IsTravelPending() || DayId != GetHostDayId()
+		|| !IsChapterUnlocked(ChapterId) || !CanSelectWeek(ChapterId, Week)) return false;
+	if (!Days->GetSubLevelForDayId(DayId, ChapterId, Level) || !Days->IsValidDestination(Level))
 	{
+		Days->ReportTravelError(FString::Printf(TEXT("章节 %s 缺少目的地图"), *ChapterId.ToString()));
 		return false;
 	}
-
 	CloseWeekSelect();
-	WeekIndex = FMath::Clamp(Week, 1, 3);
+	WeekIndex = Week;
 	ResetChapterProgress(ChapterId);
 	ActivateChapter(ChapterId);
 	PersistProgress();
-
-	if (UDayLevelSubsystem* Days = GetGameInstance()->GetSubsystem<UDayLevelSubsystem>())
-	{
-		TSoftObjectPtr<UWorld> SubLevel;
-		if (Days->GetSubLevelForDayId(DayId, ChapterId, SubLevel) && !SubLevel.IsNull())
-		{
-			return Days->TravelToSubLevel(World, DayId, ChapterId);
-		}
-		return Days->TravelToDayId(World, DayId);
-	}
-	return false;
+	return Days->TravelToSubLevel(World, DayId, ChapterId);
 }
 
 void UQuestSubsystem::OpenWeekSelect(FName DayId, FName ChapterId)
@@ -1723,4 +1755,19 @@ void UQuestSubsystem::RestoreProgress()
 			}
 		}
 	}
+}
+
+void UQuestSubsystem::SaveBeforeTravel()
+{
+	if (UWorld* World = ActiveWorld.Get()) World->GetTimerManager().ClearTimer(PendingTravelHandle);
+	PendingTravelChapterId = NAME_None;
+	PersistProgress();
+	CloseWeekSelect();
+	CloseQuestLog();
+}
+
+void UQuestSubsystem::RefreshMuseumDate(UWorld* World)
+{
+	ActiveWorld.Reset();
+	BeginForWorld(World);
 }

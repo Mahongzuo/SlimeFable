@@ -389,7 +389,7 @@ void UMainMenuWidget::OnPlayTodayClicked()
 {
 	if (UDayLevelSubsystem* DayLevels = GetDayLevelSubsystem())
 	{
-		if (!DayLevels->TravelToMuseumHub(this) && StatusText)
+		if (!DayLevels->TravelToToday(this) && StatusText)
 		{
 			StatusText->SetVisibility(ESlateVisibility::Visible);
 			StatusText->SetText(FText::FromString(TEXT("无法进入时光博物馆")));

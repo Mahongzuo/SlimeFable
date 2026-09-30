@@ -101,6 +101,7 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::BodySkin: return EKeys::Seven;
 	case ESlimeInputAction::BuildCatalog: return EKeys::F1;
 	case ESlimeInputAction::BuildClearMode: return EKeys::X;
+	case ESlimeInputAction::Stats: return EKeys::K;
 	default: return EKeys::Invalid;
 	}
 }
@@ -167,6 +168,7 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::BodySkin: return FText::FromString(TEXT("史莱姆皮肤"));
 	case ESlimeInputAction::BuildCatalog: return FText::FromString(TEXT("建造目录"));
 	case ESlimeInputAction::BuildClearMode: return FText::FromString(TEXT("建造清除"));
+	case ESlimeInputAction::Stats: return FText::FromString(TEXT("属性"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -327,6 +329,7 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 		ESlimeInputAction::CheatConsole,
 		ESlimeInputAction::Sprint,
 		ESlimeInputAction::BodySkin, // v7
+		ESlimeInputAction::Stats,
 		ESlimeInputAction::BuildCatalog, // v8
 		ESlimeInputAction::BuildClearMode
 	};

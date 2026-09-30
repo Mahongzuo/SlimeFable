@@ -94,6 +94,9 @@ protected:
 	TObjectPtr<UTextBlock> DetailTitle;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> DetailSummary;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DetailProgress;
 
 	UPROPERTY(Transient)

@@ -22,7 +22,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	void Configure(TSubclassOf<AActor> InFluidClass, int32 InHomePieceId);
+	void Configure(TSubclassOf<AActor> InFluidClass, int32 InHomePieceId, float InPlanScale = 1.f, float InDepthCm = 0.f, bool bInSwapPlanAxes = false);
 	int32 GetHomePieceId() const { return HomePieceId; }
 	void SetHomePieceId(int32 InId) { HomePieceId = InId; }
 
@@ -62,5 +62,8 @@ private:
 	TObjectPtr<AActor> FluidActor;
 
 	int32 HomePieceId = INDEX_NONE;
+	float PlanScale = 1.f;
+	float RequestedDepthCm = 0.f;
+	bool bSwapPlanAxes = false;
 	bool bHighlighted = false;
 };

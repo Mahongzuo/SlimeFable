@@ -237,6 +237,28 @@ void USlimeInventorySubsystem::RestoreInventory()
 	{
 		Hotbar = Save->Hotbar;
 	}
+	const int32 RemovedSeeds = Entries.RemoveAll([this](const FSlimeInventoryEntry& Entry)
+	{
+		if (Entry.ItemId.ToString().StartsWith(TEXT("Seed_")))
+		{
+			return true;
+		}
+		const USlimeItemDefinition* Def = FindDefinition(Entry.ItemId);
+		return Def && Def->Category == ESlimeItemCategory::Seed;
+	});
+	bool bHotbarChanged = false;
+	for (FName& Slot : Hotbar)
+	{
+		if (Slot.ToString().StartsWith(TEXT("Seed_")))
+		{
+			Slot = NAME_None;
+			bHotbarChanged = true;
+		}
+	}
+	if (RemovedSeeds > 0 || bHotbarChanged)
+	{
+		PersistInventory();
+	}
 }
 
 int32 USlimeInventorySubsystem::AddItem(FName ItemId, int32 Count)

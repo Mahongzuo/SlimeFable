@@ -277,6 +277,13 @@ void UQuestLogWidget::BuildLayoutIfNeeded()
 	DetailTitle->SetAutoWrapText(true);
 	DetailTitle->SetWrapTextAt(248.f);
 	DetailCol->AddChildToVerticalBox(DetailTitle);
+	DetailSummary = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailSummary"));
+	DetailSummary->SetAutoWrapText(true);
+	DetailSummary->SetWrapTextAt(248.f);
+	if (UVerticalBoxSlot* SummarySlot = DetailCol->AddChildToVerticalBox(DetailSummary))
+	{
+		SummarySlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+	}
 	DetailProgress = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DetailProgress"));
 	DetailProgress->SetAutoWrapText(true);
 	DetailProgress->SetWrapTextAt(248.f);
@@ -334,6 +341,12 @@ void UQuestLogWidget::Refresh()
 	{
 		DetailTitle->SetAutoWrapText(true);
 		DetailTitle->SetWrapTextAt(248.f);
+	}
+	if (DetailSummary)
+	{
+		DetailSummary->SetAutoWrapText(true);
+		DetailSummary->SetWrapTextAt(248.f);
+		FMenuUIStyle::ApplyBrushCJKFont(DetailSummary, 15.f, FMenuUIStyle::WarmMutedTextColor());
 	}
 	if (DetailProgress)
 	{
@@ -507,6 +520,11 @@ void UQuestLogWidget::RefreshDetail()
 	{
 		DetailTitle->SetText(FText::FromString(TEXT("选择一条任务")));
 		FMenuUIStyle::ApplyBrushCJKFont(DetailTitle, 18.f, FMenuUIStyle::WarmMutedTextColor());
+		if (DetailSummary)
+		{
+			DetailSummary->SetText(FText::GetEmpty());
+			DetailSummary->SetVisibility(ESlateVisibility::Collapsed);
+		}
 		DetailProgress->SetText(FText::GetEmpty());
 		if (TrackButton)
 		{
@@ -517,6 +535,17 @@ void UQuestLogWidget::RefreshDetail()
 
 	DetailTitle->SetText(Main->Title);
 	FMenuUIStyle::ApplyMixedMenuFont(DetailTitle, 20.f, FMenuUIStyle::WarmTitleColor());
+	if (DetailSummary)
+	{
+		const FQuestChapter* Chapter = Book->FindChapter(SelectedChapterId);
+		const bool bHasSummary = Chapter && !Chapter->Summary.IsEmpty();
+		DetailSummary->SetText(bHasSummary ? Chapter->Summary : FText::GetEmpty());
+		DetailSummary->SetVisibility(bHasSummary ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		if (bHasSummary)
+		{
+			FMenuUIStyle::ApplyBrushCJKFont(DetailSummary, 15.f, FMenuUIStyle::WarmMutedTextColor());
+		}
+	}
 
 	int32 Count = 0;
 	int32 Required = 1;

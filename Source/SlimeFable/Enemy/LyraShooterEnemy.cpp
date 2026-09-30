@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "LyraShooterEnemy.h"
+#include "Exploration/SlimeEncounterMember.h"
+#include "AbilitySystem/Attributes/LyraCombatSet.h"
 
 #include "AbilitySystem/Abilities/LyraGameplayAbility.h"
 #include "AbilitySystem/Attributes/LyraHealthSet.h"
@@ -476,6 +478,10 @@ void ALyraShooterEnemy::HandleLyraHealthChanged(ULyraHealthComponent* LyraHealth
 
 void ALyraShooterEnemy::HandleSlimeHealthChanged(float CurrentHP, float MaxHP)
 {
+	if (!bSyncingLyraHealth && FindComponentByClass<USlimeEncounterMember>())
+	{
+		RefreshExplorationStats(1.f);
+	}
 	if (IsPlayerMorphBody())
 	{
 		bLyraHealthSyncPending = true;
@@ -1763,7 +1769,29 @@ void ALyraShooterEnemy::ApplyWeaponDamageOverrides()
 {
 	if (ULyraRangedWeaponInstance* Ranged = Cast<ULyraRangedWeaponInstance>(EquippedWeapon))
 	{
-		Ranged->PlainHitDamage = IsPlayerControlled() ? PlayerGunDamagePerHit : AIGunDamagePerHit;
+		Ranged->PlainHitDamage = IsPlayerControlled() ? PlayerGunDamagePerHit
+			: AIGunDamagePerHit * USlimeEncounterMember::DamageMultiplier(this);
+	}
+}
+
+void ALyraShooterEnemy::RefreshExplorationStats(float DamageScale)
+{
+	ApplyWeaponDamageOverrides();
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		// The existing mirror converts Lyra health deltas proportionally. Match both maxima so
+		// increasing slime health also increases survivability against GAS bullets.
+		TGuardValue<bool> Guard(bSyncingLyraHealth, true);
+		if (Health && ASC->HasAttributeSetForAttribute(ULyraHealthSet::GetMaxHealthAttribute()))
+		{
+			ASC->SetNumericAttributeBase(ULyraHealthSet::GetMaxHealthAttribute(), Health->MaxHP);
+			ASC->SetNumericAttributeBase(ULyraHealthSet::GetHealthAttribute(), FMath::Max(1.f, Health->CurrentHP));
+		}
+		if (ASC->HasAttributeSetForAttribute(ULyraCombatSet::GetBaseDamageAttribute()))
+		{
+			const float Base = ASC->GetNumericAttributeBase(ULyraCombatSet::GetBaseDamageAttribute());
+			ASC->SetNumericAttributeBase(ULyraCombatSet::GetBaseDamageAttribute(), Base * DamageScale);
+		}
 	}
 }
 
