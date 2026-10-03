@@ -4,22 +4,29 @@
 
 #include "Hub/HomeBuild/SlimeHomeBuildTypes.h"
 
+#include "Camera/PlayerCameraManager.h"
 #include "Components/BoxComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/PostProcessVolume.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "Engine/World.h"
 #include "Engine/EngineTypes.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "SlimeFable.h"
 #include "TimerManager.h"
 #include "UnrealClient.h"
@@ -539,6 +546,392 @@ void ASlimeHomeFluidPad::FitAimQuery()
 	AimQuery->SetRelativeLocation(FVector(LocalTop.X, LocalTop.Y, FMath::Max(LocalTop.Z, 0.f)));
 }
 
+namespace
+{
+	bool CopyUnderwaterTemplate(FPostProcessSettings& OutSettings, float& OutWeight, float& OutPriority, float& OutRadius, bool& bOutEnabled)
+	{
+		static bool bTried = false;
+		static bool bOk = false;
+		static FPostProcessSettings Settings;
+		static float Weight = 1.f;
+		static float Priority = 0.f;
+		static float Radius = 0.f;
+		static bool bEnabled = true;
+		if (!bTried)
+		{
+			bTried = true;
+			UPackage* Package = LoadPackage(nullptr, TEXT("/Game/FluidNinjaLive/UseCases/Levels/Usecase_016_Caustics_LIVE17"), LOAD_None);
+			APostProcessVolume* Found = nullptr;
+			if (Package)
+			{
+				ForEachObjectWithPackage(Package, [&Found](UObject* Object)
+				{
+					if (APostProcessVolume* Volume = Cast<APostProcessVolume>(Object))
+					{
+						if (Volume->GetName().Contains(TEXT("UnderWater")))
+						{
+							Found = Volume;
+						}
+					}
+					return true;
+				});
+			}
+			if (!Found)
+			{
+				UE_LOG(LogSlimeFable, Warning, TEXT("[HomeFluid] PostProcess_UnderWater was not found in Usecase_016_Caustics_LIVE17"));
+			}
+			else
+			{
+				Settings = Found->Settings;
+				Weight = Found->BlendWeight;
+				Priority = Found->Priority;
+				Radius = Found->BlendRadius;
+				bEnabled = Found->bEnabled;
+				bOk = true;
+				UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] copied underwater post from %s (%d blends)"),
+					*Found->GetName(), Settings.WeightedBlendables.Array.Num());
+			}
+		}
+		if (!bOk)
+		{
+			return false;
+		}
+		OutSettings = Settings;
+		OutWeight = Weight;
+		OutPriority = Priority;
+		OutRadius = Radius;
+		bOutEnabled = bEnabled;
+		return true;
+	}
+}
+
+void ASlimeHomeFluidPad::AddUnderwaterPost()
+{
+	if (UnderwaterPost || !FluidActor || !GetWorld())
+	{
+		return;
+	}
+	if (!FluidClass || !FluidClass->GetName().Contains(TEXT("Pool")))
+	{
+		return;
+	}
+
+	FPostProcessSettings Settings;
+	float Weight = 1.f;
+	float Priority = 0.f;
+	float Radius = 0.f;
+	bool bEnabled = true;
+	if (!CopyUnderwaterTemplate(Settings, Weight, Priority, Radius, bEnabled))
+	{
+		return;
+	}
+	(void)Radius;
+
+	UStaticMeshComponent* Trace = SlimeFluidLook::FindTraceMesh(FluidActor);
+	if (!Trace || !Trace->GetStaticMesh())
+	{
+		return;
+	}
+	Trace->UpdateBounds();
+	const FBox MeshLocal = Trace->GetStaticMesh()->GetBoundingBox();
+	const FTransform TraceXform = Trace->GetComponentTransform();
+	const FVector Half = MeshLocal.GetExtent() * TraceXform.GetScale3D().GetAbs();
+	if (Half.GetMin() <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FVector WaterCenter = TraceXform.TransformPosition(MeshLocal.GetCenter());
+	WaterSurfaceZ = WaterCenter.Z + Half.Z;
+	PoolMinXY = FVector2D(WaterCenter.X - Half.X, WaterCenter.Y - Half.Y);
+	PoolMaxXY = FVector2D(WaterCenter.X + Half.X, WaterCenter.Y + Half.Y);
+
+	// The rendered surface is the TraceMesh's real top face, which can sit a few centimeters off its padded bounds.
+	// A few centimeters matter: with the camera at the surface they move the waterline across a third of the screen.
+	{
+		FHitResult Hit;
+		FCollisionQueryParams Query(SCENE_QUERY_STAT(SlimePoolSurface), true);
+		const FVector Start(WaterCenter.X, WaterCenter.Y, WaterSurfaceZ + 200.f);
+		const FVector End(WaterCenter.X, WaterCenter.Y, WaterCenter.Z - Half.Z);
+		const bool bHit = Trace->LineTraceComponent(Hit, Start, End, Query);
+		UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] water surface: bounds top %.1f, traced top %s"),
+			WaterSurfaceZ, bHit ? *FString::Printf(TEXT("%.1f"), Hit.ImpactPoint.Z) : TEXT("miss"));
+		if (bHit && Hit.ImpactPoint.Z > WaterCenter.Z)
+		{
+			WaterSurfaceZ = Hit.ImpactPoint.Z;
+		}
+	}
+
+	// The trace mesh still wears the inactive gray material here. Ninja maps the visible water on later, from
+	// OutputMaterials on the live component. That material's MeshDistortion pushes the top face up by as much as
+	// MeshDistortClampMax, so the drawn surface sits well above the collision top.
+	// A late split leaves an original-color band between the drawn surface and the mask; the full ceiling tints a
+	// strip of wall above the water. UnderwaterMaskTrimCm pulls the mask down from that ceiling. Whole-screen tint stays on the constant part of that lift: it cannot be masked per pixel.
+	TArray<UMaterialInterface*> WaterCandidates;
+	auto ConsiderMaterial = [&WaterCandidates](UObject* Object)
+	{
+		if (UMaterialInterface* Material = Cast<UMaterialInterface>(Object))
+		{
+			WaterCandidates.AddUnique(Material);
+		}
+	};
+	auto ConsiderHolder = [&ConsiderMaterial](UObject* Holder)
+	{
+		if (!Holder)
+		{
+			return;
+		}
+		if (const FObjectPropertyBase* Output = FindFProperty<FObjectPropertyBase>(Holder->GetClass(), TEXT("MI_Output")))
+		{
+			ConsiderMaterial(Output->GetObjectPropertyValue_InContainer(Holder));
+		}
+		const FArrayProperty* Materials = FindFProperty<FArrayProperty>(Holder->GetClass(), TEXT("OutputMaterials"));
+		const FObjectPropertyBase* Inner = Materials ? CastField<FObjectPropertyBase>(Materials->Inner) : nullptr;
+		if (!Materials || !Inner)
+		{
+			return;
+		}
+		FScriptArrayHelper Helper(Materials, Materials->ContainerPtrToValuePtr<void>(Holder));
+		for (int32 Index = 0; Index < Helper.Num(); ++Index)
+		{
+			ConsiderMaterial(Inner->GetObjectPropertyValue(Helper.GetRawPtr(Index)));
+		}
+	};
+	ConsiderHolder(FluidActor);
+	TArray<UActorComponent*> FluidComponents;
+	FluidActor->GetComponents(FluidComponents);
+	for (UActorComponent* Component : FluidComponents)
+	{
+		ConsiderHolder(Component);
+	}
+	TArray<UPrimitiveComponent*> MaterialPrims;
+	FluidActor->GetComponents<UPrimitiveComponent>(MaterialPrims);
+	for (UPrimitiveComponent* Prim : MaterialPrims)
+	{
+		if (!Prim)
+		{
+			continue;
+		}
+		for (int32 Slot = 0; Slot < Prim->GetNumMaterials(); ++Slot)
+		{
+			ConsiderMaterial(Prim->GetMaterial(Slot));
+		}
+	}
+
+	const UMaterialInterface* WaterMat = nullptr;
+	float BestClamp = -1.f;
+	for (UMaterialInterface* Candidate : WaterCandidates)
+	{
+		bool bCandidateDistort = false;
+		FGuid CandidateGuid;
+		float CandidateClamp = 0.f;
+		Candidate->GetStaticSwitchParameterValue(FHashedMaterialParameterInfo(TEXT("MeshDistortion")), bCandidateDistort, CandidateGuid);
+		if (!bCandidateDistort || !Candidate->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("MeshDistortClampMax")), CandidateClamp))
+		{
+			continue;
+		}
+		if (!WaterMat || CandidateClamp > BestClamp)
+		{
+			WaterMat = Candidate;
+			BestClamp = CandidateClamp;
+		}
+	}
+	if (!WaterMat && Trace->GetNumMaterials() > 0)
+	{
+		WaterMat = Trace->GetMaterial(0);
+	}
+
+	float MaskSurfaceZ = WaterSurfaceZ;
+	if (WaterMat)
+	{
+		bool bDistort = false;
+		FGuid Unused;
+		float Offset = 0.f, Mult = 0.f, ClampMin = -100.f, ClampMax = 0.f;
+		WaterMat->GetStaticSwitchParameterValue(FHashedMaterialParameterInfo(TEXT("MeshDistortion")), bDistort, Unused);
+		WaterMat->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("AdditionalOffset")), Offset);
+		WaterMat->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("MeshDistortMult")), Mult);
+		WaterMat->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("MeshDistortClampMin")), ClampMin);
+		const bool bHasClamp = WaterMat->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("MeshDistortClampMax")), ClampMax);
+		const float FadeLift = bDistort ? FMath::Clamp(Offset + 0.25f * Mult, ClampMin, bHasClamp ? ClampMax : Offset + Mult) : 0.f;
+		const float CeilingLift = (bDistort && bHasClamp) ? FMath::Max(ClampMax, FadeLift) : FadeLift;
+		UnderwaterMaskCeilingZ = WaterSurfaceZ + CeilingLift;
+		UnderwaterMaskFloorZ = WaterSurfaceZ + FadeLift;
+		const float MaskLift = FMath::Max(CeilingLift - FMath::Clamp(UnderwaterMaskTrimCm, 0.f, 80.f), FadeLift);
+		UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] water WPO fade lift %.1f, mask lift %.1f trim %.1f (distort %d, offset %.1f, mult %.1f, clamp %.1f..%.1f) via %s -> mask z %.1f"),
+			FadeLift, MaskLift, UnderwaterMaskTrimCm, bDistort ? 1 : 0, Offset, Mult, ClampMin, ClampMax, *WaterMat->GetName(), WaterSurfaceZ + MaskLift);
+		WaterSurfaceZ += FadeLift;
+		MaskSurfaceZ += MaskLift;
+	}
+
+	TArray<UPrimitiveComponent*> FluidPrims;
+	FluidActor->GetComponents<UPrimitiveComponent>(FluidPrims);
+	for (UPrimitiveComponent* Prim : FluidPrims)
+	{
+		if (Prim && Prim != Trace && Prim->IsVisible() && !Prim->bHiddenInGame)
+		{
+			Prim->UpdateBounds();
+			const FBox PrimBox = Prim->Bounds.GetBox();
+			UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] pool prim %s (%s) z %.1f..%.1f"),
+				*Prim->GetName(), *Prim->GetClass()->GetName(), PrimBox.Min.Z, PrimBox.Max.Z);
+		}
+	}
+
+	UMaterialInterface* PoolLook = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/_Slime/Hub/Build/Fluid/PP/MI_SlimePool_Cyan_v2.MI_SlimePool_Cyan_v2"));
+	UMaterialInterface* Refract = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/_Slime/Hub/Build/Fluid/PP/M_SlimePoolWaterlineRefract.M_SlimePoolWaterlineRefract"));
+	auto MakeWaterlineMID = [this, MaskSurfaceZ](UMaterialInterface* Base) -> UMaterialInstanceDynamic*
+	{
+		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
+		MID->SetScalarParameterValue(TEXT("WaterZ"), MaskSurfaceZ);
+		MID->SetVectorParameterValue(TEXT("PoolMin"), FLinearColor(PoolMinXY.X, PoolMinXY.Y, 0.f, 0.f));
+		MID->SetVectorParameterValue(TEXT("PoolMax"), FLinearColor(PoolMaxXY.X, PoolMaxXY.Y, 0.f, 0.f));
+		UnderwaterMIDs.Add(MID);
+		return MID;
+	};
+	TArray<FString> Overrides;
+	for (TFieldIterator<FBoolProperty> It(FPostProcessSettings::StaticStruct()); It; ++It)
+	{
+		if (It->GetName().StartsWith(TEXT("bOverride_")) && It->GetPropertyValue_InContainer(&Settings))
+		{
+			Overrides.Add(It->GetName().RightChop(10));
+		}
+	}
+	UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] underwater source overrides: %s"), *FString::Join(Overrides, TEXT(", ")));
+
+	// SceneColorTint stays a whole-screen setting: the masked material runs after tonemapping, where the same tint reads far darker.
+	FPostProcessSettings Masked;
+	FPostProcessSettings Global = Settings;
+	Global.WeightedBlendables.Array.Reset();
+	for (const FWeightedBlendable& Blend : Settings.WeightedBlendables.Array)
+	{
+		UMaterialInterface* Source = Cast<UMaterialInterface>(Blend.Object);
+		const UMaterial* Base = Source ? Source->GetBaseMaterial() : nullptr;
+		const bool bMaskable = PoolLook && Base && Base->GetName() == TEXT("M_UnderWaterPostProcess");
+		UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] underwater blendable %s weight %.2f base %s -> %s"),
+			Blend.Object ? *Blend.Object->GetName() : TEXT("None"), Blend.Weight,
+			Base ? *Base->GetName() : TEXT("None"), Blend.Weight <= 0.f ? TEXT("off") : bMaskable ? TEXT("masked") : TEXT("depth fade"));
+		if (Blend.Weight <= 0.f)
+		{
+			continue;
+		}
+		if (!bMaskable)
+		{
+			Global.WeightedBlendables.Array.Add(Blend);
+			continue;
+		}
+		UMaterialInstanceDynamic* LookMID = MakeWaterlineMID(PoolLook);
+		if (UMaterialInstance* SourceInstance = Cast<UMaterialInstance>(Source))
+		{
+			LookMID->CopyParameterOverrides(SourceInstance);
+			LookMID->SetScalarParameterValue(TEXT("WaterZ"), MaskSurfaceZ);
+			LookMID->SetVectorParameterValue(TEXT("PoolMin"), FLinearColor(PoolMinXY.X, PoolMinXY.Y, 0.f, 0.f));
+			LookMID->SetVectorParameterValue(TEXT("PoolMax"), FLinearColor(PoolMaxXY.X, PoolMaxXY.Y, 0.f, 0.f));
+		}
+		Masked.WeightedBlendables.Array.Add(FWeightedBlendable(Blend.Weight, LookMID));
+	}
+	if (Refract)
+	{
+		Masked.WeightedBlendables.Array.Add(FWeightedBlendable(1.f, MakeWaterlineMID(Refract)));
+	}
+	UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] waterline materials %d (pool look %d, refract %d), depth-fade blendables %d"),
+		UnderwaterMIDs.Num(), PoolLook != nullptr, Refract != nullptr, Global.WeightedBlendables.Array.Num());
+	GlobalWeight = Weight;
+
+	// The slime camera boom is ~260cm, so the eye often sits in the pool wall or just outside it while still below the surface.
+	// The top has to clear the early mask plane, otherwise the split is clipped before the camera reaches it.
+	const float MaskAbove = FMath::Max(0.f, FMath::Max(MaskSurfaceZ, UnderwaterMaskCeilingZ) - (WaterCenter.Z + Half.Z));
+	const FVector Margin(100.f, 100.f, FMath::Max(30.f, (MaskAbove + 40.f) * 0.5f));
+	UnderwaterBox = NewObject<UBoxComponent>(this, TEXT("UnderwaterBox"));
+	UnderwaterBox->SetupAttachment(PadRoot);
+	UnderwaterBox->SetMobility(EComponentMobility::Movable);
+	UnderwaterBox->SetCollisionResponseToAllChannels(ECR_Ignore);
+	UnderwaterBox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	UnderwaterBox->SetGenerateOverlapEvents(false);
+	UnderwaterBox->SetHiddenInGame(true);
+	UnderwaterBox->SetVisibility(false);
+	UnderwaterBox->SetCanEverAffectNavigation(false);
+	UnderwaterBox->SetBoxExtent(Half + Margin);
+	UnderwaterBox->SetWorldScale3D(FVector::OneVector);
+	UnderwaterBox->SetWorldRotation(TraceXform.Rotator());
+	UnderwaterBox->SetWorldLocation(WaterCenter + FVector(0.f, 0.f, Margin.Z));
+	UnderwaterBox->RegisterComponent();
+
+	UnderwaterPost = NewObject<UPostProcessComponent>(this, TEXT("UnderwaterPost"));
+	UnderwaterPost->SetupAttachment(UnderwaterBox);
+	UnderwaterPost->bUnbound = false;
+	UnderwaterPost->bEnabled = bEnabled;
+	UnderwaterPost->BlendWeight = 1.f;
+	UnderwaterPost->Priority = Priority;
+	UnderwaterPost->BlendRadius = 0.f;
+	UnderwaterPost->Settings = Masked;
+	UnderwaterPost->RegisterComponent();
+
+	UnderwaterGlobalPost = NewObject<UPostProcessComponent>(this, TEXT("UnderwaterGlobalPost"));
+	UnderwaterGlobalPost->SetupAttachment(UnderwaterBox);
+	UnderwaterGlobalPost->bUnbound = false;
+	UnderwaterGlobalPost->bEnabled = bEnabled;
+	UnderwaterGlobalPost->BlendWeight = 0.f;
+	UnderwaterGlobalPost->Priority = Priority;
+	UnderwaterGlobalPost->BlendRadius = 0.f;
+	UnderwaterGlobalPost->Settings = Global;
+	UnderwaterGlobalPost->RegisterComponent();
+	const FBodyInstance* Body = UnderwaterBox->GetBodyInstance();
+	UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] underwater box %s extent %s shape %d"),
+		*UnderwaterBox->GetComponentLocation().ToCompactString(), *Half.ToCompactString(),
+		Body && Body->IsValidBodyInstance());
+	AppliedMaskTrimCm = FMath::Clamp(UnderwaterMaskTrimCm, 0.f, 80.f);
+	GetWorldTimerManager().SetTimer(CameraTimer, this, &ASlimeHomeFluidPad::UpdateUnderwaterCamera, 0.25f, true);
+}
+
+void ASlimeHomeFluidPad::ApplyMaskTrim()
+{
+	const float Trim = FMath::Clamp(UnderwaterMaskTrimCm, 0.f, 80.f);
+	if (UnderwaterMIDs.Num() == 0 || UnderwaterMaskCeilingZ <= 0.f || FMath::IsNearlyEqual(Trim, AppliedMaskTrimCm))
+	{
+		return;
+	}
+	AppliedMaskTrimCm = Trim;
+	const float MaskZ = FMath::Max(UnderwaterMaskCeilingZ - Trim, UnderwaterMaskFloorZ);
+	for (UMaterialInstanceDynamic* MID : UnderwaterMIDs)
+	{
+		if (MID)
+		{
+			MID->SetScalarParameterValue(TEXT("WaterZ"), MaskZ);
+		}
+	}
+	UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] waterline trim %.1f -> mask z %.1f"), Trim, MaskZ);
+}
+
+void ASlimeHomeFluidPad::UpdateUnderwaterCamera()
+{
+	ApplyMaskTrim();
+	const APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this, 0);
+	if (!Camera || !UnderwaterBox || !UnderwaterGlobalPost)
+	{
+		return;
+	}
+	const FVector Eye = Camera->GetCameraLocation();
+	const FVector Local = UnderwaterBox->GetComponentTransform().InverseTransformPosition(Eye);
+	const FVector Extent = UnderwaterBox->GetUnscaledBoxExtent();
+	const bool bNear = FMath::Abs(Local.X) <= Extent.X && FMath::Abs(Local.Y) <= Extent.Y && FMath::Abs(Local.Z) <= Extent.Z;
+	// Whole-screen settings only start once the eye itself is below the surface, so the above-water half stays untinted.
+	const float Under = FMath::SmoothStep(0.f, 1.f, FMath::Clamp(static_cast<float>(WaterSurfaceZ - Eye.Z) / 20.f, 0.f, 1.f));
+	UnderwaterGlobalPost->BlendWeight = bNear ? GlobalWeight * Under : 0.f;
+	const bool bEyeUnder = Eye.Z < WaterSurfaceZ;
+	if (bNear && bEyeUnder != bEyeWasUnder)
+	{
+		const bool bInsidePoolXY = Eye.X >= PoolMinXY.X && Eye.X <= PoolMaxXY.X && Eye.Y >= PoolMinXY.Y && Eye.Y <= PoolMaxXY.Y;
+		UE_LOG(LogSlimeFable, Log, TEXT("[HomeFluid] camera %s water: eye %s, surface z %.1f, %s pool plan"),
+			bEyeUnder ? TEXT("entered") : TEXT("left"), *Eye.ToCompactString(), WaterSurfaceZ,
+			bInsidePoolXY ? TEXT("inside") : TEXT("outside"));
+	}
+	bEyeWasUnder = bEyeUnder;
+	if (bNear != bCameraNear)
+	{
+		bCameraNear = bNear;
+		GetWorldTimerManager().SetTimer(CameraTimer, this, &ASlimeHomeFluidPad::UpdateUnderwaterCamera, bNear ? 0.033f : 0.25f, true);
+	}
+}
+
 void ASlimeHomeFluidPad::BeginPlay()
 {
 	Super::BeginPlay();
@@ -587,11 +980,29 @@ void ASlimeHomeFluidPad::BeginPlay()
 	{
 		SetupSurface(Look->SurfaceMaterial, Look->SurfaceLift);
 	}
+	AddUnderwaterPost();
 }
 
 void ASlimeHomeFluidPad::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(SurfaceTimer);
+	GetWorldTimerManager().ClearTimer(CameraTimer);
+	UnderwaterMIDs.Reset();
+	if (UnderwaterPost)
+	{
+		UnderwaterPost->DestroyComponent();
+		UnderwaterPost = nullptr;
+	}
+	if (UnderwaterGlobalPost)
+	{
+		UnderwaterGlobalPost->DestroyComponent();
+		UnderwaterGlobalPost = nullptr;
+	}
+	if (UnderwaterBox)
+	{
+		UnderwaterBox->DestroyComponent();
+		UnderwaterBox = nullptr;
+	}
 	if (FluidActor)
 	{
 		FluidActor->Destroy();

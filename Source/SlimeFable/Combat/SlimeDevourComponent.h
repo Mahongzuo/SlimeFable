@@ -87,6 +87,11 @@ class SLIMEFABLE_API USlimeDevourComponent : public UActorComponent
 public:
 	USlimeDevourComponent();
 
+	/** One non-combat prop in the belly. Used by sorting games without consuming phantom slots. */
+	bool TrySwallowProp(AActor* Prop, float MaxDistance = 220.f);
+	AActor* ReleaseStoredProp(const FVector& Location);
+	AActor* GetStoredProp() const { return StoredProp.Get(); }
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -357,6 +362,9 @@ protected:
 	TArray<FSlimeDevourCapture> PhantomSlots;
 
 	TWeakObjectPtr<APawn> DevourTarget;
+	TWeakObjectPtr<AActor> StoredProp;
+	FVector StoredPropScale = FVector::OneVector;
+	bool bStoredPropCollision = false;
 	TWeakObjectPtr<AActor> PendingDestroyEnemy;
 	FSlimeDevourCapture ActiveCapture;
 	FTransform EnemyStartXform = FTransform::Identity;

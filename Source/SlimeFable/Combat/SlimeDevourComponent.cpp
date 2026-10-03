@@ -131,12 +131,43 @@ void USlimeDevourComponent::BeginPlay()
 
 void USlimeDevourComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ReleaseStoredProp(GetOwner()->GetActorLocation());
 	if (bPhantomWheelOpen)
 	{
 		ClosePhantomWheel(false);
 	}
 	AbortDevour(true);
 	Super::EndPlay(EndPlayReason);
+}
+
+bool USlimeDevourComponent::TrySwallowProp(AActor* Prop, float MaxDistance)
+{
+	if (!IsValid(Prop) || Prop == GetOwner() || StoredProp.IsValid() || IsDevouring()
+		|| Prop->IsHidden() || FVector::DistSquared(Prop->GetActorLocation(), GetOwner()->GetActorLocation()) > FMath::Square(MaxDistance))
+	{
+		return false;
+	}
+	StoredProp = Prop;
+	StoredPropScale = Prop->GetActorScale3D();
+	bStoredPropCollision = Prop->GetActorEnableCollision();
+	Prop->SetActorEnableCollision(false);
+	Prop->SetActorHiddenInGame(true);
+	if (USlimeFaceComponent* Face = GetOwner()->FindComponentByClass<USlimeFaceComponent>()) Face->PulseBliss(0.45f);
+	if (USoundBase* Sfx = SwallowSound.LoadSynchronous()) SlimeAudioPlay::PlaySfxAt(GetOwner(), Sfx, GetOwner()->GetActorLocation());
+	return true;
+}
+
+AActor* USlimeDevourComponent::ReleaseStoredProp(const FVector& Location)
+{
+	AActor* Prop = StoredProp.Get();
+	StoredProp.Reset();
+	if (!IsValid(Prop)) return nullptr;
+	Prop->SetActorLocation(Location);
+	Prop->SetActorScale3D(StoredPropScale);
+	Prop->SetActorHiddenInGame(false);
+	Prop->SetActorEnableCollision(bStoredPropCollision);
+	if (USlimeFaceComponent* Face = GetOwner()->FindComponentByClass<USlimeFaceComponent>()) Face->PulseMood(ESlimeMood::Spit, 0.35f, 5);
+	return Prop;
 }
 
 void USlimeDevourComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

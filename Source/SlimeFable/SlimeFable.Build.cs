@@ -62,6 +62,7 @@ public class SlimeFable : ModuleRules
 		{
 			PrivateDependencyModuleNames.AddRange(new string[] {
 				"UnrealEd",
+				"Json",
 				"AnimGraph",
 				"BlueprintGraph",
 				"PoseSearchEditor",
