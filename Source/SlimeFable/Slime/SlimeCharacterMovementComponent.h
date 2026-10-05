@@ -75,6 +75,8 @@ public:
 
 protected:
 	virtual void PerformMovement(float DeltaTime) override;
+ virtual FVector NewFallVelocity(const FVector& InitialVelocity,const FVector& Gravity,float DeltaTime) const override;
+ virtual FVector GetAirControl(float DeltaTime,float TickAirControl,const FVector& FallAcceleration) override;
 	virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
 	virtual void HandleImpact(const FHitResult& Hit, float TimeSlice, const FVector& MoveDelta) override;
 

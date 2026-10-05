@@ -31,6 +31,7 @@ class USlimePathSwordComponent;
 class USlimeFluidNinjaContactComponent;
 class USlimeFoliageInteractComponent;
 class USlimeFaceComponent;
+class USlimeUmbrellaComponent;
 class UStaticMeshComponent;
 class USoundBase;
 class UAudioComponent;
@@ -61,6 +62,10 @@ public:
 	virtual void Landed(const FHitResult& Hit) override;
 	virtual void OnJumped_Implementation() override;
 	virtual void Jump() override;
+ void ResetUmbrellaFallOrigin();
+ UPROPERTY(VisibleAnywhere, Category="Z_Components", AdvancedDisplay)
+ TObjectPtr<USlimeUmbrellaComponent> SlimeUmbrella;
+ uint64 LastUmbrellaJumpFrame=MAX_uint64;
 	virtual void DoMove(float Right, float Forward) override;
 
 	/** Ground / first jump vertical impulse written into CharacterMovement. */
@@ -100,6 +105,14 @@ public:
 	/** How quickly the boom eases toward the desired length (higher = snappier). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Camera", meta = (ClampMin = "1.0", ClampMax = "30.0"))
 	float CameraZoomInterpSpeed = 8.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|LaunchCamera", meta=(ToolTip="按住发射键时镜头额外抬高，默认60厘米，不改变视距或FOV"))
+ float LaunchCameraHeight = 60.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|LaunchCamera", meta=(ToolTip="瞄准时镜头向右肩偏移，默认45厘米"))
+ float LaunchCameraShoulder = 45.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|LaunchCamera", meta=(ClampMin="0.01", ToolTip="瞄准与探索构图过渡时间，默认0.18秒"))
+ float LaunchCameraBlendSeconds = 0.18f;
+ float LaunchCameraBlend = 0.f;
+
 
 	/** Hold Sprint key multiplier on MaxWalkSpeed. Walk 320 * 1.97 = sprint 630. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Move", meta = (ClampMin = "1.0", ClampMax = "3.0",
@@ -367,4 +380,7 @@ protected:
 	bool bHasLastGroundedZ = false;
 	TWeakObjectPtr<AActor> FallTrackActor;
 	static constexpr float FatalFallDistance = 3000.f;
+
+	/** Local player only: the screen-space X-ray outline lives on the follow camera. */
+	void RegisterXRayOutline();
 };

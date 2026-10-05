@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeCharacterMovementComponent.h"
+#include "SlimeUmbrellaComponent.h"
 
 #include "CollisionQueryParams.h"
 #include "Components/CapsuleComponent.h"
@@ -691,4 +692,20 @@ bool USlimeCharacterMovementComponent::CanFollowSurfaceTransition(const TArray<F
 UCapsuleComponent* USlimeCharacterMovementComponent::GetOwnerCapsule() const
 {
 	return CharacterOwner ? CharacterOwner->GetCapsuleComponent() : nullptr;
+}
+
+FVector USlimeCharacterMovementComponent::NewFallVelocity(const FVector& InitialVelocity,const FVector& Gravity,float DeltaTime) const
+{
+ FVector Result=Super::NewFallVelocity(InitialVelocity,Gravity,DeltaTime);
+ if (InitialVelocity.Z<=0.f && CharacterOwner)
+  if (const USlimeUmbrellaComponent* Umbrella=CharacterOwner->FindComponentByClass<USlimeUmbrellaComponent>())
+   Result.Z=Umbrella->LimitFallVelocity(float(Result.Z));
+ return Result;
+}
+FVector USlimeCharacterMovementComponent::GetAirControl(float DeltaTime,float TickAirControl,const FVector& FallAcceleration)
+{
+ if (CharacterOwner)
+  if (const USlimeUmbrellaComponent* Umbrella=CharacterOwner->FindComponentByClass<USlimeUmbrellaComponent>())
+   if (Umbrella->IsUmbrellaOpen()) TickAirControl=Umbrella->GlideAirControl;
+ return Super::GetAirControl(DeltaTime,TickAirControl,FallAcceleration);
 }

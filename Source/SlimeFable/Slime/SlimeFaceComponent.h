@@ -109,7 +109,7 @@ private:
 	void UpdateOrientation(float DeltaTime);
 	void UpdateBlink(float DeltaTime);
 	void UpdateVisibility(float DeltaTime);
-	void UpdateMaterial();
+	void UpdateMaterial(float DeltaTime);
 	UMaterialInstanceDynamic* GetBodyMID() const;
 
 	UFUNCTION()
@@ -154,4 +154,11 @@ private:
 	FVector FaceUp = FVector::UpVector;
 	float LookX = 0.f;
 	float StillSeconds = 0.f;
+	struct FShotFacing
+	{
+		FVector PreviousCenter = FVector::ZeroVector;
+		FVector Forward = FVector::ForwardVector;
+		bool bMoving = false;
+	};
+	TMap<uint8, FShotFacing> ShotFacing;
 };

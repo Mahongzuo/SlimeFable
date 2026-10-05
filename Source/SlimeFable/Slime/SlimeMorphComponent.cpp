@@ -43,6 +43,10 @@
 #endif
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "StaticMeshResources.h"
 #include "Components/MeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
@@ -125,6 +129,85 @@ namespace SlimeMorphPolicies
 			return false;
 		}
 		return Mat->GetPathName().Contains(TEXT("M_SlimeMorph"), ESearchCase::IgnoreCase);
+	}
+
+	bool MeshKeepsNonNaniteFallback(const UMeshComponent* Mesh)
+	{
+		if (const USkeletalMeshComponent* Skel = Cast<USkeletalMeshComponent>(Mesh))
+		{
+			const USkeletalMesh* Asset = Skel->GetSkeletalMeshAsset();
+			if (!Asset || !Asset->IsNaniteEnabled())
+			{
+				return true;
+			}
+			const FSkeletalMeshRenderData* RenderData = Asset->GetResourceForRendering();
+			return RenderData && RenderData->LODRenderData.Num() > 0;
+		}
+		if (const UStaticMeshComponent* StaticMesh = Cast<UStaticMeshComponent>(Mesh))
+		{
+			const UStaticMesh* Asset = StaticMesh->GetStaticMesh();
+			if (!Asset || !Asset->IsNaniteEnabled())
+			{
+				return true;
+			}
+			const FStaticMeshRenderData* RenderData = Asset->GetRenderData();
+			return RenderData && RenderData->LODResources.Num() > 0;
+		}
+		return true;
+	}
+
+	void CaptureTransitionRenderState(FSlimeMorphMeshVisual& Entry, UMeshComponent* MeshComp)
+	{
+		if (!MeshComp)
+		{
+			return;
+		}
+		Entry.bSavedRenderCustomDepth = MeshComp->bRenderCustomDepth;
+		Entry.SavedStencil = MeshComp->CustomDepthStencilValue;
+		if (const USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(MeshComp))
+		{
+			Entry.bSavedForceDisableNanite = Skinned->IsForceDisableNanite();
+		}
+		else if (const UStaticMeshComponent* StaticMesh = Cast<UStaticMeshComponent>(MeshComp))
+		{
+			Entry.bSavedForceDisableNanite = StaticMesh->IsForceDisableNanite();
+		}
+	}
+
+	void SetForceDisableNanite(UMeshComponent* MeshComp, bool bDisable)
+	{
+		if (USkinnedMeshComponent* Skinned = Cast<USkinnedMeshComponent>(MeshComp))
+		{
+			Skinned->SetForceDisableNanite(bDisable);
+		}
+		else if (UStaticMeshComponent* StaticMesh = Cast<UStaticMeshComponent>(MeshComp))
+		{
+			StaticMesh->SetForceDisableNanite(bDisable);
+		}
+	}
+
+	void ApplyTransitionRenderState(const FSlimeMorphMeshVisual& Entry)
+	{
+		UMeshComponent* MeshComp = Entry.Mesh.Get();
+		if (!MeshComp || !Entry.bUsesLuminousSkin)
+		{
+			return;
+		}
+		MeshComp->SetRenderCustomDepth(true);
+		MeshComp->SetCustomDepthStencilValue(1);
+		SetForceDisableNanite(MeshComp, true);
+	}
+
+	void RestoreTransitionRenderState(const FSlimeMorphMeshVisual& Entry)
+	{
+		UMeshComponent* MeshComp = Entry.Mesh.Get();
+		if (!MeshComp || !Entry.bUsesLuminousSkin)
+		{
+			return;
+		}
+		MeshComp->SetRenderCustomDepth(Entry.bSavedRenderCustomDepth);
+		MeshComp->SetCustomDepthStencilValue(Entry.SavedStencil);
+		SetForceDisableNanite(MeshComp, Entry.bSavedForceDisableNanite);
 	}
 
 	bool SlotNeedsHairMorphSkin(UMaterialInterface* Saved, FName SlotName)
@@ -539,6 +622,11 @@ void USlimeMorphComponent::EnterPhase(ESlimeMorphPhase Next)
 			Slime->SetActorEnableCollision(true);
 		}
 		SetSlimeMovementEnabled(true);
+		for (const FSlimeMorphMeshVisual& Entry : MorphVisuals)
+		{
+			SlimeMorphPolicies::RestoreTransitionRenderState(Entry);
+		}
+		SetOwnerXRayDepthSuppressed(false);
 		MorphTarget = nullptr;
 		MorphVisuals.Reset();
 		MorphedSlotIndex = INDEX_NONE;
@@ -767,11 +855,17 @@ void USlimeMorphComponent::SpawnMorphTarget()
 	UMaterialInterface* OverlayMat = LoadMorphMaterial();
 	UMaterialInterface* SubstrateMat = LoadMorphSubstrateMaterial();
 	UMaterialInterface* HairMat = LoadMorphHairMaterial();
+	UMaterialInterface* LuminousMat = bLuminousTransitionSkin ? LoadMorphLuminousMaterial() : nullptr;
 	UMaterialInterface* SkinParent = SubstrateMat ? SubstrateMat : OverlayMat;
 	if (!SubstrateMat)
 	{
 		UE_LOG(LogSlimeFable, Warning,
 			TEXT("SlimeMorphComponent: M_SlimeMorph_Substrate missing — falling back to M_SlimeMorph"));
+	}
+	if (bLuminousTransitionSkin && !LuminousMat)
+	{
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: M_SlimeMorph_Luminous missing — falling back to Substrate Toon"));
 	}
 	if (!HairMat)
 	{
@@ -800,6 +894,7 @@ void USlimeMorphComponent::SpawnMorphTarget()
 			Entry.SavedMaterials.Add(MeshComp->GetMaterial(Idx));
 		}
 		Entry.SavedOverlay = MeshComp->GetOverlayMaterial();
+		SlimeMorphPolicies::CaptureTransitionRenderState(Entry, MeshComp);
 
 		UE_LOG(LogSlimeFable, Log,
 			TEXT("SlimeMorphComponent: capture %s (%s) extra=%d slots=%d"),
@@ -814,7 +909,22 @@ void USlimeMorphComponent::SpawnMorphTarget()
 	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)
 	{
 		UMeshComponent* MeshComp = Entry.Mesh.Get();
-		if (!MeshComp || !SkinParent)
+		UMaterialInterface* MeshSkin = SkinParent;
+		Entry.bUsesLuminousSkin = false;
+		if (MeshComp && LuminousMat)
+		{
+			if (SlimeMorphPolicies::MeshKeepsNonNaniteFallback(MeshComp))
+			{
+				MeshSkin = LuminousMat;
+			}
+			else
+			{
+				UE_LOG(LogSlimeFable, Warning,
+					TEXT("SlimeMorphComponent: %s has no non-Nanite fallback — using Substrate Toon for this mesh"),
+					*MeshComp->GetName());
+			}
+		}
+		if (!MeshComp || !MeshSkin)
 		{
 			continue;
 		}
@@ -823,7 +933,7 @@ void USlimeMorphComponent::SpawnMorphTarget()
 		const TArray<FName> SlotNames = MeshComp->GetMaterialSlotNames();
 		for (int32 Idx = 0; Idx < NumMats; ++Idx)
 		{
-			UMaterialInterface* Parent = SkinParent;
+			UMaterialInterface* Parent = MeshSkin;
 			UMaterialInterface* Saved = Entry.SavedMaterials.IsValidIndex(Idx)
 				? Entry.SavedMaterials[Idx].Get()
 				: nullptr;
@@ -831,6 +941,10 @@ void USlimeMorphComponent::SpawnMorphTarget()
 			if (HairMat && SlimeMorphPolicies::SlotNeedsHairMorphSkin(Saved, SlotName))
 			{
 				Parent = HairMat;
+			}
+			else if (Parent == LuminousMat)
+			{
+				Entry.bUsesLuminousSkin = true;
 			}
 			if (Parent)
 			{
@@ -873,6 +987,7 @@ void USlimeMorphComponent::ApplySlimeSkin()
 			continue;
 		}
 		RestoreHiddenMorphSlots(Entry);
+		SlimeMorphPolicies::ApplyTransitionRenderState(Entry);
 		MeshComp->SetOverlayMaterial(nullptr);
 		const TArray<FName> SlotNames = MeshComp->GetMaterialSlotNames();
 		const int32 NumSlots = SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp);
@@ -903,6 +1018,15 @@ void USlimeMorphComponent::ApplySlimeSkin()
 		// hidden via pointer compare (Substrate slots can report a different interface).
 	}
 	bOriginalMaterialsActive = false;
+	SetOwnerXRayDepthSuppressed(true);
+}
+
+void USlimeMorphComponent::SetOwnerXRayDepthSuppressed(bool bSuppressed)
+{
+	if (USlimeBodyComponent* SlimeBody = GetOwner() ? GetOwner()->FindComponentByClass<USlimeBodyComponent>() : nullptr)
+	{
+		SlimeBody->SetXRayDepthSuppressed(bSuppressed);
+	}
 }
 
 void USlimeMorphComponent::RefreshMorphedVisualMaterials()
@@ -938,6 +1062,7 @@ void USlimeMorphComponent::ApplyOriginalMaterials()
 			continue;
 		}
 		RestoreHiddenMorphSlots(Entry);
+		SlimeMorphPolicies::RestoreTransitionRenderState(Entry);
 		for (int32 Idx = 0; Idx < Entry.SavedMaterials.Num() && Idx < SlimeMorphPolicies::CountVisualMaterialSlots(MeshComp); ++Idx)
 		{
 			if (Entry.SavedMaterials[Idx])
@@ -948,6 +1073,7 @@ void USlimeMorphComponent::ApplyOriginalMaterials()
 		MeshComp->SetOverlayMaterial(Entry.SavedOverlay);
 	}
 	bOriginalMaterialsActive = true;
+	SetOwnerXRayDepthSuppressed(false);
 }
 
 void USlimeMorphComponent::SetShellActive(bool bActive)
@@ -1112,6 +1238,24 @@ UMaterialInterface* USlimeMorphComponent::LoadMorphHairMaterial()
 	return MorphHairMaterial;
 }
 
+UMaterialInterface* USlimeMorphComponent::LoadMorphLuminousMaterial()
+{
+	if (MorphLuminousMaterial)
+	{
+		return MorphLuminousMaterial;
+	}
+
+	static const FSoftObjectPath LuminousPath(
+		TEXT("/Game/Characters/Slime/Materials/M_SlimeMorph_Luminous.M_SlimeMorph_Luminous"));
+	MorphLuminousMaterial = Cast<UMaterialInterface>(LuminousPath.TryLoad());
+	if (!MorphLuminousMaterial)
+	{
+		UE_LOG(LogSlimeFable, Warning,
+			TEXT("SlimeMorphComponent: M_SlimeMorph_Luminous not found at %s"), *LuminousPath.ToString());
+	}
+	return MorphLuminousMaterial;
+}
+
 bool USlimeMorphComponent::MaterialNeedsBaseSkinMorphPath(UMaterialInterface* Mat)
 {
 	if (!Mat)
@@ -1239,6 +1383,30 @@ void USlimeMorphComponent::UpdateMorphMaterial(float GrowProgress, float ShellOp
 	}
 
 	SyncElementProfileToMorphMaterial();
+	PushLuminousRuntimeParams();
+}
+
+void USlimeMorphComponent::PushLuminousRuntimeParams()
+{
+	const float Ambient = Body ? Body->GetAmbientScale() : 1.f;
+	const FVector4 Key = Body ? Body->GetKeyLightDir() : FVector4(0.35, 0.2, 0.91, 1.0);
+	const float Clock = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	const FLinearColor KeyColor(Key.X, Key.Y, Key.Z, Key.W);
+
+	for (const FSlimeMorphMeshVisual& Entry : MorphVisuals)
+	{
+		for (UMaterialInstanceDynamic* MID : Entry.MorphMIDs)
+		{
+			if (!MID)
+			{
+				continue;
+			}
+			MID->SetScalarParameterValue(TEXT("AmbientScale"), Ambient);
+			MID->SetVectorParameterValue(TEXT("KeyLightDir"), KeyColor);
+			MID->SetScalarParameterValue(TEXT("BubbleClock"), Clock);
+			MID->SetScalarParameterValue(TEXT("FrontDepthBias"), TransitionFrontDepthBias);
+		}
+	}
 }
 
 void USlimeMorphComponent::UpdateSlimeOpacity(float Alpha)
@@ -1802,9 +1970,14 @@ void USlimeMorphComponent::SyncElementProfileToMorphMaterial()
 		MID->SetScalarParameterValue(SlimeMorphParams::FlowSpeed, Profile.FlowSpeed);
 		MID->SetScalarParameterValue(SlimeMorphParams::NoiseScale, Profile.NoiseScale);
 		MID->SetScalarParameterValue(SlimeMorphParams::RimPower, Profile.RimPower);
-		MID->SetScalarParameterValue(TEXT("MorphBrightness"), MorphBrightness);
-		MID->SetScalarParameterValue(TEXT("MorphRimBoost"), MorphRimBoost);
-		MID->SetScalarParameterValue(TEXT("MorphFillEmissive"), MorphFillEmissive);
+		const bool bLuminousParent = MID->Parent
+			&& MID->Parent->GetPathName().Contains(TEXT("M_SlimeMorph_Luminous"), ESearchCase::IgnoreCase);
+		if (!bLuminousParent)
+		{
+			MID->SetScalarParameterValue(TEXT("MorphBrightness"), MorphBrightness);
+			MID->SetScalarParameterValue(TEXT("MorphRimBoost"), MorphRimBoost);
+			MID->SetScalarParameterValue(TEXT("MorphFillEmissive"), MorphFillEmissive);
+		}
 	};
 
 	for (FSlimeMorphMeshVisual& Entry : MorphVisuals)

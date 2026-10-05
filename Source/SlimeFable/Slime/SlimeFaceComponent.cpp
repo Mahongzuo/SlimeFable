@@ -162,7 +162,7 @@ void USlimeFaceComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	UpdateOrientation(DeltaTime);
 	UpdateBlink(DeltaTime);
 	UpdateVisibility(DeltaTime);
-	UpdateMaterial();
+	UpdateMaterial(DeltaTime);
 }
 
 void USlimeFaceComponent::UpdateSense(float DeltaTime)
@@ -276,7 +276,7 @@ void USlimeFaceComponent::UpdateVisibility(float DeltaTime)
 	VisibleAlpha = FMath::FInterpTo(VisibleAlpha, Target, DeltaTime, 10.f);
 }
 
-void USlimeFaceComponent::UpdateMaterial()
+void USlimeFaceComponent::UpdateMaterial(float DeltaTime)
 {
 	UMaterialInstanceDynamic* Mid = GetBodyMID();
 	if (!Mid)
@@ -323,6 +323,11 @@ void USlimeFaceComponent::UpdateMaterial()
 	{
 		EyeH *= EyeHScale;
 		EyeW *= EyeWScale;
+		// The face projection divides by the shell axes, which the dome preset squashes.
+		// Undo only that rest-shape scale so the eyes keep the ball's size and aspect.
+		const FVector DomeScale = Body->GetDomeAxisScale();
+		EyeH /= FMath::Max(DomeScale.Z, 0.25f);
+		EyeW /= FMath::Max(DomeScale.X, 0.25f);
 	}
 
 	float Curve = Pose.Curve;
@@ -357,6 +362,10 @@ void USlimeFaceComponent::UpdateMaterial()
 	Body->RefreshShotStates();
 	const TArray<FSlimeSolver::FShotState>& Shots = Body->GetShotStates();
 	const TArray<uint8>& SlotIds = Body->GetShotSlotIds();
+	for (auto It = ShotFacing.CreateIterator(); It; ++It)
+	{
+		if (!Shots.ContainsByPredicate([Id = It.Key()](const FSlimeSolver::FShotState& Shot) { return Shot.Id == Id; })) It.RemoveCurrent();
+	}
 	for (int32 i = 0; i < SlimeFaceParams::MaxShotFaces; ++i)
 	{
 		FLinearColor Forward(float(FaceForward.X), float(FaceForward.Y), float(FaceForward.Z), 0.f);
@@ -366,12 +375,33 @@ void USlimeFaceComponent::UpdateMaterial()
 			const FSlimeSolver::FShotState* Shot = Shots.FindByPredicate([WantedId](const FSlimeSolver::FShotState& S) { return S.Id == WantedId; });
 			if (Shot)
 			{
-				const FVector Horiz(Shot->Velocity.X, Shot->Velocity.Y, 0.f);
-				if (Horiz.SizeSquared() > 100.f)
+				FShotFacing* Facing = ShotFacing.Find(WantedId);
+				const bool bFresh = Facing == nullptr;
+				if (!Facing)
 				{
-					const FVector Dir = Horiz.GetSafeNormal();
-					Forward = FLinearColor(float(Dir.X), float(Dir.Y), float(Dir.Z), 0.f);
+					FShotFacing Initial;
+					Initial.PreviousCenter = FVector(Shot->Center);
+					Initial.Forward = FVector(Shot->Velocity.X, Shot->Velocity.Y, 0.f).GetSafeNormal(UE_SMALL_NUMBER, FVector(Shot->LaunchDirection));
+					Facing = &ShotFacing.Add(WantedId, Initial);
 				}
+				FVector Delta = FVector(Shot->Center) - Facing->PreviousCenter;
+				Delta.Z = 0.f;
+				const float Speed = DeltaTime > UE_SMALL_NUMBER ? float(Delta.Size()) / DeltaTime : 0.f;
+				if (Speed > 10.f) Facing->bMoving = true;
+				else if (Speed < 5.f) Facing->bMoving = false;
+				FVector Desired = Facing->Forward;
+				if (!bFresh && Facing->bMoving && !Delta.IsNearlyZero()) Desired = Delta.GetSafeNormal();
+				else if (!bFresh && !Facing->bMoving)
+				{
+					FVector ToBody = Body->GetBlobCenter() - FVector(Shot->Center);
+					ToBody.Z = 0.f;
+					Desired = ToBody.GetSafeNormal(UE_SMALL_NUMBER, Facing->Forward);
+				}
+				const float Yaw = Facing->Forward.Rotation().Yaw;
+				const float Blend = 1.f - FMath::Exp(-FMath::Max(DeltaTime, 0.f) / 0.12f);
+				Facing->Forward = FRotator(0.f, Yaw + FMath::FindDeltaAngleDegrees(Yaw, Desired.Rotation().Yaw) * Blend, 0.f).Vector();
+				Facing->PreviousCenter = FVector(Shot->Center);
+				Forward = FLinearColor(float(Facing->Forward.X), float(Facing->Forward.Y), 0.f, 0.f);
 			}
 		}
 		Mid->SetVectorParameterValue(SlimeFaceParams::ShotForward[i], Forward);

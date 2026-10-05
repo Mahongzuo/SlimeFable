@@ -394,6 +394,8 @@ void ASlimeFablePlayerController::RetargetUIFocus(UUserWidget* FocusWidget)
 
 void ASlimeFablePlayerController::PushUIInput(ESlimeUIInputReason Reason, UUserWidget* FocusWidget)
 {
+ if (APawn* Controlled = GetPawn())
+  if (USlimeAbilityComponent* Ability = Controlled->FindComponentByClass<USlimeAbilityComponent>()) Ability->CancelLaunchAim();
 	if (!IsLocalPlayerController())
 	{
 		return;

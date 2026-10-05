@@ -8,6 +8,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
 #include "SlimeClingComponent.h"
+#include "SlimeBodyComponent.h"
 
 USlimeSpringArmComponent::USlimeSpringArmComponent()
 {
@@ -31,6 +32,16 @@ void USlimeSpringArmComponent::UpdateDesiredArmLocation(
 	FTransform WorldCam = GetSocketTransform(USpringArmComponent::SocketName, RTS_World);
 	FVector Loc = WorldCam.GetLocation();
 	ApplyFootClamp(Loc);
+ if (bAimWallAvoidance && GetOwner())
+ {
+  if (const USlimeBodyComponent* Body = GetOwner()->FindComponentByClass<USlimeBodyComponent>())
+  {
+   FHitResult Hit;
+   const FVector Pivot=GetComponentLocation()+TargetOffset;
+   if (Body->TraceShotWorld(Hit, Pivot, Loc, FMath::Max(ProbeSize, 8.f)))
+    Loc=Hit.bStartPenetrating ? Pivot : Hit.Location;
+  }
+ }
 	WorldCam.SetLocation(Loc);
 
 	const FTransform RelCam = WorldCam.GetRelativeTransform(GetComponentTransform());

@@ -31,6 +31,7 @@ namespace SlimeElementParams
 	static const FName MaxThickness(TEXT("MaxThickness"));
 	static const FName DistortionScale(TEXT("DistortionScale"));
 	static const FName CoreAmount(TEXT("CoreAmount"));
+	static const FName ReadabilityFloor(TEXT("ReadabilityFloor"));
 	/** Only on M_SlimeBody_Volumetric; presence identifies the ray-marched skin. */
 	static const FName GridInfo(TEXT("GridInfo"));
 }
@@ -103,6 +104,14 @@ namespace SlimeSpectralLook
 
 	static void Apply(UMaterialInstanceDynamic* Mid, ESlimeElement Element, float BaseOpacity, float HitOpacityScale)
 	{
+		// Luminous keeps its authored look parameters; element opacity and hit fading still apply.
+		float ReadabilityFloor = 0.f;
+		if (Mid && Mid->GetScalarParameterValue(SlimeElementParams::ReadabilityFloor, ReadabilityFloor))
+		{
+			Mid->SetScalarParameterValue(SlimeElementParams::Opacity, BaseOpacity * HitOpacityScale);
+			Mid->SetScalarParameterValue(TEXT("BodyVisibility"), HitOpacityScale);
+			return;
+		}
 		// Volumetric skin shares the Absorption name, so test for it first; the spectral branch below is unchanged.
 		if (SlimeVolumetricLook::IsVolumetricBody(Mid))
 		{
@@ -290,6 +299,22 @@ bool USlimeElementComponent::EnsureDynamicMaterial()
 
 bool USlimeElementComponent::EnsureXRayDynamicMaterial()
 {
+	if (BodyComponent && BodyComponent->UsesScreenSpaceXRay())
+	{
+		UMaterialInstanceDynamic* Outline = BodyComponent->GetXRayOutlineMID();
+		if (!Outline)
+		{
+			return false;
+		}
+		if (XRayMaterial != Outline)
+		{
+			XRayMaterial = Outline;
+			const FSlimeElementProfile& Profile = TransitionRemaining > 0.f ? TransitionFrom : TransitionTo;
+			XRayMaterial->SetVectorParameterValue(SlimeElementParams::XRayColor, Profile.BaseColor);
+		}
+		return true;
+	}
+
 	UProceduralMeshComponent* Mesh = BodyComponent ? BodyComponent->GetXRayMesh() : nullptr;
 	if (!Mesh || Mesh->GetNumSections() == 0)
 	{

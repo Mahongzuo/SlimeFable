@@ -52,6 +52,14 @@ struct FSlimeMorphMeshVisual
 
 	/** Material slot indices whose sections were hidden after a failed slime-skin swap. */
 	TArray<int32> HiddenMaterialSlots;
+
+	/** Render state captured before the luminous transition skin changes it. */
+	bool bSavedRenderCustomDepth = false;
+	int32 SavedStencil = 0;
+	bool bSavedForceDisableNanite = false;
+
+	/** True when at least one slot on this mesh wears M_SlimeMorph_Luminous. */
+	bool bUsesLuminousSkin = false;
 };
 
 UENUM(BlueprintType)
@@ -75,7 +83,7 @@ enum class ESlimeMorphPhase : uint8
  *  and the spawned enemy pawn. The enemy's own UEnemyCombatComponent handles attack
  *  execution; this component only routes player combat keys onto it.
  */
-UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API USlimeMorphComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -164,6 +172,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Morph|Visual", meta = (ClampMin = "0.01", ClampMax = "0.5"))
 	float GrowEdgeSoftness = 0.08f;
 
+	/** Non-hair slots wear the translucent luminous jelly during the transition. Off falls back to Masked Substrate Toon. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Material",
+		meta = (ToolTip = "过渡期（生长、融合、解除、缩回）非头发槽穿荧光果冻皮 M_SlimeMorph_Luminous。关掉则回退 Masked Substrate Toon。默认开。头发槽始终用 Masked 荧光配色。"))
+	bool bLuminousTransitionSkin = true;
+
+	/** Centimetres past the CustomDepth front surface that still draw. Covers depth error without letting a rear limb show through. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Material",
+		meta = (ClampMin = "0.0", Units = "cm",
+			ToolTip = "只画最前表面时，允许比 CustomDepth 更远这么多厘米仍保留。默认 6。太大四肢会叠出排序错误，太小会把自己裁出洞。"))
+	float TransitionFrontDepthBias = 6.f;
+
 	/** Hold Z this long before the morph wheel opens. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Morph|Wheel", meta = (ClampMin = "0.05", Units = "s"))
 	float MorphWheelHoldSeconds = 0.25f;
@@ -203,9 +222,12 @@ private:
 	void CacheUnmorphPoseAndFreezeTarget();
 	void ConsumeMorphedSlotIfRequested();
 	void SyncElementProfileToMorphMaterial();
+	void PushLuminousRuntimeParams();
 
 	/** Mesh slots -> slime-skin MIDs (Substrate Slab on every visual mesh). */
 	void ApplySlimeSkin();
+	/** Luminous transition skin clips on CustomDepth; the slime silhouette must not write it then. */
+	void SetOwnerXRayDepthSuppressed(bool bSuppressed);
 
 	/** Mesh slots → the enemy's own materials, so the final look is always correct. */
 	void ApplyOriginalMaterials();
@@ -224,6 +246,9 @@ private:
 
 	/** Loads M_SlimeMorph_Hair (Masked MSM_HAIR slime skin) on demand and caches it. */
 	UMaterialInterface* LoadMorphHairMaterial();
+
+	/** Loads M_SlimeMorph_Luminous (translucent jelly) on demand and caches it. */
+	UMaterialInterface* LoadMorphLuminousMaterial();
 
 	/** True if any saved material is Substrate/Toon and should skip Overlay. */
 	static bool MaterialNeedsBaseSkinMorphPath(UMaterialInterface* Mat);
@@ -287,6 +312,10 @@ private:
 	/** Cached M_SlimeMorph_Hair (Masked MSM_HAIR slime skin). */
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> MorphHairMaterial;
+
+	/** Cached M_SlimeMorph_Luminous (translucent jelly transition skin). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> MorphLuminousMaterial;
 
 	/** Hides GeneratedParts while grow mask is incomplete (avoids hair floating on slime). */
 	void SetExtraPartsHidden(bool bHidden);

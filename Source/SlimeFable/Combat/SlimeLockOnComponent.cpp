@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeLockOnComponent.h"
+#include "Slime/SlimeAbilityComponent.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -453,6 +454,10 @@ float USlimeLockOnComponent::ComputeFramingArmLength(
 
 void USlimeLockOnComponent::ApplyLockCamera(float DeltaTime)
 {
+ if (const USlimeAbilityComponent* Ability=GetOwner()->FindComponentByClass<USlimeAbilityComponent>())
+  if (Ability->IsAimingLaunch()) return;
+ if (const ASlimeCharacter* Slime=Cast<ASlimeCharacter>(GetOwner()))
+  if (Slime->LaunchCameraBlend>0.f) return;
 	ACharacter* Character = Cast<ACharacter>(GetOwner());
 	APlayerController* PC = GetPlayerController();
 	AActor* Target = LockedTarget.Get();

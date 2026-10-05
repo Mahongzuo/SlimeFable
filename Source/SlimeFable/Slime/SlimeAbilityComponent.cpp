@@ -11,6 +11,8 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/GameViewportClient.h"
+#include "SceneView.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
@@ -20,6 +22,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Misc/App.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeHealthComponent.h"
 #include "SlimeClingComponent.h"
 #include "SlimeDevourComponent.h"
 #include "SlimeElementComponent.h"
@@ -70,6 +73,7 @@ void USlimeAbilityComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	CloseFormation();
 	CloseHotbarConfirm();
+	CancelLaunchAim();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -180,6 +184,8 @@ void USlimeAbilityComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	// Undilated: slowing the world for the wheel must not also slow the wheel's own throttle.
+	CannonCooldown = FMath::Max(CannonCooldown-DeltaTime,0.f);
+	if (bCharging && !CanBeginLaunchAim()) CancelLaunchAim();
 	CycleCooldownRemaining = FMath::Max(CycleCooldownRemaining - float(FApp::GetDeltaTime()), 0.f);
 
 	if (bPollAbilityKeys)
@@ -189,12 +195,7 @@ void USlimeAbilityComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
 	if (bCharging)
 	{
-		ChargeElapsed += DeltaTime;
-		BuildLaunchPath(PendingLaunchPath);
-		if (bDrawTrajectoryPreview)
-		{
-			DrawLaunchPath(PendingLaunchPath);
-		}
+		UpdateLaunchAim();
 	}
 }
 
@@ -284,6 +285,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 	}
 
 	const bool bLaunch = IsDown(ESlimeInputAction::Launch, EKeys::G);
+	if (!bLaunch) bAimSuppressedUntilRelease = false;
 	if (bPollLaunchKey)
 	{
 		if (bLaunch && !bPollLaunchDown)
@@ -300,7 +302,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 			ReleaseLaunchCharge();
 		}
 		// Unstick only on poll path: charging while G is up after a missed edge.
-		else if (bCharging && !bLaunch)
+		else if (bCharging && !bLaunch && !bGamepadALaunchArmed)
 		{
 			bPollLaunchDown = false;
 			ReleaseLaunchCharge();
@@ -390,6 +392,16 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 				}
 			}
 		}
+		if (WasPressed(ESlimeInputAction::BodyShape, EKeys::Eight))
+		{
+			if (const UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+			{
+				if (USlimeGraphicsSettings* Graphics = GameInstance->GetSubsystem<USlimeGraphicsSettings>())
+				{
+					Graphics->CycleBodyShape();
+				}
+			}
+		}
 		if (InputSettings && InputSettings->ShouldReadGamepadAbilityKeys())
 		{
 			if (PlayerController->WasInputKeyJustPressed(EKeys::Gamepad_DPad_Left))
@@ -440,11 +452,7 @@ void USlimeAbilityComponent::PollAbilityKeys(float DeltaTime)
 					WheelWidget->SetHighlightedSlot(HotbarWheelSlot);
 				}
 			}
-			else if (bCharging)
-			{
-				CycleCooldownRemaining = CycleCooldown;
-				AdjustLaunchRange(Step);
-			}
+
 		}
 	}
 
@@ -584,6 +592,7 @@ void USlimeAbilityComponent::HandleLaunchStarted()
 	{
 		return;
 	}
+	bAimSuppressedUntilRelease = false;
 	BeginLaunchCharge();
 }
 
@@ -596,50 +605,147 @@ void USlimeAbilityComponent::HandleLaunchCompleted()
 	ReleaseLaunchCharge();
 }
 
-void USlimeAbilityComponent::BeginLaunchCharge()
+bool USlimeAbilityComponent::CanBeginLaunchAim() const
 {
+	const APlayerController *PC = GetOwningPlayerController();
+	if (!PC || !PC->IsLocalController() || !Body || !GetWorld() || GetWorld()->IsPaused() || PC->IsMoveInputIgnored() ||
+		PC->bShowMouseCursor || bWheelOpen)
+		return false;
+	if (const USlimeHealthComponent *H = GetOwner()->FindComponentByClass<USlimeHealthComponent>())
+		if (!H->IsAlive())
+			return false;
+	if (const USlimeDevourComponent *D = GetOwner()->FindComponentByClass<USlimeDevourComponent>())
+		if (D->IsCombatLocked() || D->IsPhantomWheelOpen())
+			return false;
+	if (const USlimeMorphComponent *M = GetOwner()->FindComponentByClass<USlimeMorphComponent>())
+		if (M->IsMorphing() || M->IsMorphed() || M->IsMorphWheelOpen())
+			return false;
+	if (const USlimeBuildModeComponent *B = GetOwner()->FindComponentByClass<USlimeBuildModeComponent>())
+		if (B->IsBuildInputActive())
+			return false;
+	return true;
+}
+void USlimeAbilityComponent::BeginLaunchAim()
+{
+	if (bAimSuppressedUntilRelease || !CanBeginLaunchAim())
+		return;
 	bCharging = true;
-	ChargeElapsed = 0.f;
-	LaunchExtraArcHeight = DefaultLaunchArcHeight;
-	LaunchRange = FMath::Clamp(DefaultLaunchRange, MinLaunchRange, MaxLaunchRange);
+	UpdateLaunchAim();
+}
+void USlimeAbilityComponent::CancelLaunchAim()
+{
+	bCharging = false;
+	bAimReachable = false;
+	bAimSuppressedUntilRelease = true;
 	PendingLaunchPath = FSlimeLaunchPath();
 }
-
+void USlimeAbilityComponent::BeginLaunchCharge()
+{
+	BeginLaunchAim();
+}
 void USlimeAbilityComponent::ReleaseLaunchCharge()
 {
-	if (!bCharging)
-	{
+	CancelLaunchAim();
+}
+bool USlimeAbilityComponent::CanFireLaunch() const
+{
+	return IsAimingLaunch() && bAimReachable && !bSeparationBlocked && CannonCooldown <= 0.f && Body->CanLaunchCannon();
+}
+FVector2D USlimeAbilityComponent::GetLaunchScreenCenter() const
+{
+ const APlayerController* PC=GetOwningPlayerController();
+ if (!PC) return FVector2D::ZeroVector;
+ if (const ULocalPlayer* Player=PC->GetLocalPlayer(); Player && Player->ViewportClient)
+ {
+  FSceneViewProjectionData Projection;
+  if (Player->GetProjectionData(Player->ViewportClient->Viewport,Projection))
+  {
+   const FIntRect Rect=Projection.GetConstrainedViewRect();
+   return FVector2D((Rect.Min.X+Rect.Max.X)*0.5,(Rect.Min.Y+Rect.Max.Y)*0.5);
+  }
+ }
+ int32 W=0,H=0; PC->GetViewportSize(W,H);
+ return FVector2D(W*0.5,H*0.5);
+}
+
+void USlimeAbilityComponent::UpdateLaunchAim()
+{
+	bAimReachable = false;
+	bAimBlocked = false;
+ bSeparationBlocked = false;
+	APlayerController *PC = GetOwningPlayerController();
+	if (!PC || !Body || !GetWorld())
 		return;
-	}
-	bCharging = false;
-
-	if (Body)
+	const FVector2D ScreenCenter=GetLaunchScreenCenter();
+	FVector Origin, Direction;
+	if (!PC->DeprojectScreenPositionToWorld(ScreenCenter.X, ScreenCenter.Y, Origin, Direction))
 	{
-		if (!PendingLaunchPath.bValid)
-		{
-			BuildLaunchPath(PendingLaunchPath);
-		}
-		if (PendingLaunchPath.bValid)
-		{
-			const int32 Launched = Body->LaunchChunkAlongPath(PendingLaunchPath);
-			if (Launched == 0)
-			{
-				UE_LOG(LogSlimeFable, Verbose, TEXT("Slime launch rejected: active shot limit or clone pool full."));
-			}
-		}
-		else
-		{
-			FVector Direction;
-			if (GetAimDirection(Direction))
-			{
-				const float Speed = FMath::Lerp(MinLaunchSpeed, MaxLaunchSpeed, GetLaunchCharge());
-				Body->LaunchChunk(Direction * Speed);
-			}
-		}
+		FRotator Rotation;
+		PC->GetPlayerViewPoint(Origin, Rotation);
+		Direction = Rotation.Vector();
 	}
-
-	ChargeElapsed = 0.f;
-	PendingLaunchPath = FSlimeLaunchPath();
+	FHitResult AimHit;
+	const FVector End = Origin + Direction * CannonAimDistance;
+	const bool bHit = Body->TraceShotWorld(AimHit, Origin, End);
+	CannonAim.Target = bHit ? AimHit.ImpactPoint : End;
+	CannonAim.Speed = FMath::Clamp(CannonSpeed, 100.f, FMath::Max(CannonMaxSpeed,100.f));
+	CannonAim.MaxSpeed = FMath::Max(CannonMaxSpeed,100.f);
+	CannonAim.Gravity = FMath::Max(CannonGravity,1.f);
+	bSeparationBlocked = !Body->PrepareCannonLaunch(CannonAim);
+ const FVector Start = Body->GetBlobCenter() + CannonAim.MuzzleOffset;
+ AimMuzzle = Start;
+	FVector Velocity;
+	float Time = 0;
+	bAimReachable = CannonAim.Solve(Start, Velocity, Time);
+	if (!bAimReachable)
+		return;
+	const float Radius = Body->GetCannonRadius();
+	FHitResult Hit;
+ if (bSeparationBlocked) return;
+	FVector Previous = Start;
+	const int32 Steps = FMath::Max(1, FMath::CeilToInt(Time / 0.02f));
+	for (int32 I = 1; I <= Steps; ++I)
+	{
+		const FVector Next = FSlimeCannonLaunch::Position(Start, Velocity, CannonAim.Gravity, Time * I / Steps);
+		if (Body->TraceShotWorld(Hit, Previous, Next, Radius))
+		{
+			// Hitting the target's surface early is expected for a sphere, not obstruction.
+			bAimBlocked = !(bHit && Hit.GetComponent() == AimHit.GetComponent()) &&
+						  FVector::DistSquared(Hit.ImpactPoint, CannonAim.Target) > FMath::Square(Radius * 2.f);
+			break;
+		}
+		Previous = Next;
+	}
+}
+bool USlimeAbilityComponent::TryFireAimedLaunch()
+{
+	if (LastFireFrame == GFrameCounter)
+		return false;
+	LastFireFrame = GFrameCounter;
+	if (!IsAimingLaunch())
+		return false;
+	UpdateLaunchAim();
+	if (!CanFireLaunch())
+		return false;
+	if (Body->LaunchCannonShot(CannonAim) == 0)
+		return false;
+	CannonCooldown = FMath::Max(CannonFireInterval, 0.01f);
+	return true;
+}
+bool USlimeAbilityComponent::ConsumeLaunchFireInput()
+{
+	APlayerController *PC = GetOwningPlayerController();
+	const UGameInstance *GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+	const USlimeInputSettings *Settings = GI ? GI->GetSubsystem<USlimeInputSettings>() : nullptr;
+	const bool Held =
+		PC && (Settings ? Settings->IsKeyDown(PC, ESlimeInputAction::Launch) : PC->IsInputKeyDown(EKeys::G));
+	if (!bCharging && Held)
+		BeginLaunchAim();
+	if (!bCharging && !Held)
+		return false;
+	if (bCharging && (Held || bGamepadALaunchArmed))
+		TryFireAimedLaunch();
+	return true;
 }
 
 void USlimeAbilityComponent::AdjustLaunchRange(int32 Step)
@@ -910,6 +1016,7 @@ void USlimeAbilityComponent::TrySwitchOrderedElement(int32 SlotIndex)
 
 void USlimeAbilityComponent::OpenFormation()
 {
+ CancelLaunchAim();
 	ASlimeFablePlayerController* PC = Cast<ASlimeFablePlayerController>(GetOwningPlayerController());
 	if (!PC || PC->HasUIInput(ESlimeUIInputReason::ElementFormation))
 	{
@@ -996,6 +1103,7 @@ void USlimeAbilityComponent::CloseHotbarConfirm()
 
 void USlimeAbilityComponent::OpenWheel()
 {
+ CancelLaunchAim();
 	if (bWheelOpen)
 	{
 		return;

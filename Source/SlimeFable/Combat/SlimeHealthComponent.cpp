@@ -12,6 +12,7 @@
 #include "GameFramework/Controller.h"
 #include "ProceduralMeshComponent.h"
 #include "SlimeBodyComponent.h"
+#include "SlimeAbilityComponent.h"
 #include "SlimeCombatComponent.h"
 #include "SlimeElementComponent.h"
 #include "EnemyCharacter.h"
@@ -171,6 +172,7 @@ float USlimeHealthComponent::ApplyDamage(float Damage, AActor* DamageCauser, con
 
 void USlimeHealthComponent::HandleDeath(AActor* DamageCauser)
 {
+ if (USlimeAbilityComponent* Ability=GetOwner()->FindComponentByClass<USlimeAbilityComponent>()) Ability->CancelLaunchAim();
 	// Final death only: lethal phase absorption has already returned before this point.
 	if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
 		if (auto* Collection = GI->GetSubsystem<USlimeNpcCollectionSubsystem>()) Collection->ReportDefeat(GetOwner());

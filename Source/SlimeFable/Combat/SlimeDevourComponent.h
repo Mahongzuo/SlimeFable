@@ -290,6 +290,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Devour")
 	TObjectPtr<UMaterialInterface> DigestDissolveMaterial;
+ UPROPERTY(EditAnywhere, Category="0_Config|Devour", meta=(ClampMin="0", ToolTip="体内被吞噬模型的菲涅尔轮廓发光强度，默认6；消化消失时同步关闭。"))
+ float DigestRimStrength = 6.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Devour", meta=(ToolTip="体内被吞噬模型轮廓光颜色，默认蓝白色。"))
+ FLinearColor DigestRimColor = FLinearColor(0.3f,0.7f,1.f);
+
 
 protected:
 	void TickPhase(float DeltaTime);

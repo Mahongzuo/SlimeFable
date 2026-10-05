@@ -11,7 +11,7 @@ FSlimeFacePose FSlimeFacePose::ForMood(ESlimeMood Mood)
 	{
 	case ESlimeMood::Idle:   P.EyeH = 3.8f; P.EyeW = 3.2f; P.Brow = 0.f;   P.Mouth = ESlimeMouth::Smile; P.Curve = 10.5f; P.Blush = 0.f;  break;
 	case ESlimeMood::Move:   P.EyeH = 3.6f; P.EyeW = 3.1f; P.Brow = 0.15f; P.Mouth = ESlimeMouth::Smile; P.Curve = 10.f;  P.Blush = 0.f;  break;
-	case ESlimeMood::Jump:   P.EyeH = 4.6f; P.EyeW = 2.5f; P.Brow = 0.4f;  P.Mouth = ESlimeMouth::O;     P.Curve = 2.f;  P.Blush = 0.f;   break;
+	case ESlimeMood::Jump:   P.EyeH = 2.0f; P.EyeW = 2.4f; P.Brow = 0.f;   P.Mouth = ESlimeMouth::W;     P.Curve = 2.f;  P.Blush = 0.f;   break;
 	case ESlimeMood::Attack: P.EyeH = 2.4f; P.EyeW = 3.2f; P.Brow = -0.8f; P.Mouth = ESlimeMouth::Grin;  P.Curve = 3.f;  P.Blush = 0.15f; break;
 	case ESlimeMood::Hurt:   P.EyeH = 1.4f; P.EyeW = 3.4f; P.Brow = -0.4f; P.Mouth = ESlimeMouth::Frown; P.Curve = 2.f;  P.Blush = 0.4f;  break;
 	case ESlimeMood::Happy:  P.EyeH = 1.1f; P.EyeW = 3.2f; P.Brow = 0.7f;  P.Mouth = ESlimeMouth::Grin;  P.Curve = 10.f; P.Blush = 0.35f; break;

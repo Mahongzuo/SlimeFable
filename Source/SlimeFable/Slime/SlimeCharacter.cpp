@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeCharacter.h"
+#include "SlimeUmbrellaComponent.h"
 
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -11,6 +12,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
 #include "SlimeAbilityComponent.h"
 #include "SlimeBodyComponent.h"
@@ -79,6 +81,7 @@ ASlimeCharacter::ASlimeCharacter(const FObjectInitializer& ObjectInitializer)
 		.SetDefaultSubobjectClass<USlimeSpringArmComponent>(TEXT("CameraBoom")))
 {
 	PrimaryActorTick.bCanEverTick = true;
+ SlimeUmbrella=CreateDefaultSubobject<USlimeUmbrellaComponent>(TEXT("SlimeUmbrella"));
 	bReplicates = true;
 	SetReplicateMovement(true);
 	FootstepSound = TSoftObjectPtr<USoundBase>(FSoftObjectPath(SlimeMoveAudio::DefaultFootstep));
@@ -295,6 +298,7 @@ void ASlimeCharacter::BeginPlay()
 			SlimeElement->SetElement(Progress->GetSavedElement(), true);
 		}
 	}
+	RegisterXRayOutline();
 }
 
 void ASlimeCharacter::PossessedBy(AController* NewController)
@@ -308,6 +312,22 @@ void ASlimeCharacter::PossessedBy(AController* NewController)
 			SlimeElement->SetElement(Progress->GetSavedElement(), true);
 		}
 	}
+	RegisterXRayOutline();
+}
+
+void ASlimeCharacter::RegisterXRayOutline()
+{
+	if (!IsLocallyControlled() || !SlimeBody || !SlimeBody->UsesScreenSpaceXRay())
+	{
+		return;
+	}
+	UMaterialInstanceDynamic* Outline = SlimeBody->GetXRayOutlineMID();
+	UCameraComponent* Camera = GetFollowCamera();
+	if (!Outline || !Camera)
+	{
+		return;
+	}
+	Camera->AddOrUpdateBlendable(Outline, 1.f);
 }
 
 void ASlimeCharacter::ApplyCameraViewLimits()
@@ -463,10 +483,11 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 		DeltaSeconds,
 		CameraZoomInterpSpeed);
 
-	if (bLockOnFramingActive)
-	{
-		return;
-	}
+	LaunchCameraBlend = FMath::FInterpConstantTo(LaunchCameraBlend, bChargingLaunch ? 1.f : 0.f,
+  DeltaSeconds, 1.f / FMath::Max(LaunchCameraBlendSeconds, 0.01f));
+ if (USlimeSpringArmComponent* SlimeBoom = Cast<USlimeSpringArmComponent>(Boom))
+  SlimeBoom->bAimWallAvoidance = bChargingLaunch || LaunchCameraBlend > 0.f;
+ if (bLockOnFramingActive && !bChargingLaunch && LaunchCameraBlend <= 0.f) return;
 
 	// Lower socket when zoomed in so the short slime stays framed (capsule ~40cm tall).
 	const float ArmAlpha = FMath::GetMappedRangeValueClamped(
@@ -474,11 +495,8 @@ void ASlimeCharacter::UpdateCameraZoom(float DeltaSeconds)
 		FVector2D(0.f, 1.f),
 		Boom->TargetArmLength);
 	const float DesiredSocketZ = FMath::Lerp(8.f, 20.f, ArmAlpha);
-	Boom->SocketOffset = FMath::VInterpTo(
-		Boom->SocketOffset,
-		FVector(0.f, 0.f, DesiredSocketZ),
-		DeltaSeconds,
-		CameraZoomInterpSpeed);
+	const float AimBlend=FMath::SmoothStep(0.f,1.f,LaunchCameraBlend);
+ Boom->SocketOffset=FVector(0.f,LaunchCameraShoulder*AimBlend,DesiredSocketZ+LaunchCameraHeight*AimBlend);
 }
 
 float ASlimeCharacter::AdjustCameraZoom(int32 WheelSteps)
@@ -507,6 +525,7 @@ void ASlimeCharacter::SetLockOnFramingArm(float FramingFloorArm, float FramingMa
 
 void ASlimeCharacter::SetDesiredCameraArmLengthClamped(float Length)
 {
+ if (SlimeAbilities && SlimeAbilities->IsAimingLaunch()) return;
 	const float MinArm = bLockOnFramingActive
 		? FMath::Max(CameraArmLengthMin, LockOnFramingFloorArm)
 		: CameraArmLengthMin;
@@ -670,6 +689,11 @@ void ASlimeCharacter::DoMove(float Right, float Forward)
 
 void ASlimeCharacter::Jump()
 {
+ if (LastUmbrellaJumpFrame==GFrameCounter) return;
+ LastUmbrellaJumpFrame=GFrameCounter;
+ if (SlimeUmbrella && GetCharacterMovement()->IsFalling() &&
+  (SlimeUmbrella->IsUmbrellaOpen() || JumpCurrentCount>=JumpMaxCount))
+ { SlimeUmbrella->ToggleUmbrella(); return; }
 	if (SlimeVehicle && SlimeVehicle->IsUsingVehicle())
 	{
 		return;
@@ -747,6 +771,7 @@ void ASlimeCharacter::Unstuck()
 
 void ASlimeCharacter::Landed(const FHitResult& Hit)
 {
+ if (SlimeUmbrella) SlimeUmbrella->CancelUmbrella();
 	Super::Landed(Hit);
 
 	if (SlimeBody)
@@ -824,11 +849,13 @@ void ASlimeCharacter::ApplyDamage(float Damage, AActor* DamageCauser, const FVec
 
 void ASlimeCharacter::HandleDeath()
 {
+ if (SlimeUmbrella) SlimeUmbrella->ResetUmbrellas();
 	if (bPlayerDead)
 	{
 		return;
 	}
 	bPlayerDead = true;
+ if (SlimeBody) SlimeBody->ClearFragments();
 
 	if (SlimeMorph && SlimeMorph->GetMorphTarget())
 	{
@@ -899,8 +926,16 @@ void ASlimeCharacter::FinishPlayerDeathReload()
 	}
 }
 
+void ASlimeCharacter::ResetUmbrellaFallOrigin()
+{
+ LastGroundedZ=GetActorLocation().Z;
+ bHasLastGroundedZ=true;
+}
+
 void ASlimeCharacter::TickFatalFall()
 {
+ if (SlimeUmbrella && SlimeUmbrella->IsUmbrellaOpen())
+ { ResetUmbrellaFallOrigin(); return; }
 	if (bPlayerDead)
 	{
 		return;

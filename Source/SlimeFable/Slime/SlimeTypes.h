@@ -55,6 +55,38 @@ struct FSlimeLaunchPath
 	bool bValid = false;
 };
 
+/** Shared analytic cannon trajectory in centimetres; independent of jelly damping. */
+struct FSlimeCannonLaunch
+{
+	FVector Target = FVector::ZeroVector;
+	// Body-relative departure points, frozen at click; no distant shot bounds involved.
+	FVector SeparationStartOffset = FVector::ZeroVector, MuzzleOffset = FVector::ZeroVector;
+	float Speed = 2800.f, MaxSpeed = 3600.f, Gravity = 980.f;
+	bool Solve(const FVector &Start, FVector &Velocity, float &FlightTime) const
+	{
+		const FVector D = Target - Start;
+		const double G = FMath::Max(double(Gravity), 1.0);
+		const double Distance = D.Size();
+		if (Distance < 1.0)
+			return false;
+		// Minimum energy speed reaches the point at the discriminant's tangent.
+		const double Required2 = G * (Distance + D.Z);
+		const double V2 = FMath::Max(FMath::Square(double(Speed)), Required2 * (1.0 + 1.e-6));
+		if (V2 > FMath::Square(double(FMath::Max(MaxSpeed, Speed))))
+			return false;
+		const double Disc = FMath::Max(V2 * V2 - 2.0 * G * D.Z * V2 - G * G * D.SizeSquared2D(), 0.0);
+		// Rationalised low-arc time avoids cancellation for close/vertical targets.
+		const double T2 = 2.0 * D.SizeSquared() / (V2 - G * D.Z + FMath::Sqrt(Disc));
+		FlightTime = float(FMath::Sqrt(FMath::Max(T2, 1.e-8)));
+		Velocity = D / FlightTime + FVector(0, 0, 0.5 * G * FlightTime);
+		return !Velocity.ContainsNaN();
+	}
+	static FVector Position(const FVector &Start, const FVector &Velocity, float G, float T)
+	{
+		return Start + Velocity * T + FVector(0, 0, -0.5 * G * T * T);
+	}
+};
+
 /**
  *  Tunable solver settings.
  *  Everything here is runtime data so particle budget and resolution can be changed

@@ -22,6 +22,24 @@ struct FSlimeBodyField
 };
 
 /**
+ *  Columns of the body density grid whose iso surface crosses the floor clip.
+ *  Mean and the second moments are in world centimetres on the XY plane, so the trail can
+ *  size a puddle from the mesh people actually see (bell flare included) rather than the particles.
+ *  Count < 6 means there was no floor clip this build.
+ */
+struct FSlimeFloorFootprint
+{
+	int32 Count = 0;
+	FVector2D Mean = FVector2D::ZeroVector;
+	double Cxx = 0.0;
+	double Cyy = 0.0;
+	double Cxy = 0.0;
+	float CellSize = 1.f;
+
+	bool IsValid() const { return Count >= 6; }
+};
+
+/**
  *  Turns the particle set into a triangle soup with marching cubes.
  *
  *  Body and ballistic fragments each get their own grid so a distant Q chunk cannot
@@ -58,7 +76,48 @@ public:
 	 *  colour R = (i + 1) / 255; the body and any shot without a slot get R = 0. The body material uses
 	 *  this to pick the per-cluster shell ellipsoid instead of the whole-component ObjectBounds.
 	 */
+	struct FVisualNeck { FVector Start, End; float Radius; uint8 ShotId; };
+	void SetVisualNecks(const TArray<FVisualNeck>& Necks) { VisualNecks = Necks; }
+	void SetConnectedShotRadius(float Radius) { ConnectedShotRadius = Radius; }
 	void SetShotSlotIds(const TArray<uint8>& Ids) { ShotSlotIds = Ids; }
+
+	/**
+	 *  Ground skirt for the next Build: when the body cluster is clipped at a floor, density in the
+	 *  slices within Height (cm) above it is dilated outwards by up to Spread (cm), fading to zero
+	 *  at Height, so the iso surface flares into a meniscus. Zero disables it.
+	 */
+	void SetGroundSkirt(float InHeight, float InSpread) { SkirtHeight = FMath::Max(InHeight, 0.f); SkirtSpread = FMath::Max(InSpread, 0.f); }
+
+	/**
+	 *  Dome bell flare for the next Build: within HeightFraction of the body's height above the floor,
+	 *  each slice is pushed out by Reach * (1-t)^Curve cm, so the base swings out from mid-body into a
+	 *  bell. Tip rounds the contact edge. Reach 0 disables it.
+	 */
+	void SetBellFlare(float InHeightFraction, float InReach, float InCurve, float InTip)
+	{
+		FlareHeightFraction = FMath::Clamp(InHeightFraction, 0.f, 1.f);
+		FlareReach = FMath::Max(InReach, 0.f);
+		FlareCurve = FMath::Max(InCurve, 0.5f);
+		FlareTip = FMath::Max(InTip, 0.f);
+	}
+
+	/**
+	 *  Spread sheet for the next Build: the body cluster becomes a volume-conserving heightfield.
+	 *  Each body particle carries Volume / N and spreads it with a normalised 2D kernel of radius
+	 *  KernelRadius, so thickness h(x,y) is thick in the middle and thin at the rim. The sheet sits
+	 *  on the weighted particle Z minus BaseOffset; samples thinner than MinThickness are outside.
+	 *  Particles more than DrapeDepth below their column base keep ordinary 3D splats (drips over
+	 *  edges). Blend lerps the ordinary field toward the sheet field; zero disables it.
+	 */
+	void SetSheetMode(float InBlend, float InVolume, float InKernelRadius, float InMinThickness, float InDrapeDepth, float InBaseOffset)
+	{
+		SheetBlend = FMath::Clamp(InBlend, 0.f, 1.f);
+		SheetVolume = FMath::Max(InVolume, 0.f);
+		SheetKernelRadius = FMath::Max(InKernelRadius, 0.5f);
+		SheetMinThickness = FMath::Max(InMinThickness, 0.f);
+		SheetDrapeDepth = FMath::Max(InDrapeDepth, 0.f);
+		SheetBaseOffset = InBaseOffset;
+	}
 
 	/** World space positions, MaxVertices long. */
 	const TArray<FVector>& GetVertices() const { return Vertices; }
@@ -86,6 +145,9 @@ public:
 	/** Body density snapshot from the last Build. Check IsValid(); empty when capture is off. */
 	const FSlimeBodyField& GetBodyField() const { return BodyField; }
 
+	/** Floor-crossing columns of the body cluster from the last Build. Invalid when nothing was clipped. */
+	const FSlimeFloorFootprint& GetBodyFloorFootprint() const { return BodyFloorFootprint; }
+
 private:
 	void BuildCluster(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, const FBox& Bounds, uint8 ShotFilter = 0);
 	void CaptureBodyField();
@@ -93,10 +155,39 @@ private:
 	/** ShotFilter selects one flying shot; MergingShots (when non-null) are included in the body splat. */
 	void SplatDensity(const TArray<SlimeSim::FSlimeParticle>& Particles, bool bBallisticSubset, uint8 ShotFilter, const TSet<uint8>* MergingShots);
 	void BlurDensity();
+	void ApplyGroundSkirt();
+	void ApplyBellFlare();
 	void ClipDensityBelowFloor();
 	void Triangulate();
+	/** Fills SheetDrapeMask and the per-column thickness / base sums for the body cluster. */
+	void BuildSheetColumns(const TArray<SlimeSim::FSlimeParticle>& Particles);
+	/** Density = lerp(Density, max(SheetDrapeField, heightfield), SheetBlend). */
+	void ApplySheetField();
+
+	bool HasGroundSkirt() const { return SkirtHeight > 0.f && SkirtSpread > 0.f; }
+	bool HasBellFlare() const { return FlareReach > 0.05f && FlareHeightFraction > 0.01f; }
+	bool HasSheet() const { return SheetBlend > 0.001f && SheetVolume > 0.f; }
+
+	float SheetBlend = 0.f;
+	float SheetVolume = 0.f;
+	float SheetKernelRadius = 8.f;
+	float SheetMinThickness = 0.3f;
+	float SheetDrapeDepth = 6.f;
+	float SheetBaseOffset = 0.f;
+	/** Per particle: 1 = ordinary 3D splat (drape / merging shot), 0 = folded into the sheet. */
+	TArray<uint8> SheetDrapeMask;
+	/** When set, the body splat only draws particles whose mask entry is non-zero. */
+	const TArray<uint8>* SplatMask = nullptr;
+	TArray<float> SheetColumnWeight;
+	TArray<float> SheetColumnZ;
+	TArray<float> SheetColumnHeight;
+	TArray<float> SheetDrapeField;
 
 	TSet<uint8> ActiveMergingShots;
+	TArray<FVisualNeck> VisualNecks;
+	TMap<uint8, FVector> ConnectedShotCenters;
+	float ConnectedShotRadius = 18.f;
+	FVector ConnectedBodyCenter = FVector::ZeroVector;
 
 	FORCEINLINE int32 SampleIndex(int32 X, int32 Y, int32 Z) const
 	{
@@ -174,7 +265,16 @@ private:
 	float ClipFloorZ = -1.e9f;
 	float BodyClipFloorZ = -1.e9f;
 	bool bClipFloorThisCluster = false;
+	/** Body cluster only: ClipDensityBelowFloor records the floor-crossing columns. */
+	bool bCollectFloorFootprint = false;
+	FSlimeFloorFootprint BodyFloorFootprint;
 	TMap<uint8, float> ShotClipFloors;
+	float SkirtHeight = 0.f;
+	float SkirtSpread = 0.f;
+	float FlareHeightFraction = 0.f;
+	float FlareReach = 0.f;
+	float FlareCurve = 2.f;
+	float FlareTip = 0.f;
 
 	/** Truncation coarsening multiplier (body cluster). */
 	float CellScale = 1.f;

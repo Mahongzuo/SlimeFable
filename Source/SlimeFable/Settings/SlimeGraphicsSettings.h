@@ -8,6 +8,7 @@
 #include "SlimeGraphicsSettings.generated.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSlimeBodySkinChanged, ESlimeBodySkin);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnSlimeBodyShapeChanged, ESlimeBodyShape);
 
 /**
  * GPU probe, first-run quality bucket, and optional DLSS/FSR.
@@ -138,11 +139,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Graphics")
 	void SetBodySkin(ESlimeBodySkin NewSkin);
 
-	/** Advances Spectral -> Volumetric -> Classic -> Spectral. Bound to the BodySkin input action (default 7). */
+	/** Advances Luminous -> Spectral -> Volumetric -> Classic -> Luminous. Bound to BodySkin (default 7). */
 	UFUNCTION(BlueprintCallable, Category = "Graphics")
 	void CycleBodySkin();
 
 	FOnSlimeBodySkinChanged OnBodySkinChanged;
+
+	/** Resting body silhouette. Persisted; USlimeBodyComponent listens to OnBodyShapeChanged. */
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	ESlimeBodyShape GetBodyShape() const { return BodyShape; }
+
+	UFUNCTION(BlueprintPure, Category = "Graphics")
+	FText GetBodyShapeDisplayName() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	void SetBodyShape(ESlimeBodyShape NewShape);
+
+	/** Ball -> Dome -> Ball. Bound to BodyShape (default 8). */
+	UFUNCTION(BlueprintCallable, Category = "Graphics")
+	void CycleBodyShape();
+
+	FOnSlimeBodyShapeChanged OnBodyShapeChanged;
 
 	void ApplyUpscaler() const;
 	void ApplyPixelStreaming() const;
@@ -190,7 +207,8 @@ protected:
 	bool bHasUserOrAutoQuality = false;
 	bool bPixelStreaming = false;
 	ESlimePixelStreamTarget PixelStreamTarget = ESlimePixelStreamTarget::Cloud;
-	ESlimeBodySkin BodySkin = ESlimeBodySkin::Spectral;
+	ESlimeBodySkin BodySkin = ESlimeBodySkin::Luminous;
+	ESlimeBodyShape BodyShape = ESlimeBodyShape::Ball;
 	FString PixelStreamingUrl;
 	FString CloudPixelStreamingUrl;
 	FString PixelStreamingPlayToken;

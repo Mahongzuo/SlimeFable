@@ -20,6 +20,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/MeshComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -147,6 +148,7 @@ bool USlimeDevourComponent::TrySwallowProp(AActor* Prop, float MaxDistance)
 	{
 		return false;
 	}
+	if (USlimeBodyComponent* BubbleBody = GetOwner()->FindComponentByClass<USlimeBodyComponent>()) BubbleBody->TriggerDevourBubbleBurst(Prop->GetActorLocation());
 	StoredProp = Prop;
 	StoredPropScale = Prop->GetActorScale3D();
 	bStoredPropCollision = Prop->GetActorEnableCollision();
@@ -1419,6 +1421,7 @@ void USlimeDevourComponent::SwallowTarget()
 	CaptureEnemy(Target, ActiveCapture);
 	PushPhantomSlot(ActiveCapture);
 	SpawnInnerMesh(ActiveCapture);
+	if (Body) Body->TriggerDevourBubbleBurst(GetBlobCenter() + FVector(0, 0, GetBlobRadius() * FMath::Clamp(InnerMeshLiftFraction, 0.f, 1.f)));
 
 	if (UGameInstance* GI = Target->GetGameInstance())
 	{
@@ -1850,6 +1853,22 @@ void USlimeDevourComponent::SpawnInnerMesh(const FSlimeDevourCapture& Capture)
 		}
 		InnerStatic->SetWorldTransform(MakeFittedInnerTransform());
 	}
+ UMeshComponent* DigestMesh = InnerPoseable ? static_cast<UMeshComponent*>(InnerPoseable) : static_cast<UMeshComponent*>(InnerStatic);
+ if (Body) Body->SetDigestBubbleSource(DigestMesh);
+ if (DigestMesh)
+ {
+  UMaterialInterface* Rim = LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Characters/Slime/Materials/M_DevourInnerRim.M_DevourInnerRim"));
+  if (Rim)
+  {
+   UMaterialInstanceDynamic* Glow = UMaterialInstanceDynamic::Create(Rim,this);
+   Glow->SetScalarParameterValue(TEXT("RimStrength"),DigestRimStrength);
+   Glow->SetVectorParameterValue(TEXT("RimColor"),DigestRimColor);
+   DigestMesh->SetOverlayMaterial(Glow);
+   DigestMesh->TranslucencySortPriority=Body && Body->GetSurfaceMesh() ? Body->GetSurfaceMesh()->TranslucencySortPriority+5 : 5;
+   DigestMesh->MarkRenderStateDirty();
+  }
+  else UE_LOG(LogSlimeFable,Warning,TEXT("Missing M_DevourInnerRim: inner glow unavailable"));
+ }
 }
 
 void USlimeDevourComponent::UpdateInnerMesh(float DeltaTime)
@@ -1888,6 +1907,10 @@ void USlimeDevourComponent::ApplyInnerDissolve(float Alpha)
 		{
 			return;
 		}
+        if (UMaterialInstanceDynamic* Glow = Cast<UMaterialInstanceDynamic>(Comp->GetOverlayMaterial()))
+        {
+            Glow->SetScalarParameterValue(TEXT("DigestVisibility"),Alpha);
+        }
 		if (Alpha <= 0.02f)
 		{
 			Comp->SetVisibility(false);
@@ -1920,6 +1943,7 @@ void USlimeDevourComponent::ApplyInnerDissolve(float Alpha)
 
 void USlimeDevourComponent::DestroyInnerMesh()
 {
+ if (Body) Body->SetDigestBubbleSource(nullptr);
 	if (InnerPoseable)
 	{
 		InnerPoseable->DestroyComponent();

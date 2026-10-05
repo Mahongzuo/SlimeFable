@@ -40,7 +40,9 @@ enum class ESlimeMouth : uint8
 	Grin,
 	Squint,
 	/** Tiny 3 / ω. Used by Bliss. */
-	Pucker
+	Pucker,
+	/** Compact w. Jump pairs this with inward chevron eyes (>w<). */
+	W
 };
 
 /** One authored face pose. Units are 2D reference pixels; the material rescales. */

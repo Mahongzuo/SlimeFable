@@ -26,7 +26,7 @@ struct FInputActionValue;
  *  Owns no simulation state of its own: everything routes through the public API on
  *  USlimeBodyComponent and USlimeElementComponent.
  */
-UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API USlimeAbilityComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -67,7 +67,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> AbsorbAction;
 
-	/** G: hold to aim, release to throw a chunk. */
+	/** G: hold to aim, click attack to fire; release cancels. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
 	TObjectPtr<UInputAction> LaunchAction;
 
@@ -80,6 +80,30 @@ public:
 	TObjectPtr<UInputAction> ElementCycleAction;
 
 	// ---- Launch ----------------------------------------------------------------------
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="0_Config|Launch", meta=(ClampMin="100", ToolTip="炮弹默认初速度，单位cm/s，默认2800；低弧弹道补偿重力"))
+ float CannonSpeed = 2800.f;
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="0_Config|Launch", meta=(ClampMin="100", ToolTip="不可达时允许提升的最高弹速，默认3600cm/s，与默认弹速联动"))
+ float CannonMaxSpeed = 3600.f;
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="0_Config|Launch", meta=(ClampMin="1", ToolTip="炮弹向下重力，默认980cm/s²；预测与飞行共用，不使用身体阻尼"))
+ float CannonGravity = 980.f;
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="0_Config|Launch", meta=(ClampMin="100", ToolTip="中心准星射线最远距离，默认4000cm，即40米"))
+ float CannonAimDistance = 4000.f;
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="0_Config|Launch", meta=(ClampMin="0.01", ToolTip="单次点击发射间隔，默认0.35秒；按住攻击不连射"))
+ float CannonFireInterval = 0.35f;
+
+ bool IsAimingLaunch() const { return bCharging && CanBeginLaunchAim(); }
+ bool CanFireLaunch() const;
+ bool IsLaunchPathBlocked() const { return bAimBlocked || bSeparationBlocked; }
+ bool IsLaunchSeparationBlocked() const { return bSeparationBlocked; }
+ FVector GetLaunchMuzzle() const { return AimMuzzle; }
+ FVector2D GetLaunchScreenCenter() const;
+ FVector GetLaunchAimTarget() const { return CannonAim.Target; }
+ void BeginLaunchAim();
+ void CancelLaunchAim();
+ bool TryFireAimedLaunch();
+ /** Returns true when attack belongs to aiming, even if cooldown prevents a shot. */
+ bool ConsumeLaunchFireInput();
+
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Launch", meta = (ClampMin = "100.0"))
 	float MinLaunchSpeed = 700.f;
@@ -144,7 +168,7 @@ public:
 	void TrySwitchOrderedElement(int32 SlotIndex);
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
-	bool IsChargingLaunch() const { return bCharging; }
+	bool IsChargingLaunch() const { return IsAimingLaunch(); }
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	float GetLaunchCharge() const;
@@ -182,6 +206,8 @@ private:
 	void CloseWheel(bool bCommit);
 	void OpenFormation();
 	void OpenHotbarConfirm(int32 SlotIndex);
+	bool CanBeginLaunchAim() const;
+	void UpdateLaunchAim();
 	void BeginLaunchCharge();
 	void ReleaseLaunchCharge();
 	void AdjustLaunchRange(int32 Step);
@@ -207,7 +233,13 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<USlimeHotbarConfirmWidget> HotbarConfirmWidget;
 
-	FSlimeLaunchPath PendingLaunchPath;
+ FVector AimMuzzle = FVector::ZeroVector;
+ bool bSeparationBlocked = false;
+ FSlimeCannonLaunch CannonAim;
+ bool bAimReachable = false, bAimBlocked = false, bAimSuppressedUntilRelease = false;
+ float CannonCooldown = 0.f;
+ uint64 LastFireFrame = MAX_uint64;
+ FSlimeLaunchPath PendingLaunchPath;
 	float LaunchExtraArcHeight = 80.f;
 	float LaunchRange = 1200.f;
 	float ChargeElapsed = 0.f;

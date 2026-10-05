@@ -13,6 +13,7 @@
 
 class ACharacter;
 class UCapsuleComponent;
+class UDecalComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UProceduralMeshComponent;
@@ -28,7 +29,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSlimeSqueezeChanged, float, Squee
  *  Squeeze probing lives here rather than in its own component so it can reuse the collider
  *  set and floor trace this component already pays for.
  */
-UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Slime), meta = (BlueprintSpawnableComponent, PrioritizeCategories = "0_Config"))
 class SLIMEFABLE_API USlimeBodyComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -69,6 +70,11 @@ public:
 	TSoftObjectPtr<UMaterialInterface> VolumetricBodyMaterialPath =
 		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeBody_Volumetric.M_SlimeBody_Volumetric")));
 
+	/** Fourth skin: exposure-compensated readable jelly, no density atlas. */
+	UPROPERTY(EditAnywhere, Category = "0_Config|Surface", meta = (ToolTip = "莹光果冻母材质或实例。默认 M_SlimeBody_Luminous；按 7 切换，缺失时回退光谱／经典。只影响第四种皮肤。"))
+	TSoftObjectPtr<UMaterialInterface> LuminousBodyMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeBody_Luminous.M_SlimeBody_Luminous")));
+
 	/** Opaque material on the hidden shadow-proxy mesh. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Surface")
 	TObjectPtr<UMaterialInterface> ShadowCasterMaterial;
@@ -84,6 +90,28 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Slime|Surface")
 	TSoftObjectPtr<UMaterialInterface> XRayMaterialPath =
 		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Materials/M_SlimeXRay.M_SlimeXRay")));
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|XRay", meta = (
+		ToolTip = "穿墙描边用屏幕空间剪影：身体网格只写 CustomDepth，相机后处理按像素描边，挤压和摊开都跟着变形。关掉就回到旧的菲涅尔网格。默认开。"))
+	bool bScreenSpaceXRay = true;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|XRay", meta = (EditCondition = "bScreenSpaceXRay",
+		ToolTip = "穿墙描边后处理材质。默认 M_SlimeXRayOutlinePP，挂在本地玩家相机上。XRayColor 跟着当前元素色。"))
+	TSoftObjectPtr<UMaterialInterface> XRayOutlineMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Materials/M_SlimeXRayOutlinePP.M_SlimeXRayOutlinePP")));
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|XRay", meta = (EditCondition = "bScreenSpaceXRay",
+		ToolTip = "穿墙剪影网格的材质。半透明并关闭深度测试，史莱姆完全躲在墙后也不会被遮挡剔除，仍写入 CustomDepth。默认 M_SlimeXRayDepthProxy。加载失败时退回不透明默认材质，墙后描边会再次丢失。"))
+	TSoftObjectPtr<UMaterialInterface> XRayDepthProxyMaterialPath =
+		TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Materials/M_SlimeXRayDepthProxy.M_SlimeXRayDepthProxy")));
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|XRay", meta = (EditCondition = "bScreenSpaceXRay", ClampMin = "0.0", ClampMax = "200.0",
+		ToolTip = "墙要比史莱姆近多少厘米才开始画描边。默认 3。调大则贴着薄墙时更不容易透出，调小则栅栏背面也会显示。传给后处理材质的 OcclusionBias。"))
+	float XRayOcclusionBias = 3.f;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|XRay", meta = (EditCondition = "bScreenSpaceXRay", ClampMin = "0.1", ClampMax = "200.0",
+		ToolTip = "描边从刚出现到完全不透明要再近多少厘米。默认 6。和 XRayOcclusionBias 一起传给后处理材质的 OcclusionRamp。"))
+	float XRayOcclusionRamp = 6.f;
 
 	/** Solver steps per second. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Stepping", meta = (ClampMin = "20.0", ClampMax = "90.0"))
@@ -205,6 +233,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.5", ClampMax = "2.0"))
 	float SpreadConcentrationScale = 1.15f;
 
+	UPROPERTY(EditAnywhere, Category = "0_Config|Spread", meta = (ClampMin = "1.0", ClampMax = "4.0",
+		ToolTip = "摊开时粒子水平间距相对静止间距的倍率，默认2.2。越大摊得越开、面积越大；1 = 不放宽（老行为）。"))
+	float SpreadLateralScale = 2.2f;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Spread", meta = (
+		ToolTip = "摊开时用体积守恒的薄饼高度场出网格：中间厚、边缘薄。关掉回到粒子球拼接（老行为）。"))
+	bool bSpreadSheet = true;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Spread", meta = (ClampMin = "0.2", ClampMax = "3.0", EditCondition = "bSpreadSheet",
+		ToolTip = "薄饼总体积相对静止球体积的倍率，默认1.0；>1 更厚，<1 更薄。"))
+	float SpreadSheetVolumeScale = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Spread", meta = (ClampMin = "0.5", ClampMax = "4.0", EditCondition = "bSpreadSheet",
+		ToolTip = "薄饼高度场的水平平滑核半径，相对粒子间距（含摊开放宽）的倍率，默认1.6。越大越圆润平滑，越小越贴粒子起伏。"))
+	float SpreadSheetKernelScale = 1.6f;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Spread", meta = (ClampMin = "0.0", ClampMax = "5.0", Units = "cm", EditCondition = "bSpreadSheet",
+		ToolTip = "薄饼比这个厚度更薄的地方当作没有粘液，厘米，默认0.3；决定边缘在哪里收口。"))
+	float SpreadSheetMinThickness = 0.3f;
+
+	UPROPERTY(EditAnywhere, Category = "0_Config|Spread", meta = (ClampMin = "1.0", ClampMax = "50.0", Units = "cm", EditCondition = "bSpreadSheet",
+		ToolTip = "粒子比所在位置薄饼底面低出这么多厘米就当作垂下边缘的粘液，改用普通粒子球画，默认6。"))
+	float SheetDrapeDepth = 6.f;
+
 	/** 越过边缘的粘液最多垂到边缘下方多少厘米（硬上限）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Spread", meta = (ClampMin = "0.0", ClampMax = "200.0",
 		ToolTip = "越过柱子/台阶边缘的粘液，最多垂到边缘下方多少厘米。默认 35，是硬上限；平时垂多深主要由 SpreadDrapeTension 决定。下方地面更高时会先落到地面上。"))
@@ -302,6 +354,102 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "0.5"))
 	float FragmentLifetime = 10.f;
 
+ UPROPERTY(EditAnywhere, Category="0_Config|Fragments", meta=(ClampMin="0.02", ToolTip="G发射拉颈分离时间，默认0.22秒。"))
+ float ShotSeparationSeconds = 0.22f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Fragments", meta=(ClampMin="0.1", ToolTip="G子球寿命末尾用于跳回融合的时间，默认3秒。"))
+ float ShotReturnSeconds = 3.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Fragments", meta=(ClampMin="0", ToolTip="回程小跳高度，单位厘米，默认20。"))
+ float ShotReturnHopHeight = 20.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Surface", meta=(ClampMin="0", ClampMax="1", ToolTip="从背面透过身体看到正面眼睛的强度，默认0.85（保留正面85%亮度）。"))
+ float RearEyeStrength = 0.85f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Surface", meta=(ClampMin="0", ToolTip="眼睛独立自发光强度，默认2，四种皮肤共用并做曝光补偿。"))
+ float EyeEmissionStrength = 2.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Surface", meta=(ClampMin="0", ClampMax="1", ToolTip="眼睛补光的环境亮度下限，默认0.65，越高暗处眼睛越清楚。"))
+ float EyeReadabilityFloor = 0.65f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="1", ToolTip="气泡随机放大的最小倍率，默认2，与最大倍率联动。"))
+ float BubbleSizeScaleMin = 2.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="1", ToolTip="气泡随机放大的最大倍率，默认5；常驻气泡每次重生重新取值。"))
+ float BubbleSizeScaleMax = 5.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0", ToolTip="气泡自身菲涅尔边缘高光倍率，默认4。"))
+ float BubbleEdgeStrength = 4.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.1", ClampMax="2", ToolTip="常驻气泡在随机半径基础上的显示倍率，默认0.65；降低可减少对表情的遮挡。"))
+ float BubbleVisualRadiusScale = 0.65f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.1", ClampMax="2", ToolTip="吞噬气泡在常驻显示半径基础上的倍率，默认0.55；形成物品周围的细泡与上升气流。"))
+ float DevourBubbleRadiusScale = 0.55f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.02", ClampMax="0.4", ToolTip="吞噬气泡穿出身体上缘后继续上升的距离，相对该处身体高度，默认0.12；随后膨胀破裂。"))
+ float DevourBubbleOverflowHeight = 0.12f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.01", ToolTip="常驻气泡到顶部后停留并膨胀破裂的秒数，默认0.25；结束后从底部重生。"))
+ float BubblePopSeconds = 0.25f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.005", ClampMax="0.25", ToolTip="气泡外缘亮边宽度相对半径的比例，默认0.12；控制球面菲涅尔亮边范围。"))
+ float BubbleRimWidth = 0.12f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0", ToolTip="气泡偏心高光倍率，默认0.12，同时用于常驻及吞噬爆发气泡。"))
+ float BubbleCoreStrength = 0.12f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0", ClampMax="32", ToolTip="常驻细小气泡数量，默认32，从身体下部上升。"))
+ int32 FineBubbleCount = 32;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.01", ToolTip="细小气泡最小半径，厘米，默认0.15。"))
+ float FineBubbleMinRadius = 0.15f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.01", ToolTip="细小气泡最大半径，厘米，默认0.45。"))
+ float FineBubbleMaxRadius = 0.45f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0", ClampMax="64", ToolTip="吞噬爆发气泡总上限，默认64，连续两次吞噬共享上限。"))
+ int32 DevourBubbleCount = 64;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.1", ToolTip="吞噬细泡爆发持续秒数，默认1.5。"))
+ float DevourBubbleSeconds = 1.5f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ToolTip="莹光果冻皮肤下把常驻气泡换成汽水气泡柱：更多、更小、更快，聚在身体一侧上升，只画高光点和淡边。默认开；其它皮肤不受影响。"))
+ bool bFizzBubbles = true;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0", ClampMax="96", EditCondition="bFizzBubbles", ToolTip="汽水气泡数量，默认64，替代常驻气泡数量（FineBubbleCount）。"))
+ int32 FizzBubbleCount = 64;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0.05", ClampMax="2", EditCondition="bFizzBubbles", ToolTip="汽水气泡半径相对常驻气泡的倍率，默认0.5。"))
+ float FizzRadiusScale = 0.5f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Bubbles", meta=(ClampMin="0", ClampMax="0.4", EditCondition="bFizzBubbles", ToolTip="气泡柱横向散开半径（相对身体半轴），默认0.12；越大气泡柱越粗。"))
+ float FizzColumnSpread = 0.12f;
+
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ToolTip="站在地上时身体底部向外翻出一圈贴地裙边（弯月面）。只改显示网格，碰撞和体积不变。默认开。"))
+ bool bGroundSkirt = true;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="0", ClampMax="30", Units="cm", EditCondition="bGroundSkirt", ToolTip="裙边影响的离地高度，厘米，默认5；至少会覆盖1.5个网格单元。"))
+ float SkirtHeight = 5.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="0", ClampMax="30", Units="cm", EditCondition="bGroundSkirt", ToolTip="裙边贴地处向外扩出的距离，厘米，默认8；越大底部越像摊开的水滴。"))
+ float SkirtSpread = 8.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ToolTip="脚下接触贴花：中心接触暗部 + 边缘一圈元素色透射光斑 + 湿润反光。默认开。"))
+ bool bContactDecal = true;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(EditCondition="bContactDecal", ToolTip="接触贴花材质，默认 M_SlimeContactDecal；颜色每帧从身体材质的 BaseColor 同步。"))
+ TSoftObjectPtr<UMaterialInterface> ContactDecalMaterialPath =
+  TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Characters/Slime/Materials/M_SlimeContactDecal.M_SlimeContactDecal")));
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0.8", ClampMax="2.5", ToolTip="扁圆顶形态（按 8 切换）下身体水平方向相对圆球的倍率，默认1.3；碰撞胶囊不变，宽出来的部分贴墙会被压扁。"))
+ float DomeWidthScale = 1.3f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0.25", ClampMax="1.2", ToolTip="扁圆顶形态下身体高度相对圆球的倍率，默认0.72；越小越扁。"))
+ float DomeHeightScale = 0.72f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0", ClampMax="1", ToolTip="扁圆顶形态下往上撑回原形的力相对圆球的倍率，默认0.5；越小越在重力下塌、晃得越软，太小会像一摊水。"))
+ float DomeUpwardRestoreScale = 0.5f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0.2", ClampMax="1.2", ToolTip="扁圆顶形态下身体质心锚点高度相对圆球的倍率，默认0.78；让矮身体坐在地面上而不是悬着。"))
+ float DomeAnchorHeightScale = 0.78f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0.01", ClampMax="3", Units="s", ToolTip="圆球与扁圆顶之间切换的过渡时间，秒，默认0.35。"))
+ float ShapeBlendTime = 0.35f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ToolTip="扁圆顶贴地时，从身体中下部开始向外摆成钟形裙边。只改显示网格，碰撞不变。默认开。"))
+ bool bDomeFlare = true;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0.1", ClampMax="0.8", EditCondition="bDomeFlare", ToolTip="钟形外摆从离地多高开始，相对身体离地高度的比例，默认0.45；越大越从高处就开始变宽。"))
+ float DomeFlareHeightFraction = 0.45f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0", ClampMax="40", Units="cm", EditCondition="bDomeFlare", ToolTip="贴地处比身体截面多宽出的距离，厘米，默认14。"))
+ float DomeFlareReach = 14.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="1", ClampMax="4", EditCondition="bDomeFlare", ToolTip="外摆曲线，默认2；越大越内凹像裙摆，1 接近直线斜坡。"))
+ float DomeFlareCurve = 2.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Shape", meta=(ClampMin="0", ClampMax="6", Units="cm", EditCondition="bDomeFlare", ToolTip="贴地边缘圆头的半径，厘米，默认1.5；避免最外缘收成刀刃。"))
+ float DomeFlareTip = 1.5f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="1", ClampMax="3", EditCondition="bContactDecal", ToolTip="外圈柔和阴影相对真实接触面（贴地/贴墙粒子拟合的椭圆）的倍率，默认1.25；1 = 只在接触面内，不外扩。"))
+ float ContactShadowExtent = 1.25f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="0", ClampMax="20", Units="cm", EditCondition="bContactDecal", ToolTip="接触面椭圆每个半轴额外外扩的厘米数，默认2；补上粒子外侧果冻表面露出的那一圈。"))
+ float ContactFootprintPadding = 2.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="1", ClampMax="30", Units="cm", EditCondition="bContactDecal", ToolTip="接触贴花的投影深度（半厚），厘米，默认6；越小越不会投到旁边的侧墙和台阶立面。"))
+ float ContactDepth = 6.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="0", ClampMax="1", Units="s", EditCondition="bContactDecal", ToolTip="接触面尺寸、位置的平滑时间，秒，默认0.1；0 = 不平滑（可能抖动）。"))
+ float ContactSmoothing = 0.1f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="0", ClampMax="5", EditCondition="bContactDecal", ToolTip="接触面边缘元素色焦散光环亮度，默认0（关闭）；0.5~1.2 可看到脚边一圈光斑。"))
+ float ContactCausticStrength = 0.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ClampMin="1", ClampMax="100", Units="cm", EditCondition="bContactDecal", ToolTip="身体离地超过该高度时接触贴花和接触带完全淡出，厘米，默认25。"))
+ float ContactFadeHeight = 25.f;
+ void SetDigestBubbleSource(class UMeshComponent* Source);
+ void TriggerDevourBubbleBurst(const FVector& WorldPosition);
+
+
 	/** Vertex budget ceiling while shots are in flight; the body keeps its normal budget and shots use the extra ~35%. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Chunk", meta = (ClampMin = "3000", ClampMax = "60000",
 		ToolTip = "有子球在飞时表面顶点预算上限。发射后本体不再让出 35% 预算，子球用额外的部分。默认 20000；过低会让本体顶部缺片（日志出现 vertex budget 警告）。"))
@@ -390,7 +538,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	UMaterialInterface* GetResolvedBodyMaterial() const { return ResolvedMaterial; }
 
-	/** Swaps the surface material between the classic / spectral / volumetric skins. Element MID is rebuilt by USlimeElementComponent. */
+	/** Swaps classic / spectral / volumetric / luminous skins. Element MID is rebuilt by USlimeElementComponent. */
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	void ApplyBodySkin(ESlimeBodySkin Skin);
 
@@ -406,6 +554,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsSpreading() const { return bSpread; }
+	/** 0 = gathered, 1 = fully spread. */
+	float GetSpreadBlend() const { return SpreadBlend; }
 
 	/** Temporary MaxStepHeight used while walking onto short props. 0 restores the default. */
 	void SetStepHeightBoost(float BoostedMaxStep);
@@ -420,7 +570,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Slime")
 	int32 LaunchChunk(const FVector& LaunchVelocity);
 
-	int32 LaunchChunkAlongPath(const FSlimeLaunchPath& Path);
+ int32 LaunchChunkAlongPath(const FSlimeLaunchPath& Path);
+ int32 LaunchCannonShot(const FSlimeCannonLaunch& Cannon);
+ bool CanLaunchCannon() const;
+ float GetCannonRadius() const { return Solver.GetScaledRestRadius() * FMath::Pow(FMath::Clamp(LaunchFraction, 0.05f, 0.6f), 1.f / 3.f); }
+ bool TraceShotWorld(FHitResult& Hit, const FVector& Start, const FVector& End, float Radius = 0.f, bool bIgnorePawns = false) const;
+ bool PrepareCannonLaunch(FSlimeCannonLaunch& Aim) const;
+ bool QueryShotGround(const FVector& Center, FHitResult& Hit) const;
+ void ConfigureShotUmbrellas(float Height,float Follow,float Fall,float MaxFall);
+ UPROPERTY(EditAnywhere, Category="0_Config|Launch", meta=(ClampMin="0", ToolTip="子球出射点在体表外额外预留的间隙，默认3厘米；与子球半径共同决定分离终点"))
+ float CannonClearance = 3.f;
+ UPROPERTY(EditAnywhere, Category="0_Config|Ground", meta=(ToolTip="子史莱姆复用本体接触阴影材质，随离地高度淡出；默认开启"))
+ bool bShotContactDecals = true;
+ FVector GetCannonMuzzle(const FSlimeCannonLaunch& Aim) const;
 
 	/** Combat tendrils: short-lived clone blobs that peel then get recalled. */
 	int32 LaunchTendril(const FVector& LaunchVelocity, float Fraction, float Life);
@@ -516,6 +678,59 @@ public:
 	/** World AABB of the attached body particles. */
 	UFUNCTION(BlueprintPure, Category = "Slime|Shell")
 	FBox GetBodyBounds() const { return Solver.GetBodyBounds(); }
+
+	/**
+	 *  Ellipse fitted to the body particles touching the floor (or the wall while clinging).
+	 *  HalfAxes are centimetres along MajorDir and the in-plane perpendicular. Confidence is 0..1.
+	 */
+	bool GetContactFootprint(FVector& OutCenter, FVector& OutNormal, FVector& OutMajorDir, FVector2D& OutHalfAxes, float& OutConfidence) const
+	{
+		if (!bContactValid)
+		{
+			return false;
+		}
+		OutCenter = ContactCenter;
+		OutNormal = ContactNormal;
+		OutMajorDir = ContactMajorDir;
+		OutHalfAxes = ContactHalfAxes;
+		OutConfidence = ContactFadeSmoothed;
+		return true;
+	}
+
+	/**
+	 *  Half-axes (cm) of the floor columns the mesh actually drew, projected onto MajorDir.
+	 *  A filled disc of radius R has variance R^2/4, so 2*sqrt(variance) is the radius; half a cell is added
+	 *  because the samples sit on grid points.
+	 */
+	static FVector2D FootprintHalfAxesFromMoments(const FSlimeFloorFootprint& Footprint, const FVector2D& MajorDir);
+
+	/** Smoothed mesh footprint. False until a floor clip has produced one. */
+	bool GetVisualContactHalfAxes(FVector2D& OutHalfAxes) const
+	{
+		if (!bVisualContactValid)
+		{
+			return false;
+		}
+		OutHalfAxes = VisualContactHalfAxes;
+		return true;
+	}
+
+	/** 1 while a dome is showing its bell, 0 for a ball and while spread (the sheet puddle stays as tuned). */
+	float GetDomeFootprintWeight() const;
+
+	bool UsesScreenSpaceXRay() const { return bScreenSpaceXRay; }
+	UMaterialInstanceDynamic* GetXRayOutlineMID() const { return XRayOutlineMID; }
+	/** Luminous morph skin clips against CustomDepth; stop the slime writing it for the transition. */
+	void SetXRayDepthSuppressed(bool bSuppressed);
+
+	/** Rest-shape scale the dome preset applies on top of the ball: (wide, wide, tall). (1,1,1) while a ball. */
+	FVector GetDomeAxisScale() const
+	{
+		const float Blend = FMath::SmoothStep(0.f, 1.f, ShapeBlend);
+		const float Wide = FMath::Lerp(1.f, DomeWidthScale, Blend);
+		const float Tall = FMath::Lerp(1.f, DomeHeightScale, Blend);
+		return FVector(Wide, Wide, Tall);
+	}
 
 	/** Shader slot count. Custom HLSL is unrolled; runtime uses BubbleCount. */
 	static constexpr int32 MaxBubbles = 10;
@@ -616,8 +831,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Slime")
 	bool IsClingingVisual() const { return bClingVisual; }
 
+	/** 0 = blocked, 1 = open sky. The luminous skins use this to ramp night readability. */
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	float GetAmbientScale() const { return AmbientScale; }
+
+	/** xyz points at the brightest directional light, w is visibility times elevation. */
+	UFUNCTION(BlueprintPure, Category = "Slime")
+	FVector4 GetKeyLightDir() const { return FVector4(KeyLightDir); }
+
 private:
 	void FixedStep(float StepDelta);
+	void ApplyCannonImpact(uint8 ShotId, AActor* Target, const FVector& Location);
 	void SweepKinematicShots();
 	void TickFragmentAttacks(float DeltaTime);
 	void RefreshColliders();
@@ -682,6 +906,9 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ResolvedVolumetricMaterial;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedLuminousMaterial;
+
 	/** R16F 2D atlas of the body density grid: TilesX x TilesY tiles of AtlasTileDim^2, one per Z slice. */
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> DensityAtlas;
@@ -708,6 +935,11 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> ResolvedXRayMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ResolvedXRayDepthProxy;
+
+	bool bLoggedMissingXRayDepthProxy = false;
 
 	float StepAccumulator = 0.f;
 	float SurfaceAccumulator = 0.f;
@@ -737,6 +969,46 @@ private:
 	float AmbientLogTimer = 0.f;
 	float AmbientTarget = 1.f;
 	float AmbientScale = 1.f;
+	struct FBubbleBurst { FVector Local = FVector::ZeroVector; float Started = -100.f; float Seed = 0.f; };
+	FBubbleBurst DevourBursts[2];
+	int32 NextDevourBurst = 0;
+ TWeakObjectPtr<class UMeshComponent> DigestBubbleSource;
+ UPROPERTY(Transient) TObjectPtr<UProceduralMeshComponent> BubbleVisualMesh;
+ UPROPERTY(Transient) TObjectPtr<UDecalComponent> ContactDecal;
+ void UpdateContactFootprint();
+ void UpdateVisualContactFootprint();
+ void UpdateContactDecal();
+ void EnsureXRayOutlineMaterial();
+ void ApplyXRayRenderMode();
+ void UpdateShotContactDecals();
+ UPROPERTY(Transient)
+ TMap<uint8,TObjectPtr<UDecalComponent>> ShotContactDecals;
+ /** Smoothed contact ellipse: centre on the contact plane, plane normal, major axis direction, half axes (cm). */
+ FVector ContactCenter = FVector::ZeroVector;
+ FVector ContactNormal = FVector::UpVector;
+ FVector ContactMajorDir = FVector::ForwardVector;
+ FVector2D ContactHalfAxes = FVector2D::ZeroVector;
+ /** Mesh floor-crossing ellipse, smoothed like ContactHalfAxes. Only used for the dome puddle. */
+ FVector2D VisualContactHalfAxes = FVector2D::ZeroVector;
+ bool bVisualContactValid = false;
+ UPROPERTY(Transient)
+ TObjectPtr<UMaterialInstanceDynamic> XRayOutlineMID;
+ bool bXRayDepthSuppressed = false;
+ /** 0 = ball, 1 = dome; eases toward the setting over ShapeBlendTime. */
+ float ShapeBlend = 0.f;
+ float ShapeTarget = 0.f;
+ FDelegateHandle BodyShapeChangedHandle;
+ void ApplyBodyShape(ESlimeBodyShape Shape);
+ float ContactFadeSmoothed = 0.f;
+ bool bContactValid = false;
+ bool bLuminousSkinActive = false;
+ /** Direction to the brightest visible directional light (w = visibility * elevation), refreshed with AmbientTarget. */
+ mutable FVector4f KeyLightDir = FVector4f(0.35f, 0.2f, 0.91f, 1.f);
+ mutable float KeyLightContribution = 0.f;
+ struct FVisibleBubble { FVector Local = FVector::ZeroVector; float Radius = 1.f; float Speed = 0.15f; float PopAge = -1.f; float Seed = 0.f; bool bValid = false; };
+ TArray<FVisibleBubble> VisibleBubbles;
+ void UpdateBubbleVisuals(float DeltaTime);
+
 	bool bAmbientPrimed = false;
 	float RecallElapsed = 0.f;
 	FVector SqueezeFreeDirection = FVector::UpVector;

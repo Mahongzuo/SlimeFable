@@ -17,6 +17,7 @@ class SLIMEFABLE_API USlimeSpringArmComponent : public USpringArmComponent
 
 public:
 	USlimeSpringArmComponent();
+ bool bAimWallAvoidance = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "0_Config|Camera",
 		meta = (ClampMin = "0.0", Units = "cm",

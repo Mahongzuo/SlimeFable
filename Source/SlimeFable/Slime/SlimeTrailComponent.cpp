@@ -84,9 +84,9 @@ FSlimeTrailProfile USlimeTrailComponent::MakeDefaultProfile(ESlimeElement Elemen
 		Profile.StampKind = ESlimeTrailStampKind::Decal;
 		Profile.DecalMaterial = TSoftObjectPtr<UMaterialInterface>(SlimeTrailDefaults::WaterDecal);
 		Profile.SpawnDistance = 16.f;
-		Profile.StampSize = 48.f;
-		Profile.StampLifetime = 3.f;
-		Profile.MaxStamps = 16;
+		Profile.StampSize = 40.f;
+		Profile.StampLifetime = 8.f;
+		Profile.MaxStamps = 48;
 		Profile.StampSizeJitter = 0.12f;
 		break;
 
@@ -94,9 +94,9 @@ FSlimeTrailProfile USlimeTrailComponent::MakeDefaultProfile(ESlimeElement Elemen
 		Profile.StampKind = ESlimeTrailStampKind::Decal;
 		Profile.DecalMaterial = TSoftObjectPtr<UMaterialInterface>(SlimeTrailDefaults::WindDecal);
 		Profile.SpawnDistance = 16.f;
-		Profile.StampSize = 44.f;
-		Profile.StampLifetime = 1.6f;
-		Profile.MaxStamps = 14;
+		Profile.StampSize = 40.f;
+		Profile.StampLifetime = 8.f;
+		Profile.MaxStamps = 48;
 		Profile.StampSizeJitter = 0.15f;
 		break;
 
@@ -129,9 +129,9 @@ FSlimeTrailProfile USlimeTrailComponent::MakeDefaultProfile(ESlimeElement Elemen
 		Profile.StampKind = ESlimeTrailStampKind::Decal;
 		Profile.DecalMaterial = TSoftObjectPtr<UMaterialInterface>(SlimeTrailDefaults::DarkDecal);
 		Profile.SpawnDistance = 16.f;
-		Profile.StampSize = 48.f;
-		Profile.StampLifetime = 3.5f;
-		Profile.MaxStamps = 16;
+		Profile.StampSize = 40.f;
+		Profile.StampLifetime = 8.f;
+		Profile.MaxStamps = 48;
 		Profile.StampSizeJitter = 0.12f;
 		break;
 
@@ -178,6 +178,8 @@ void USlimeTrailComponent::BeginPlay()
 	OwnerCharacter = Cast<ACharacter>(GetOwner());
 	ElementComponent = GetOwner() ? GetOwner()->FindComponentByClass<USlimeElementComponent>() : nullptr;
 	BodyComponent = GetOwner() ? GetOwner()->FindComponentByClass<USlimeBodyComponent>() : nullptr;
+ if (BodyComponent) AddTickPrerequisiteComponent(BodyComponent);
+ PrimaryComponentTick.TickGroup=TG_PostPhysics;
 
 	if (const ASlimeCharacter* Slime = Cast<ASlimeCharacter>(GetOwner()))
 	{
@@ -208,6 +210,7 @@ void USlimeTrailComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		ElementComponent->OnElementChanged.RemoveDynamic(this, &USlimeTrailComponent::HandleElementChanged);
 	}
 
+	ReleaseBodyPuddle(false);
 	ClearAttachedEffects();
 	ClearClingFireFx();
 	ClearShotLinkArcs();
@@ -239,6 +242,11 @@ void USlimeTrailComponent::HandleElementChanged(ESlimeElement NewElement, ESlime
 	if (NewElement != ESlimeElement::Lightning)
 	{
 		ClearShotLinkArcs();
+	}
+	const FSlimeTrailProfile& Previous = GetProfile(PreviousElement);
+	if (Previous.StampKind == ESlimeTrailStampKind::Decal)
+	{
+		ReleaseBodyPuddle(true, &Previous);
 	}
 	DistanceAccumulator = 0.f;
 	if (OwnerCharacter)
@@ -372,11 +380,13 @@ void USlimeTrailComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	TickActiveStamps(DeltaTime);
+	TickBodyPuddle(DeltaTime);
 	TickShotLinkArcs();
 	UpdateClingFireFx();
 
 	if (!bEnabled || !OwnerCharacter || !ElementComponent)
 	{
+		ShotTrailStates.Reset();
 		return;
 	}
 
@@ -386,6 +396,7 @@ void USlimeTrailComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		return;
 	}
 
+	TickShotTrails(Profile);
 	const FVector Location = OwnerCharacter->GetActorLocation();
 	if (!bHasLastStampLocation)
 	{
@@ -608,7 +619,32 @@ void USlimeTrailComponent::TryStamp(const FSlimeTrailProfile& Profile)
 
 	if (Profile.StampKind == ESlimeTrailStampKind::Decal)
 	{
-		StampDecal(Profile, Location, Normal, Size);
+		FVector2D HalfExtents(Size * 0.5f, Size * 0.5f);
+		FVector MajorDir = FVector::ZeroVector;
+		float Spin = FMath::FRandRange(0.f, 2.f * PI);
+		if (bPuddleFollowsContact && BodyComponent)
+		{
+			FVector ContactCenter;
+			FVector ContactNormal;
+			FVector ContactMajor;
+			FVector2D ContactAxes;
+			float Confidence = 0.f;
+			if (BodyComponent->GetContactFootprint(ContactCenter, ContactNormal, ContactMajor, ContactAxes, Confidence)
+				&& Confidence > 0.2f)
+			{
+				FVector2D VisualAxes = ContactAxes;
+				BodyComponent->GetVisualContactHalfAxes(VisualAxes);
+				const FVector Fitted = DecalSizeForShape(
+					ContactAxes, PuddleFootprintScale * Jitter,
+					VisualAxes, DomePuddleFootprintScale * Jitter,
+					BodyComponent->GetDomeFootprintWeight(), BodyPuddleDepth);
+				HalfExtents = FVector2D(Fitted.Y, Fitted.Z);
+				MajorDir = ContactMajor;
+				Normal = ContactNormal;
+				Spin = FMath::DegreesToRadians(FMath::FRandRange(-15.f, 15.f));
+			}
+		}
+		StampDecal(Profile, Location, Normal, HalfExtents, MajorDir, Spin);
 	}
 	else if (Profile.StampKind == ESlimeTrailStampKind::Niagara)
 	{
@@ -620,7 +656,9 @@ void USlimeTrailComponent::StampDecal(
 	const FSlimeTrailProfile& Profile,
 	const FVector& Location,
 	const FVector& Normal,
-	float Size)
+	const FVector2D& HalfExtents,
+	const FVector& MajorDir,
+	float SpinRadians)
 {
 	UMaterialInterface* Material = ResolveMaterial(Profile.DecalMaterial);
 	if (!Material || !GetOwner())
@@ -635,9 +673,14 @@ void USlimeTrailComponent::StampDecal(
 	}
 	MID->SetScalarParameterValue(SlimeTrailDefaults::FadeParam, 1.f);
 
-	const FQuat BaseQuat = FRotationMatrix::MakeFromX(-Normal).ToQuat();
-	const FQuat Spin = FQuat(Normal, FMath::FRandRange(0.f, 2.f * PI));
-	const FRotator Rotation = (Spin * BaseQuat).Rotator();
+	const FVector SafeNormal = Normal.GetSafeNormal();
+	FQuat BaseQuat = FRotationMatrix::MakeFromX(-SafeNormal).ToQuat();
+	const FVector FlatMajor = (MajorDir - SafeNormal * FVector::DotProduct(MajorDir, SafeNormal)).GetSafeNormal();
+	if (!FlatMajor.IsNearlyZero())
+	{
+		BaseQuat = FRotationMatrix::MakeFromXY(-SafeNormal, FlatMajor).ToQuat();
+	}
+	const FRotator Rotation = (FQuat(SafeNormal, SpinRadians) * BaseQuat).Rotator();
 
 	UDecalComponent* Decal = NewObject<UDecalComponent>(GetOwner());
 	if (!Decal)
@@ -646,9 +689,12 @@ void USlimeTrailComponent::StampDecal(
 	}
 
 	Decal->SetDecalMaterial(MID);
-	// UE decal: X = projection depth, Y/Z = footprint. StampSize ≈ footprint diameter in cm.
-	Decal->DecalSize = FVector(Size * 0.4f, Size, Size);
-	Decal->SetWorldLocationAndRotation(Location + Normal * 1.5f, Rotation);
+	// UE decal: X = projection depth, Y/Z = half-extents. The box is larger than the nominal
+	// puddle by the shader margin, so the noisy edge is not cut by the decal square.
+	const float Margin = PuddleBoxMargin(MID);
+	Decal->DecalSize = FVector(FMath::Max(BodyPuddleDepth, 1.f),
+		FMath::Max(HalfExtents.X, 0.5f) * Margin, FMath::Max(HalfExtents.Y, 0.5f) * Margin);
+	Decal->SetWorldLocationAndRotation(Location + SafeNormal * 1.5f, Rotation);
 	Decal->SetFadeScreenSize(0.001f);
 	Decal->RegisterComponent();
 
@@ -938,6 +984,170 @@ void USlimeTrailComponent::ClearShotLinkArcs()
 	ShotLinkArcs.Reset();
 }
 
+void USlimeTrailComponent::LeavePeakPuddle(const FSlimeTrailProfile& Profile)
+{
+	if (!bBodyPuddlePeakValid)
+	{
+		return;
+	}
+	StampDecal(Profile, BodyPuddlePeakCenter, BodyPuddlePeakNormal, BodyPuddlePeakHalf, BodyPuddlePeakMajor, 0.f);
+	BodyPuddlePeakArea = 0.f;
+	bBodyPuddlePeakValid = false;
+}
+
+void USlimeTrailComponent::ReleaseBodyPuddle(bool bLeaveDryingStamp, const FSlimeTrailProfile* LeaveProfile)
+{
+	if (bLeaveDryingStamp && BodyPuddleDecal && BodyPuddleFade > 0.05f)
+	{
+		const FSlimeTrailProfile* Profile = LeaveProfile;
+		FSlimeTrailProfile Current;
+		if (!Profile && ElementComponent)
+		{
+			Current = GetProfile(ElementComponent->CurrentElement);
+			Profile = &Current;
+		}
+		if (Profile && Profile->StampKind == ESlimeTrailStampKind::Decal)
+		{
+			const FVector LeaveAt = BodyPuddleDecal->GetComponentLocation() - BodyPuddlePeakNormal.GetSafeNormal() * 1.5;
+			StampDecal(*Profile, LeaveAt, BodyPuddlePeakNormal, BodyPuddleHalf, BodyPuddlePeakMajor, 0.f);
+		}
+	}
+	if (BodyPuddleDecal)
+	{
+		BodyPuddleDecal->DestroyComponent();
+		BodyPuddleDecal = nullptr;
+	}
+	BodyPuddleMID = nullptr;
+	BodyPuddleFade = 0.f;
+	BodyPuddleLostTime = 0.f;
+	BodyPuddlePeakArea = 0.f;
+	BodyPuddleHalf = FVector2D::ZeroVector;
+	bBodyPuddlePeakValid = false;
+}
+
+float USlimeTrailComponent::PuddleBoxMargin(const UMaterialInstanceDynamic* MID) const
+{
+	float Noise = 0.28f;
+	float Softness = 0.08f;
+	if (MID)
+	{
+		float Value = 0.f;
+		if (MID->GetScalarParameterValue(FMaterialParameterInfo(TEXT("EdgeNoise")), Value))
+		{
+			Noise = Value;
+		}
+		if (MID->GetScalarParameterValue(FMaterialParameterInfo(TEXT("EdgeSoftness")), Value))
+		{
+			Softness = Value;
+		}
+	}
+	return PuddleBoxMarginFrom(Noise, Softness);
+}
+
+void USlimeTrailComponent::TickBodyPuddle(float DeltaTime)
+{
+	if (!bBodyPuddle || !bEnabled || !ElementComponent || !BodyComponent || !GetOwner())
+	{
+		ReleaseBodyPuddle(false);
+		return;
+	}
+
+	const FSlimeTrailProfile& Profile = GetProfile(ElementComponent->CurrentElement);
+	const bool bBodyVisible = !SurfaceMesh || (SurfaceMesh->IsVisible() && !SurfaceMesh->bHiddenInGame);
+	if (Profile.StampKind != ESlimeTrailStampKind::Decal || !bBodyVisible)
+	{
+		ReleaseBodyPuddle(true, &Profile);
+		return;
+	}
+
+	FVector Center;
+	FVector Normal;
+	FVector Major;
+	FVector2D Axes;
+	float Confidence = 0.f;
+	const bool bHave = BodyComponent->GetContactFootprint(Center, Normal, Major, Axes, Confidence);
+	if (!bHave || Confidence < 0.2f)
+	{
+		BodyPuddleLostTime += DeltaTime;
+		if (BodyPuddleLostTime >= 0.1f)
+		{
+			ReleaseBodyPuddle(true, &Profile);
+		}
+		return;
+	}
+	BodyPuddleLostTime = 0.f;
+
+	const float Spread = FMath::SmoothStep(0.f, 1.f, BodyComponent->GetSpreadBlend());
+	const float SpreadMul = FMath::Lerp(1.f, BodyPuddleSpreadScale, Spread);
+	FVector2D VisualAxes = Axes;
+	BodyComponent->GetVisualContactHalfAxes(VisualAxes);
+	const FVector Fitted = DecalSizeForShape(
+		Axes, PuddleFootprintScale, VisualAxes, DomePuddleFootprintScale,
+		BodyComponent->GetDomeFootprintWeight(), BodyPuddleDepth);
+	const FVector2D Half(Fitted.Y * SpreadMul, Fitted.Z * SpreadMul);
+	const float Area = Half.X * Half.Y;
+
+	// Pulling back in from a spread leaves the wide puddle on the ground to dry.
+	if (bBodyPuddlePeakValid && BodyPuddlePeakArea > 1.f && Area < BodyPuddlePeakArea * 0.6f)
+	{
+		LeavePeakPuddle(Profile);
+	}
+	if (!bBodyPuddlePeakValid || Area >= BodyPuddlePeakArea)
+	{
+		BodyPuddlePeakCenter = Center;
+		BodyPuddlePeakNormal = Normal;
+		BodyPuddlePeakMajor = Major;
+		BodyPuddlePeakHalf = Half;
+		BodyPuddlePeakArea = Area;
+		bBodyPuddlePeakValid = true;
+	}
+
+	if (!BodyPuddleDecal)
+	{
+		UMaterialInterface* Material = ResolveMaterial(Profile.DecalMaterial);
+		if (!Material)
+		{
+			return;
+		}
+		BodyPuddleMID = UMaterialInstanceDynamic::Create(Material, this);
+		if (!BodyPuddleMID)
+		{
+			return;
+		}
+		BodyPuddleDecal = NewObject<UDecalComponent>(GetOwner(), TEXT("SlimeBodyPuddle"), RF_Transient);
+		BodyPuddleDecal->SetUsingAbsoluteLocation(true);
+		BodyPuddleDecal->SetUsingAbsoluteRotation(true);
+		BodyPuddleDecal->SetUsingAbsoluteScale(true);
+		BodyPuddleDecal->SetDecalMaterial(BodyPuddleMID);
+		BodyPuddleDecal->SetFadeScreenSize(0.001f);
+		BodyPuddleDecal->RegisterComponent();
+		BodyPuddleFade = 0.f;
+	}
+
+	const FVector SafeNormal = Normal.GetSafeNormal();
+	FQuat BaseQuat = FRotationMatrix::MakeFromX(-SafeNormal).ToQuat();
+	const FVector FlatMajor = (Major - SafeNormal * FVector::DotProduct(Major, SafeNormal)).GetSafeNormal();
+	if (!FlatMajor.IsNearlyZero())
+	{
+		BaseQuat = FRotationMatrix::MakeFromXY(-SafeNormal, FlatMajor).ToQuat();
+	}
+	BodyPuddleDecal->SetWorldLocationAndRotation(Center + SafeNormal * 1.5f, BaseQuat.Rotator());
+	BodyPuddleHalf = Half;
+	const float Margin = PuddleBoxMargin(BodyPuddleMID);
+	const FVector NewSize(Fitted.X, Half.X * Margin, Half.Y * Margin);
+	if (!BodyPuddleDecal->DecalSize.Equals(NewSize, 0.5f))
+	{
+		BodyPuddleDecal->DecalSize = NewSize;
+		BodyPuddleDecal->MarkRenderStateDirty();
+	}
+	BodyPuddleDecal->SetVisibility(true);
+	BodyPuddleFade = FMath::Min(BodyPuddleFade + DeltaTime / 0.25f, 1.f);
+	if (BodyPuddleMID)
+	{
+		BodyPuddleMID->SetScalarParameterValue(SlimeTrailDefaults::FadeParam, BodyPuddleFade);
+	}
+}
+
 void USlimeTrailComponent::TickActiveStamps(float DeltaTime)
 {
 	for (int32 Index = ActiveStamps.Num() - 1; Index >= 0; --Index)
@@ -1031,4 +1241,52 @@ USkeletalMesh* USlimeTrailComponent::ResolveSampleMesh() const
 		return nullptr;
 	}
 	return LightningSampleMesh.LoadSynchronous();
+}
+
+void USlimeTrailComponent::TickShotTrails(const FSlimeTrailProfile& Profile)
+{
+ TSet<uint8> Alive;
+ if (bShotGroundEffects && BodyComponent)
+ for (const FSlimeSolver::FShotState& Shot:BodyComponent->GetShotStates())
+ {
+  if (BodyComponent->IsRecalling() && !Shot.bKeepUntilMerged) continue;
+  Alive.Add(Shot.Id);
+  FShotTrailState& State=ShotTrailStates.FindOrAdd(Shot.Id);
+  const FVector Position(Shot.Center);
+  const float Ratio=FMath::Clamp(BodyComponent->GetMiniMembraneRadius()/FMath::Max(BodyComponent->SolverParams.RestRadius,1.f),0.1f,1.f);
+  const bool Landing=Shot.LandingEvent!=State.LandingEvent;
+  const bool Eligible=Shot.bGrounded && Shot.bHasSupport &&
+   (Shot.Phase==FSlimeSolver::EShotPhase::Active || Shot.Phase==FSlimeSolver::EShotPhase::Returning);
+  if (Eligible && State.bInitialized && State.bGrounded)
+   State.Distance+=FVector::Dist2D(State.LastPosition,Position);
+  else State.Distance=0.f;
+  State.LastPosition=Position;
+  State.bInitialized=true;
+  State.bGrounded=Eligible;
+  State.LandingEvent=Shot.LandingEvent;
+  const float Spacing=FMath::Max(Profile.SpawnDistance*Ratio,3.f);
+  if (!Eligible || (!Landing && State.Distance<Spacing)) continue;
+  State.Distance=FMath::Fmod(State.Distance,Spacing);
+  while (ActiveStamps.Num()>=FMath::Max(Profile.MaxStamps,1)) RecycleOldestStamp();
+  const float Size=FMath::Max(Profile.StampSize*Ratio*(1.f+FMath::FRandRange(-Profile.StampSizeJitter,Profile.StampSizeJitter)),0.01f);
+  if (Profile.StampKind==ESlimeTrailStampKind::Decal)
+   StampDecal(Profile,Shot.SupportPoint,Shot.SupportNormal,FVector2D(Size*0.5f),FVector::ZeroVector,FMath::FRandRange(0.f,2.f*PI));
+  else if (Profile.bGroundNiagaraIsArc)
+  {
+   if (UNiagaraSystem* System=ResolveNiagara(Profile.GroundNiagara))
+   {
+    UNiagaraComponent* Fx=UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(),System,Position,FRotator::ZeroRotator,FVector(Size),false,false,ENCPoolMethod::None,true);
+    if (Fx)
+    {
+     ConfigureTeslaArc(Fx);
+     Fx->SetVariablePosition(SlimeTrailDefaults::PositionTarget,Shot.SupportPoint);
+     Fx->Activate(true);
+     FActiveStamp Stamp; Stamp.Niagara=Fx; Stamp.Lifetime=Profile.StampLifetime; Stamp.bIsArc=true; ActiveStamps.Add(Stamp);
+    }
+   }
+  }
+  else if (Profile.StampKind==ESlimeTrailStampKind::Niagara)
+   StampGroundNiagara(Profile,Shot.SupportPoint,Shot.SupportNormal,Size);
+ }
+ for (auto It=ShotTrailStates.CreateIterator();It;++It) if (!Alive.Contains(It.Key())) It.RemoveCurrent();
 }

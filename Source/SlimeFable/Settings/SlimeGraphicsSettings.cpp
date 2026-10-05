@@ -41,6 +41,7 @@ namespace SlimeGraphicsPrivate
 	static const TCHAR* KeyPixelStreamTarget = TEXT("PixelStreamTarget");
 	static const TCHAR* KeyPixelStreamingPlayToken = TEXT("PixelStreamingPlayToken");
 	static const TCHAR* KeyBodySkin = TEXT("BodySkin");
+	static const TCHAR* KeyBodyShape = TEXT("BodyShape");
 	static const TCHAR* LanStreamerUrl = TEXT("ws://127.0.0.1:18888");
 	static const TCHAR* DefaultCloudStreamerUrl = TEXT("wss://been.chat/ps/streamer");
 	static const TCHAR* CloudPlayPage = TEXT("https://been.chat/play");
@@ -836,6 +837,7 @@ FText USlimeGraphicsSettings::GetBodySkinDisplayName() const
 	{
 	case ESlimeBodySkin::Spectral: return FText::FromString(TEXT("史莱姆皮肤：光谱折射"));
 	case ESlimeBodySkin::Volumetric: return FText::FromString(TEXT("史莱姆皮肤：体积折射"));
+	case ESlimeBodySkin::Luminous: return FText::FromString(TEXT("史莱姆皮肤：莹光果冻"));
 	default: return FText::FromString(TEXT("史莱姆皮肤：经典果冻"));
 	}
 }
@@ -844,7 +846,7 @@ void USlimeGraphicsSettings::SetBodySkin(ESlimeBodySkin NewSkin)
 {
 	if (NewSkin >= ESlimeBodySkin::COUNT)
 	{
-		NewSkin = ESlimeBodySkin::Spectral;
+		NewSkin = ESlimeBodySkin::Luminous;
 	}
 	if (BodySkin == NewSkin)
 	{
@@ -858,13 +860,42 @@ void USlimeGraphicsSettings::SetBodySkin(ESlimeBodySkin NewSkin)
 
 void USlimeGraphicsSettings::CycleBodySkin()
 {
-	// Spectral (default) -> Volumetric -> Classic -> Spectral.
+	// Luminous (default) -> Spectral -> Volumetric -> Classic -> Luminous.
 	switch (BodySkin)
 	{
+	case ESlimeBodySkin::Luminous: SetBodySkin(ESlimeBodySkin::Spectral); break;
 	case ESlimeBodySkin::Spectral: SetBodySkin(ESlimeBodySkin::Volumetric); break;
 	case ESlimeBodySkin::Volumetric: SetBodySkin(ESlimeBodySkin::Classic); break;
-	default: SetBodySkin(ESlimeBodySkin::Spectral); break;
+	default: SetBodySkin(ESlimeBodySkin::Luminous); break;
 	}
+}
+
+FText USlimeGraphicsSettings::GetBodyShapeDisplayName() const
+{
+	return BodyShape == ESlimeBodyShape::Dome
+		? FText::FromString(TEXT("史莱姆形态：扁圆顶"))
+		: FText::FromString(TEXT("史莱姆形态：圆球"));
+}
+
+void USlimeGraphicsSettings::SetBodyShape(ESlimeBodyShape NewShape)
+{
+	if (NewShape >= ESlimeBodyShape::COUNT)
+	{
+		NewShape = ESlimeBodyShape::Ball;
+	}
+	if (BodyShape == NewShape)
+	{
+		return;
+	}
+	BodyShape = NewShape;
+	Save();
+	OnBodyShapeChanged.Broadcast(BodyShape);
+	UE_LOG(LogSlimeFable, Log, TEXT("Body shape -> %s"), *GetBodyShapeDisplayName().ToString());
+}
+
+void USlimeGraphicsSettings::CycleBodyShape()
+{
+	SetBodyShape(BodyShape == ESlimeBodyShape::Ball ? ESlimeBodyShape::Dome : ESlimeBodyShape::Ball);
 }
 
 void USlimeGraphicsSettings::CyclePixelStreamTarget()
@@ -1200,6 +1231,7 @@ void USlimeGraphicsSettings::Save()
 	GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingUrl, *CloudPixelStreamingUrl, GGameUserSettingsIni);
 	GConfig->SetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamTarget, static_cast<int32>(PixelStreamTarget), GGameUserSettingsIni);
 	GConfig->SetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyBodySkin, static_cast<int32>(BodySkin), GGameUserSettingsIni);
+	GConfig->SetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyBodyShape, static_cast<int32>(BodyShape), GGameUserSettingsIni);
 	if (!PixelStreamingPlayToken.IsEmpty())
 	{
 		GConfig->SetString(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyPixelStreamingPlayToken, *PixelStreamingPlayToken, GGameUserSettingsIni);
@@ -1251,11 +1283,18 @@ void USlimeGraphicsSettings::Load()
 		PixelStreamTarget = static_cast<ESlimePixelStreamTarget>(
 			FMath::Clamp(TargetInt, 0, static_cast<int32>(ESlimePixelStreamTarget::Lan)));
 	}
-	int32 SkinInt = static_cast<int32>(ESlimeBodySkin::Spectral);
+	int32 SkinInt = static_cast<int32>(ESlimeBodySkin::Luminous);
 	if (GConfig->GetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyBodySkin, SkinInt, GGameUserSettingsIni))
 	{
 		BodySkin = static_cast<ESlimeBodySkin>(
 			FMath::Clamp(SkinInt, 0, static_cast<int32>(ESlimeBodySkin::COUNT) - 1));
+	}
+	int32 ShapeInt = static_cast<int32>(ESlimeBodyShape::Ball);
+	if (GConfig->GetInt(SlimeGraphicsPrivate::ConfigSection, SlimeGraphicsPrivate::KeyBodyShape, ShapeInt, GGameUserSettingsIni))
+	{
+		BodyShape = (ShapeInt >= 0 && ShapeInt < static_cast<int32>(ESlimeBodyShape::COUNT))
+			? static_cast<ESlimeBodyShape>(ShapeInt)
+			: ESlimeBodyShape::Ball;
 	}
 	LoadPlayToken();
 	FString CmdUrl;

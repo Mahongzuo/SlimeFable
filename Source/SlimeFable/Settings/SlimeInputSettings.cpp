@@ -18,7 +18,7 @@ namespace SlimeInputPrivate
 	static const TCHAR* SchemeVersionKey = TEXT("BindSchemeVersion");
 	static const TCHAR* PlayModeKey = TEXT("PlayInputMode");
 	static const TCHAR* HandednessKey = TEXT("TouchHandedness");
-	static constexpr int32 CurrentBindSchemeVersion = 8;
+	static constexpr int32 CurrentBindSchemeVersion = 9;
 
 	/** ThirdPerson template move/jump context — removed when move keys are customized. */
 	static const TCHAR* DefaultMoveContextPath =
@@ -102,6 +102,7 @@ FKey USlimeInputSettings::GetDefaultKey(ESlimeInputAction Action)
 	case ESlimeInputAction::BuildCatalog: return EKeys::F1;
 	case ESlimeInputAction::BuildClearMode: return EKeys::X;
 	case ESlimeInputAction::Stats: return EKeys::K;
+	case ESlimeInputAction::BodyShape: return EKeys::Eight;
 	default: return EKeys::Invalid;
 	}
 }
@@ -169,6 +170,7 @@ FText USlimeInputSettings::GetActionDisplayName(ESlimeInputAction Action) const
 	case ESlimeInputAction::BuildCatalog: return FText::FromString(TEXT("建造目录"));
 	case ESlimeInputAction::BuildClearMode: return FText::FromString(TEXT("建造清除"));
 	case ESlimeInputAction::Stats: return FText::FromString(TEXT("属性"));
+	case ESlimeInputAction::BodyShape: return FText::FromString(TEXT("史莱姆形态"));
 	default: return FText::GetEmpty();
 	}
 }
@@ -331,7 +333,8 @@ void USlimeInputSettings::MigrateBindSchemeIfNeeded()
 		ESlimeInputAction::BodySkin, // v7
 		ESlimeInputAction::Stats,
 		ESlimeInputAction::BuildCatalog, // v8
-		ESlimeInputAction::BuildClearMode
+		ESlimeInputAction::BuildClearMode,
+		ESlimeInputAction::BodyShape // v9
 	};
 	for (ESlimeInputAction Action : NewActions)
 	{

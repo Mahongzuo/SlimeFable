@@ -161,7 +161,14 @@ void USlimeCombatComponent::HandleAttack()
 	{
 		return;
 	}
-	TryComboAttack();
+	if (Abilities && Abilities->ConsumeLaunchFireInput())
+	{
+		bComboQueued = false;
+	}
+	else
+	{
+		TryComboAttack();
+	}
 }
 void USlimeCombatComponent::HandleSkill1()
 {
@@ -522,7 +529,14 @@ void USlimeCombatComponent::PollCombatKeys(float DeltaTime)
 
 	if (WasPressed(ESlimeInputAction::Attack, EKeys::LeftMouseButton))
 	{
-		TryComboAttack();
+		if (Abilities && Abilities->ConsumeLaunchFireInput())
+		{
+			bComboQueued = false;
+		}
+		else
+		{
+			TryComboAttack();
+		}
 	}
 
 	USlimeDevourComponent* DevourComp = Devour.Get();

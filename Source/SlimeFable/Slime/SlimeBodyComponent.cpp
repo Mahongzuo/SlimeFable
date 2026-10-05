@@ -1,16 +1,23 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeBodyComponent.h"
+#include "SlimeUmbrellaComponent.h"
+#include "SlimeAbilityComponent.h"
+#include "Components/MeshComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Camera/PlayerCameraManager.h"
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/DecalComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/Texture2D.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Math/Float16.h"
@@ -72,6 +79,9 @@ namespace SlimeBodyPrivate
 	static const FName ParamShellCenter(TEXT("ShellCenter"));
 	static const FName ParamShellAxes(TEXT("ShellAxes"));
 	static const FName ParamShellForward(TEXT("ShellForward"));
+	/** Jelly optics (slime_jelly_optics_hlsl.py): floor height for the contact band, key light for the highlight. */
+	static const FName ParamContactFloorZ(TEXT("ContactFloorZ"));
+	static const FName ParamKeyLightDir(TEXT("KeyLightDir"));
 	/** Shot cluster ellipsoids (xyz = centre, a = radius); slot order = USlimeBodyComponent::GetShotSlotIds(). */
 	static const FName ParamShotCenter[USlimeBodyComponent::MaxShotSlots] = {
 		FName(TEXT("ShotCenter0")), FName(TEXT("ShotCenter1")), FName(TEXT("ShotCenter2")),
@@ -173,11 +183,15 @@ void USlimeBodyComponent::BeginPlay()
 	}
 
 	ResolveMaterial();
+	EnsureXRayOutlineMaterial();
 
 	if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
 	{
 		ApplyBodySkin(Graphics->GetBodySkin());
 		BodySkinChangedHandle = Graphics->OnBodySkinChanged.AddUObject(this, &USlimeBodyComponent::ApplyBodySkin);
+		ApplyBodyShape(Graphics->GetBodyShape());
+		ShapeBlend = ShapeTarget;
+		BodyShapeChangedHandle = Graphics->OnBodyShapeChanged.AddUObject(this, &USlimeBodyComponent::ApplyBodyShape);
 	}
 
 	if (Quality == ESlimeSimQuality::High)
@@ -210,6 +224,11 @@ void USlimeBodyComponent::ApplyParams()
 
 void USlimeBodyComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+ for (auto& Pair:ShotContactDecals) if (Pair.Value) Pair.Value->DestroyComponent();
+ ShotContactDecals.Reset();
+ Solver.QueryGround=nullptr;
+ Solver.QueryUmbrellaGround=nullptr;
+ Solver.TraceSeparation=nullptr;
 	if (BodySkinChangedHandle.IsValid())
 	{
 		if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
@@ -217,6 +236,14 @@ void USlimeBodyComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			Graphics->OnBodySkinChanged.Remove(BodySkinChangedHandle);
 		}
 		BodySkinChangedHandle.Reset();
+	}
+	if (BodyShapeChangedHandle.IsValid())
+	{
+		if (USlimeGraphicsSettings* Graphics = GetGraphicsSettings())
+		{
+			Graphics->OnBodyShapeChanged.Remove(BodyShapeChangedHandle);
+		}
+		BodyShapeChangedHandle.Reset();
 	}
 	ReleaseDensityAtlas();
 	Super::EndPlay(EndPlayReason);
@@ -229,9 +256,19 @@ USlimeGraphicsSettings* USlimeBodyComponent::GetGraphicsSettings() const
 	return GameInstance ? GameInstance->GetSubsystem<USlimeGraphicsSettings>() : nullptr;
 }
 
+void USlimeBodyComponent::ApplyBodyShape(ESlimeBodyShape Shape)
+{
+	ShapeTarget = Shape == ESlimeBodyShape::Dome ? 1.f : 0.f;
+}
+
 void USlimeBodyComponent::ApplyBodySkin(ESlimeBodySkin Skin)
 {
 	bool bWantVolumetric = false;
+	if (Skin == ESlimeBodySkin::Luminous && !ResolvedLuminousMaterial)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: luminous body material missing on '%s'; falling back to spectral."), *GetNameSafe(GetOwner()));
+		Skin = ESlimeBodySkin::Spectral;
+	}
 	if (Skin == ESlimeBodySkin::Volumetric)
 	{
 		if (ResolvedVolumetricMaterial)
@@ -246,7 +283,11 @@ void USlimeBodyComponent::ApplyBodySkin(ESlimeBodySkin Skin)
 	}
 
 	UMaterialInterface* Wanted = ResolvedClassicMaterial;
-	if (bWantVolumetric)
+	if (Skin == ESlimeBodySkin::Luminous)
+	{
+		Wanted = ResolvedLuminousMaterial;
+	}
+	else if (bWantVolumetric)
 	{
 		Wanted = ResolvedVolumetricMaterial;
 	}
@@ -266,6 +307,7 @@ void USlimeBodyComponent::ApplyBodySkin(ESlimeBodySkin Skin)
 		return;
 	}
 
+	bLuminousSkinActive = Skin == ESlimeBodySkin::Luminous;
 	// Only the volumetric skin pays for the density snapshot + GPU upload.
 	bVolumetricActive = bWantVolumetric;
 	Surface.SetCaptureBodyField(bVolumetricActive);
@@ -466,7 +508,13 @@ void USlimeBodyComponent::ResolveMaterial()
 	{
 		ResolvedVolumetricMaterial = VolumetricBodyMaterialPath.LoadSynchronous();
 	}
-	ResolvedMaterial = ResolvedSpectralMaterial ? ResolvedSpectralMaterial : ResolvedClassicMaterial;
+	if (!LuminousBodyMaterialPath.IsNull())
+	{
+		ResolvedLuminousMaterial = LuminousBodyMaterialPath.LoadSynchronous();
+	}
+	ResolvedMaterial = ResolvedLuminousMaterial ? ResolvedLuminousMaterial
+		: (ResolvedSpectralMaterial ? ResolvedSpectralMaterial : ResolvedClassicMaterial);
+	bLuminousSkinActive = ResolvedMaterial && ResolvedMaterial == ResolvedLuminousMaterial;
 
 	ResolvedShadowMaterial = ShadowCasterMaterial;
 	if (!ResolvedShadowMaterial && !ShadowCasterMaterialPath.IsNull())
@@ -478,6 +526,11 @@ void USlimeBodyComponent::ResolveMaterial()
 	if (!ResolvedXRayMaterial && !XRayMaterialPath.IsNull())
 	{
 		ResolvedXRayMaterial = XRayMaterialPath.LoadSynchronous();
+	}
+
+	if (!XRayDepthProxyMaterialPath.IsNull())
+	{
+		ResolvedXRayDepthProxy = XRayDepthProxyMaterialPath.LoadSynchronous();
 	}
 }
 
@@ -583,6 +636,7 @@ void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
 
 	for (const FSlimeSolver::FShotState& Shot : Shots)
 	{
+		if (Shot.Phase != FSlimeSolver::EShotPhase::Active) continue;
 		// Clear leftover devour-style targets so BallisticLife is not refreshed forever.
 		if (Solver.IsShotTargeted(Shot.Id))
 		{
@@ -660,8 +714,8 @@ void USlimeBodyComponent::TickFragmentAttacks(float DeltaTime)
 		const float Fraction = LaunchFractionOverride > KINDA_SMALL_NUMBER ? LaunchFractionOverride : LaunchFraction;
 		const float MiniR = Solver.GetScaledRestRadius() * FMath::Pow(FMath::Clamp(Fraction, 0.05f, 0.6f), 1.f / 3.f);
 		const bool bHasShotFloor = Shot.FloorZ > -1.e8f;
-		ChaseTarget.Z = bHasShotFloor ? (Shot.FloorZ + MiniR) : Center.Z;
-		Solver.SteerShot(Shot.Id, ChaseTarget, ChaseSpeed, DeltaTime, /*bKeepGrounded=*/true);
+		ChaseTarget.Z = bHasShotFloor ? (Shot.FloorZ + Solver.GetShotSupportHeight()) : Center.Z;
+		if (Shot.bGrounded) Solver.SteerShot(Shot.Id, ChaseTarget, ChaseSpeed, DeltaTime, /*bKeepGrounded=*/true);
 
 		const float HorizDistSq = FVector::DistSquaredXY(Center, EnemyLoc);
 		float& Cd = FragmentAttackCooldownRemaining.FindOrAdd(Shot.Id);
@@ -747,8 +801,12 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	}
 
 	// Off screen the simulation keeps running but the surface does not: rebuilding a mesh
-	// nobody can see is the easiest cost to delete.
-	const bool bVisible = !SurfaceMesh || SurfaceMesh->WasRecentlyRendered(0.3f);
+	// nobody can see is the easiest cost to delete. The screen-space silhouette disables
+	// depth test, so it stays unoccluded and keeps its render time while the body is fully
+	// behind a wall. That render time is what keeps the outline following the squeeze.
+	const bool bSurfaceVisible = !SurfaceMesh || SurfaceMesh->WasRecentlyRendered(0.3f);
+	const bool bXRayVisible = bScreenSpaceXRay && XRayMesh && XRayMesh->WasRecentlyRendered(0.3f);
+	const bool bVisible = bSurfaceVisible || bXRayVisible;
 	SurfaceAccumulator += DeltaTime;
 	const float SurfaceDelta = 1.f / FMath::Max(SurfaceRate, 1.f);
 	bool bRebuilt = false;
@@ -770,7 +828,12 @@ void USlimeBodyComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	}
 
 	UpdateAmbientLight(DeltaTime);
+	UpdateBubbleVisuals(DeltaTime);
 	UpdateBubblesAndShellParams(DeltaTime);
+	UpdateContactFootprint();
+	UpdateVisualContactFootprint();
+	UpdateContactDecal();
+ UpdateShotContactDecals();
 
 	TickFragmentAttacks(DeltaTime);
 }
@@ -796,6 +859,8 @@ float USlimeBodyComponent::ComputeAmbientTarget(bool bLog) const
 
 	float Direct = 0.f;
 	float SunVisLog = -1.f;
+	float BestContribution = 0.f;
+	FVector4f BestKeyLight(0.35f, 0.2f, 0.91f, 0.f);
 	for (TObjectIterator<UDirectionalLightComponent> It; It; ++It)
 	{
 		const UDirectionalLightComponent* Light = *It;
@@ -823,7 +888,14 @@ float USlimeBodyComponent::ComputeAmbientTarget(bool bLog) const
 		const float Vis = bBlocked ? 0.f : 1.f;
 		SunVisLog = FMath::Max(SunVisLog, Vis);
 		Direct += Contribution * Vis;
+		if (Contribution > BestContribution)
+		{
+			BestContribution = Contribution;
+			BestKeyLight = FVector4f(float(ToLight.X), float(ToLight.Y), float(ToLight.Z), Vis * Elev * Horizon);
+		}
 	}
+	KeyLightDir = BestKeyLight;
+	KeyLightContribution = BestContribution;
 
 	float Sky = 0.f;
 	for (TObjectIterator<USkyLightComponent> It; It; ++It)
@@ -1026,7 +1098,53 @@ void USlimeBodyComponent::UpdateBubblesAndShellParams(float DeltaTime)
 		return;
 	}
 	const FVector Center = GetShellCenter();
-	Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamAmbientScale, AmbientScale);
+	Mid->SetScalarParameterValue(TEXT("RearEyeStrength"), RearEyeStrength);
+ Mid->SetScalarParameterValue(TEXT("EyeEmissionStrength"), EyeEmissionStrength);
+ Mid->SetScalarParameterValue(TEXT("EyeReadabilityFloor"), EyeReadabilityFloor);
+ Mid->SetScalarParameterValue(TEXT("BubbleSizeScaleMin"), BubbleSizeScaleMin);
+ Mid->SetScalarParameterValue(TEXT("BubbleSizeScaleMax"), FMath::Max(BubbleSizeScaleMax, BubbleSizeScaleMin));
+ Mid->SetScalarParameterValue(TEXT("BubbleEdgeStrength"), BubbleEdgeStrength);
+ Mid->SetScalarParameterValue(TEXT("BubbleVisualRadiusScale"), BubbleVisualRadiusScale);
+ Mid->SetScalarParameterValue(TEXT("DevourBubbleRadiusScale"), DevourBubbleRadiusScale);
+    Mid->SetScalarParameterValue(TEXT("BubblePopSeconds"), FMath::Max(BubblePopSeconds, 0.01f));
+    Mid->SetScalarParameterValue(TEXT("BubbleRimWidth"), FMath::Clamp(BubbleRimWidth, 0.005f, 0.25f));
+ Mid->SetScalarParameterValue(TEXT("BubbleCoreStrength"), BubbleCoreStrength);
+ Mid->SetScalarParameterValue(TEXT("FineBubbleCount"), FineBubbleCount);
+ Mid->SetScalarParameterValue(TEXT("ExternalBodyBubbles"), BubbleVisualMesh ? 1.f : 0.f);
+ Mid->SetScalarParameterValue(TEXT("FineBubbleMinRadius"), FineBubbleMinRadius);
+ Mid->SetScalarParameterValue(TEXT("FineBubbleMaxRadius"), FMath::Max(FineBubbleMaxRadius, FineBubbleMinRadius));
+ Mid->SetScalarParameterValue(TEXT("DevourBubbleCount"), DevourBubbleCount);
+ Mid->SetScalarParameterValue(TEXT("DevourBubbleSeconds"), DevourBubbleSeconds);
+ const float BubbleTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+ Mid->SetScalarParameterValue(TEXT("BubbleClock"), BubbleTime);
+ UMeshComponent* DigestMesh = DigestBubbleSource.Get();
+ const bool bDigestActive = IsValid(DigestMesh) && DigestMesh->IsVisible();
+ Mid->SetScalarParameterValue(TEXT("DigestActive"), bDigestActive ? 1.f : 0.f);
+ if (bDigestActive)
+ {
+  const FVector Rel = DigestMesh->Bounds.Origin-Center;
+  const FVector Extent = DigestMesh->Bounds.BoxExtent/FMath::Max(DigestMesh->BoundsScale,0.01f);
+  const FVector Local(FVector::DotProduct(Rel,Fwd)/FMath::Max(Axes.X,1.0), FVector::DotProduct(Rel,Right)/FMath::Max(Axes.Y,1.0), Rel.Z/FMath::Max(Axes.Z,1.0));
+  const FVector LocalAxes(FVector::DotProduct(Extent,Fwd.GetAbs())/FMath::Max(Axes.X,1.0), FVector::DotProduct(Extent,Right.GetAbs())/FMath::Max(Axes.Y,1.0), Extent.Z/FMath::Max(Axes.Z,1.0));
+  Mid->SetVectorParameterValue(TEXT("DigestCenter"),FLinearColor(Local));
+  Mid->SetVectorParameterValue(TEXT("DigestAxes"),FLinearColor(LocalAxes));
+ }
+
+ for (int32 I=0; I<2; ++I)
+ {
+  Mid->SetVectorParameterValue(FName(*FString::Printf(TEXT("DevourBurstPosition%d"),I)), FLinearColor(DevourBursts[I].Local));
+  Mid->SetScalarParameterValue(FName(*FString::Printf(TEXT("DevourBurstAge%d"),I)), BubbleTime-DevourBursts[I].Started);
+  Mid->SetScalarParameterValue(FName(*FString::Printf(TEXT("DevourBurstSeed%d"),I)), DevourBursts[I].Seed);
+ }
+ Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamAmbientScale, AmbientScale);
+	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamKeyLightDir, FLinearColor(KeyLightDir.X, KeyLightDir.Y, KeyLightDir.Z, KeyLightDir.W));
+	{
+		// Ground contact band in the jelly skins; sentinel switches it off while airborne / clinging / spread.
+		const float Hang = float(GetFootLocation().Z) - FloorZ;
+		const bool bGrounded = FloorZ > -1.e8f && !bClingVisual && !bSpread && SpreadBlend <= 0.f
+			&& Hang > -8.f && Hang < ContactFadeHeight;
+		Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamContactFloorZ, bGrounded ? FloorZ : -1.e9f);
+	}
 	Mid->SetScalarParameterValue(SlimeBodyPrivate::ParamAmbientDebug, CVarSlimeAmbientDebug.GetValueOnGameThread() != 0 ? 1.f : 0.f);
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellCenter, FLinearColor(float(Center.X), float(Center.Y), float(Center.Z), 0.f));
 	Mid->SetVectorParameterValue(SlimeBodyPrivate::ParamShellAxes, FLinearColor(float(Axes.X), float(Axes.Y), float(Axes.Z), 0.f));
@@ -1087,6 +1205,9 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		RefreshColliders();
 	}
 
+	ShapeBlend = FMath::FInterpConstantTo(ShapeBlend, ShapeTarget, StepDelta, 1.f / FMath::Max(ShapeBlendTime, 0.01f));
+	Solver.SetDomeShape(FMath::SmoothStep(0.f, 1.f, ShapeBlend), DomeWidthScale, DomeHeightScale, DomeUpwardRestoreScale);
+
 	UpdateAnchor();
 
 	// One squash amount drives shell height, radius, push, gravity and the vertical spring, so
@@ -1110,6 +1231,7 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		Solver.SetSpread(true, Radius, bSpread ? SpreadPush * Eased : 0.f, HalfHeight);
 		Solver.SetSpreadBlend(Eased);
 		Solver.SetSpreadConcentrationScale(FMath::Lerp(1.f, SpreadConcentrationScale, Eased));
+		Solver.SetSpreadLateralScale(SpreadLateralScale);
 		Solver.SetGravityScale(FMath::Lerp(1.f, SpreadGravityScale, Eased));
 	}
 	else
@@ -1117,6 +1239,7 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		Solver.SetSpread(false, 0.f, 0.f, HalfHeight);
 		Solver.SetSpreadBlend(0.f);
 		Solver.SetSpreadConcentrationScale(1.f);
+		Solver.SetSpreadLateralScale(1.f);
 		Solver.SetGravityScale(1.f);
 	}
 
@@ -1141,8 +1264,9 @@ void USlimeBodyComponent::FixedStep(float StepDelta)
 		Solver.RecallFragments(StepDelta, Home, GetEffectiveRecallPullSpeed());
 		if (RecallElapsed >= RecallTimeout)
 		{
-			Solver.SnapFragmentsHome(Home);
-			SetRecalling(false);
+			Solver.RemoveUnprotectedShots();
+			// Protected umbrella returns now own their motion; release global recall collision bypass.
+   SetRecalling(false);
 		}
 	}
 	else if (Solver.HasShotTargets())
@@ -1349,20 +1473,16 @@ void USlimeBodyComponent::UpdateFloor()
 		FragmentFloorZ = FloorZ;
 	}
 
-	Solver.ClearShotFloorOverrides();
-	Solver.RefreshShotStates();
-	for (const FSlimeSolver::FShotState& Shot : Solver.GetShotStates())
-	{
-		const float ProxyR = FragmentProxyRadius > KINDA_SMALL_NUMBER
-			? FragmentProxyRadius
-			: SolverParams.RestRadius * 0.45f;
-		float ShotFloor = FragmentFloorZ;
-		if (!TraceFloorUnder(FVector(Shot.Center), ProxyR, ShotFloor, /*bIgnorePawns=*/true))
-		{
-			ShotFloor = float(Shot.Center.Z - 800.0);
-		}
-		Solver.SetShotFloorZ(Shot.Id, ShotFloor);
-	}
+ Solver.QueryGround=[this](const FVector& Center,FHitResult& Hit) { return QueryShotGround(Center,Hit); };
+ Solver.TraceSeparation=[this](const FVector& A,const FVector& B,float R,FHitResult& Hit) { return TraceShotWorld(Hit,A,B,R); };
+ Solver.ClearShotFloorOverrides();
+ Solver.RefreshShotStates();
+ for (const FSlimeSolver::FShotState& Shot:Solver.GetShotStates())
+ {
+  FHitResult Hit;
+  Solver.SetShotSupport(Shot.Id,QueryShotGround(FVector(Shot.Center),Hit) ? &Hit : nullptr);
+ }
+
 }
 
 void USlimeBodyComponent::UpdateGroundField(float StepDelta)
@@ -2017,7 +2137,8 @@ void USlimeBodyComponent::UpdateAnchor()
 	else
 	{
 		const FVector Foot = GetFootLocation();
-		Anchor = Foot + FVector(0.0, 0.0, double(SolverParams.RestRadius * AnchorHeightFraction));
+		const float DomeAnchor = FMath::Lerp(1.f, DomeAnchorHeightScale, FMath::SmoothStep(0.f, 1.f, ShapeBlend));
+		Anchor = Foot + FVector(0.0, 0.0, double(SolverParams.RestRadius * AnchorHeightFraction * DomeAnchor));
 	}
 	Solver.SetAnchor(Anchor, GetOwner()->GetVelocity());
 
@@ -2191,7 +2312,7 @@ void USlimeBodyComponent::RebuildSurface()
 		{
 			ShotSlotIds.Add(Shot.Id);
 		}
-		if (Shot.FloorZ <= -1.e8f)
+		if (!Shot.bHasSupport || (Shot.Phase != FSlimeSolver::EShotPhase::Active && Shot.Phase != FSlimeSolver::EShotPhase::Returning) || Shot.FloorZ <= -1.e8f)
 		{
 			continue;
 		}
@@ -2202,6 +2323,7 @@ void USlimeBodyComponent::RebuildSurface()
 		}
 	}
 	Surface.SetShotSlotIds(ShotSlotIds);
+	Surface.SetConnectedShotRadius(Solver.GetMiniMembraneRadius());
 
 	// The builder reserves 35% of the vertex budget for shots. Instead of letting that carve the top
 	// off the body, grow the budget so the body's 65% share equals its normal budget. Held briefly
@@ -2234,6 +2356,42 @@ void USlimeBodyComponent::RebuildSurface()
 
 	TArray<uint8> MergingIds;
 	Solver.GetMergingShotIds(MergingIds);
+ TArray<uint8> SeparatingIds;
+ Solver.GetSeparatingShotIds(SeparatingIds);
+ TArray<FSlimeSurfaceBuilder::FVisualNeck> Necks;
+ for (uint8 Id : SeparatingIds)
+ {
+  const FVector Center = Solver.GetShotCenterWorld(Id);
+  const FVector Home = Solver.GetBodyCenter();
+  const float Distance = FVector::Distance(Center,Home);
+  if (Distance > Solver.GetScaledRestRadius()+Solver.GetMiniMembraneRadius()*1.8f) continue;
+  MergingIds.AddUnique(Id);
+  const FVector Direction = (Center-Home).GetSafeNormal();
+  Necks.Add({Home+Direction*Solver.GetScaledRestRadius()*0.65f,Center, Solver.GetMiniMembraneRadius()*0.65f*(1.f-Solver.GetShotSeparationProgress(Id)),Id});
+ }
+ Surface.SetVisualNecks(Necks);
+	{
+		const float RimBlend = FMath::SmoothStep(0.f, 1.f, ShapeBlend);
+		const bool bFlare = bDomeFlare && !bSpreadDrape && ClipZ > -1.e8f && RimBlend > 0.001f;
+		// The old ground skirt and the bell flare would stack, so the skirt fades out as the dome comes in.
+		const float SkirtScale = bFlare ? (1.f - RimBlend) : 1.f;
+		Surface.SetGroundSkirt(bGroundSkirt ? SkirtHeight * SkirtScale : 0.f, bGroundSkirt ? SkirtSpread * SkirtScale : 0.f);
+		Surface.SetBellFlare(bFlare ? DomeFlareHeightFraction : 0.f, bFlare ? DomeFlareReach * RimBlend : 0.f,
+			DomeFlareCurve, bFlare ? DomeFlareTip * RimBlend : 0.f);
+	}
+	if (bSpreadSheet && bSpreadDrape)
+	{
+		const float SheetSpread = FMath::SmoothStep(0.f, 1.f, SpreadBlend);
+		const float SheetSpacing = ConfigureSpacing * FMath::Lerp(1.f, SpreadLateralScale, SheetSpread);
+		const float RestR = SolverParams.RestRadius * SurfaceScale;
+		const float RestVolume = (4.f / 3.f) * PI * RestR * RestR * RestR;
+		Surface.SetSheetMode(SheetSpread, RestVolume * SpreadSheetVolumeScale, SheetSpacing * SpreadSheetKernelScale,
+			SpreadSheetMinThickness, SheetDrapeDepth, ConfigureSpacing * 0.5f);
+	}
+	else
+	{
+		Surface.SetSheetMode(0.f, 0.f, 1.f, 0.f, 0.f, 0.f);
+	}
 	Surface.Build(Solver.GetParticles(), Solver.GetBodyCenter(), MergingIds, VisualZLift, ClipZ, ShotClips);
 
 	if (Surface.WasTruncated() && !bWarnedTruncation)
@@ -2336,28 +2494,35 @@ void USlimeBodyComponent::PushMeshSection()
 	// X-ray keeps a full-height 0.92 shell for occlusion silhouette outline.
 	constexpr float ShadowProxyScale = 0.92f;
 	constexpr float ShadowProxyHeightScale = 0.35f;
-	FVector ShadowCentroid = FVector::ZeroVector;
-	float ShadowMinZ = TNumericLimits<float>::Max();
-	for (const FVector& Vertex : Vertices)
-	{
-		ShadowCentroid += Vertex;
-		ShadowMinZ = FMath::Min(ShadowMinZ, static_cast<float>(Vertex.Z));
-	}
-	ShadowCentroid /= float(Vertices.Num());
-
-	TArray<FVector> ShadowVertices;
-	ShadowVertices.Reserve(Vertices.Num());
-	TArray<FVector> XRayVertices;
-	XRayVertices.Reserve(Vertices.Num());
-	for (const FVector& Vertex : Vertices)
-	{
-		const FVector Scaled = ShadowCentroid + (Vertex - ShadowCentroid) * ShadowProxyScale;
-		XRayVertices.Add(Scaled);
-
-		FVector Puck = Scaled;
-		Puck.Z = ShadowMinZ + (Scaled.Z - ShadowMinZ) * ShadowProxyHeightScale;
-		ShadowVertices.Add(Puck);
-	}
+ // Unused budget vertices contain degenerate triangles. Never include them in bounds.
+ struct FShadowCluster { FVector Sum=FVector::ZeroVector; double Bottom=DBL_MAX; int32 Count=0; };
+ TMap<int32,FShadowCluster> Clusters;
+ TSet<int32> ValidVertices;
+ for (int32 T=0;T+2<Indices.Num();T+=3)
+ {
+  const int32 A=Indices[T],B=Indices[T+1],C=Indices[T+2];
+  if (!Vertices.IsValidIndex(A)||!Vertices.IsValidIndex(B)||!Vertices.IsValidIndex(C)) continue;
+  if (FVector::CrossProduct(Vertices[B]-Vertices[A],Vertices[C]-Vertices[A]).IsNearlyZero()) continue;
+  ValidVertices.Add(A); ValidVertices.Add(B); ValidVertices.Add(C);
+ }
+ for (int32 I:ValidVertices)
+ {
+  const int32 Slot=ClusterColors.IsValidIndex(I) ? FMath::RoundToInt(ClusterColors[I].R*255.f) : 0;
+  FShadowCluster& Cluster=Clusters.FindOrAdd(Slot);
+  Cluster.Sum+=Vertices[I]; Cluster.Bottom=FMath::Min(Cluster.Bottom,Vertices[I].Z); ++Cluster.Count;
+ }
+ TArray<FVector> ShadowVertices=Vertices, XRayVertices=Vertices;
+ for (int32 I:ValidVertices)
+ {
+  const int32 Slot=ClusterColors.IsValidIndex(I) ? FMath::RoundToInt(ClusterColors[I].R*255.f) : 0;
+  const FShadowCluster& Cluster=Clusters.FindChecked(Slot);
+  const FVector Center=Cluster.Sum/Cluster.Count;
+  const FVector Scaled=Center+(Vertices[I]-Center)*ShadowProxyScale;
+  const float XRayScale = bScreenSpaceXRay ? 1.f : ShadowProxyScale;
+  XRayVertices[I]=Center+(Vertices[I]-Center)*XRayScale;
+  ShadowVertices[I]=Scaled;
+  ShadowVertices[I].Z=Cluster.Bottom+(Scaled.Z-Cluster.Bottom)*ShadowProxyHeightScale;
+ }
 
 	if (ShadowMesh)
 	{
@@ -2417,7 +2582,8 @@ void USlimeBodyComponent::PushMeshSection()
 		XRayMesh->bCastDynamicShadow = false;
 		XRayMesh->bCastVolumetricTranslucentShadow = false;
 		XRayMesh->bCastContactShadow = false;
-		// Do not reassign material every rebuild — ElementComponent owns the MID.
+		// Screen-space mode owns the material (depth-test off, so it is not occlusion-culled, and still writes CustomDepth).
+		ApplyXRayRenderMode();
 	}
 }
 
@@ -2585,6 +2751,8 @@ void USlimeBodyComponent::SetShadowCastSuppressed(bool bSuppressed)
 
 void USlimeBodyComponent::ResetBody()
 {
+ if (USlimeUmbrellaComponent* Umbrella=GetOwner()->FindComponentByClass<USlimeUmbrellaComponent>()) Umbrella->ResetUmbrellas();
+ if (USlimeAbilityComponent* Ability=GetOwner()->FindComponentByClass<USlimeAbilityComponent>()) Ability->CancelLaunchAim();
 	bSpread = false;
 	bRecalling = false;
 	bClingVisual = false;
@@ -2612,13 +2780,107 @@ void USlimeBodyComponent::ResetBody()
 
 int32 USlimeBodyComponent::LaunchChunk(const FVector& LaunchVelocity)
 {
-	return LaunchTendril(LaunchVelocity, LaunchFraction, FragmentLifetime);
+	Solver.SetShotLifecycleParams(ShotSeparationSeconds, ShotReturnSeconds, ShotReturnHopHeight);
+	const int32 Launched = Solver.LaunchChunk(LaunchVelocity, LaunchFraction, FragmentLifetime, MaxActiveShots, nullptr, nullptr, true);
+	if (Launched > 0) SetRecalling(false);
+	return Launched;
+}
+
+bool USlimeBodyComponent::CanLaunchCannon() const
+{
+	const_cast<FSlimeSolver &>(Solver).RefreshShotStates();
+	return !bRecalling && Solver.GetActiveShotCount() < FMath::Max(MaxActiveShots, 1) &&
+		   Solver.GetParticles().Num() > 0;
+}
+bool USlimeBodyComponent::TraceShotWorld(FHitResult& Hit, const FVector& Start, const FVector& End, float Radius, bool bIgnorePawns) const
+{
+ UWorld* World = GetWorld();
+ if (!World) return false;
+ FCollisionQueryParams Query(SCENE_QUERY_STAT(SlimeShotWorld), false, GetOwner());
+ // Repeat from the original segment after filtering a blocking helper. Multi-trace alone
+ // stops at the first blocker and would miss the real wall behind that helper.
+ for (int32 Attempt = 0; Attempt < 64; ++Attempt)
+ {
+  const bool Found = Radius > 0.f
+   ? World->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, ECC_Visibility, FCollisionShape::MakeSphere(Radius), Query)
+   : World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Query);
+  if (!Found) return false;
+  const AActor* Actor = Hit.GetActor();
+  const bool OwnedHelper = Actor && !Actor->IsA<APawn>() &&
+   (Actor->GetOwner() == GetOwner() || Actor->GetAttachParentActor() == GetOwner());
+  if (ShouldIgnoreFluidNinjaCollider(Hit.GetComponent()) || OwnedHelper || (bIgnorePawns && Actor && Actor->IsA<APawn>()))
+  {
+   if (!Hit.GetComponent()) return true;
+   Query.AddIgnoredComponent(Hit.GetComponent());
+   continue;
+  }
+  return true;
+ }
+ return true; // Conservative on pathological stacks of helpers.
+}
+
+FVector USlimeBodyComponent::GetCannonMuzzle(const FSlimeCannonLaunch& Aim) const
+{
+ FBox BodyBounds(ForceInit);
+ const auto& V = Surface.GetVertices();
+ const auto& C = Surface.GetColors();
+ const auto& I = Surface.GetIndices();
+ for (int32 T = 0; T + 2 < I.Num(); T += 3)
+ {
+  if (!V.IsValidIndex(I[T]) || !V.IsValidIndex(I[T+1]) || !V.IsValidIndex(I[T+2])) continue;
+  if (FVector::CrossProduct(V[I[T+1]]-V[I[T]], V[I[T+2]]-V[I[T]]).IsNearlyZero()) continue;
+  for (int32 K=0; K<3; ++K)
+   if (C.IsValidIndex(I[T+K]) && C[I[T+K]].R < 0.5f/255.f)
+    BodyBounds += SurfaceMesh->GetComponentTransform().TransformPosition(V[I[T+K]]);
+ }
+ const FVector Home = GetBlobCenter();
+ if (!BodyBounds.IsValid) BodyBounds = FBox(Home-FVector(Solver.GetScaledRestRadius()),Home+FVector(Solver.GetScaledRestRadius()));
+ FVector Direction = (Aim.Target-Home).GetSafeNormal2D();
+ if (Direction.IsNearlyZero()) Direction = GetOwner()->GetActorForwardVector().GetSafeNormal2D();
+ const FVector Extent=BodyBounds.GetExtent();
+ const double Reach=FMath::Abs(Direction.X)*Extent.X+FMath::Abs(Direction.Y)*Extent.Y;
+ FVector Muzzle=BodyBounds.GetCenter()+Direction*(Reach+GetCannonRadius()+CannonClearance);
+ Muzzle.Z=FMath::Max(Home.Z, BodyBounds.Min.Z+Extent.Z*1.45);
+ return Muzzle;
+}
+
+bool USlimeBodyComponent::PrepareCannonLaunch(FSlimeCannonLaunch& Aim) const
+{
+ const FVector Home=GetBlobCenter();
+ const FVector Muzzle=GetCannonMuzzle(Aim);
+ FVector Start=Home;
+ // Begin at the upper body, not at a low COM whose collision sphere overlaps the floor.
+ Start.Z=Muzzle.Z;
+ Aim.MuzzleOffset=Muzzle-Home;
+ Aim.SeparationStartOffset=Start-Home;
+ FHitResult Hit;
+ return !TraceShotWorld(Hit, Start, Muzzle, GetCannonRadius()) &&
+        !TraceShotWorld(Hit, Muzzle, Muzzle+FVector(0,0,0.01), GetCannonRadius());
+}
+
+bool USlimeBodyComponent::QueryShotGround(const FVector& Center, FHitResult& Hit) const
+{
+ const float Height=Solver.GetShotSupportHeight();
+ return TraceShotWorld(Hit, Center+FVector(0,0,Height), Center-FVector(0,0,Height+30.f), 0.f, true)
+  && !Hit.bStartPenetrating && Hit.ImpactNormal.Z >= 0.65f;
+}
+
+int32 USlimeBodyComponent::LaunchCannonShot(const FSlimeCannonLaunch &Cannon)
+{
+ FSlimeCannonLaunch Prepared=Cannon;
+ if (!PrepareCannonLaunch(Prepared)) return 0;
+	Solver.SetShotLifecycleParams(ShotSeparationSeconds, ShotReturnSeconds, ShotReturnHopHeight);
+	const int32 Count = Solver.LaunchCannon(Prepared, LaunchFraction, FragmentLifetime, MaxActiveShots);
+	if (Count)
+		SetRecalling(false);
+	return Count;
 }
 
 int32 USlimeBodyComponent::LaunchChunkAlongPath(const FSlimeLaunchPath& Path)
 {
 	const FVector Velocity = Path.bValid ? Path.LaunchVelocity : FVector::ZeroVector;
-	const int32 Launched = Solver.LaunchChunk(Velocity, LaunchFraction, FragmentLifetime, MaxActiveShots, &Path);
+	Solver.SetShotLifecycleParams(ShotSeparationSeconds, ShotReturnSeconds, ShotReturnHopHeight);
+	const int32 Launched = Solver.LaunchChunk(Velocity, LaunchFraction, FragmentLifetime, MaxActiveShots, &Path, nullptr, true);
 	if (Launched > 0)
 	{
 		SetRecalling(false);
@@ -2691,6 +2953,7 @@ float USlimeBodyComponent::GetEffectiveRecallPullSpeed() const
 void USlimeBodyComponent::ClearFragments()
 {
 	Solver.SnapFragmentsHome(Solver.GetBodyCenter());
+ UpdateShotContactDecals();
 	SetRecalling(false);
 }
 
@@ -2701,6 +2964,74 @@ void USlimeBodyComponent::SetLaunchFractionOverride(float Fraction)
 	{
 		Solver.SetLaunchFraction(LaunchFractionOverride);
 	}
+}
+
+void USlimeBodyComponent::ApplyCannonImpact(uint8 ShotId, AActor *Target, const FVector &Location)
+{
+	AActor *Owner = GetOwner();
+	if (!Target || !Owner)
+		return;
+	USlimeElementComponent *ElementComp = Owner->FindComponentByClass<USlimeElementComponent>();
+	const ESlimeElement Element = ElementComp ? ElementComp->CurrentElement : ESlimeElement::Physical;
+	// Environment receivers still receive cannon element contact.
+	if (!USlimeHitProbe::IsValidDamageTarget(Target) || !USlimeHitProbe::IsHostile(Owner, Target))
+	{
+		SlimeElementDelivery::NotifyActor(Target, Element, Owner, 1.f);
+		return;
+	}
+	float &Cd = FragmentAttackCooldownRemaining.FindOrAdd(ShotId);
+	if (Cd > 0.f)
+		return;
+	USlimeCombatComponent *CombatComp = Owner->FindComponentByClass<USlimeCombatComponent>();
+	FSlimeSkillDef HitSkill;
+	HitSkill.Slot = ESlimeSkillSlot::Combo1;
+	HitSkill.Damage = 12.f;
+	if (CombatComp)
+	{
+		const FSlimeElementKitData Kit = CombatComp->GetCurrentKit();
+		if (const FSlimeSkillDef *Def = Kit.GetSkillSlot(ESlimeSkillSlot::Combo1))
+			HitSkill = *Def;
+	}
+	HitSkill.Element = Element;
+	HitSkill.bAppliesElementAura = true;
+	HitSkill.Damage = FMath::Max(HitSkill.Damage * FragmentAttackDamageScale, 0.f);
+	const float Interval = FMath::Max(FragmentAttackInterval, 0.1f);
+	float DamageAmount = HitSkill.Damage;
+	if (CombatComp && DamageAmount > 0.f)
+	{
+		DamageAmount = CombatComp->ResolveOutgoingDamage(HitSkill);
+	}
+	if (DamageAmount <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FVector HitLoc = Location;
+	if (ICombatDamageable *Damageable = Cast<ICombatDamageable>(Target))
+	{
+		Damageable->ApplyDamage(DamageAmount, Owner, HitLoc, FVector::ZeroVector);
+	}
+	else if (USlimeHealthComponent *Health = Target->FindComponentByClass<USlimeHealthComponent>())
+	{
+		Health->ApplyDamage(DamageAmount, Owner, HitLoc, FVector::ZeroVector);
+	}
+
+	if (Cast<ASlimeCharacter>(Owner))
+	{
+		USlimeFloatingTextWidget::Spawn(Target, HitLoc + FVector(0.f, 0.f, 40.f),
+										FText::FromString(FString::Printf(TEXT("%.0f"), DamageAmount)),
+										SlimeCombat::GetElementVfxColor(Element));
+	}
+
+	if (HitSkill.bAppliesElementAura)
+	{
+		if (USlimeStatusComponent *Status = Target->FindComponentByClass<USlimeStatusComponent>())
+		{
+			Status->ApplyAura(Element, Owner);
+		}
+		SlimeElementDelivery::NotifyActor(Target, Element, Owner, 1.f);
+	}
+	Cd = Interval;
 }
 
 void USlimeBodyComponent::SweepKinematicShots()
@@ -2728,10 +3059,10 @@ void USlimeBodyComponent::SweepKinematicShots()
 
 		FHitResult Hit;
 		const FCollisionShape Shape = FCollisionShape::MakeSphere(FMath::Max(Motion.Radius, 8.f));
-		if (World->SweepSingleByChannel(Hit, Motion.PrevCenter, Motion.Center, FQuat::Identity, ECC_Visibility, Shape, Params))
+		if (TraceShotWorld(Hit, Motion.PrevCenter, Motion.Center, Motion.Radius))
 		{
-			const FVector Snap = Hit.ImpactPoint + Hit.ImpactNormal * Motion.Radius;
-			Solver.SnapKinematicShotTo(Motion.Id, Snap);
+   Solver.SnapKinematicShotTo(Motion.Id,Hit.Location,Hit.ImpactNormal.Z>=0.65f ? &Hit : nullptr);
+   if (Motion.bCannon) ApplyCannonImpact(Motion.Id,Hit.GetActor(),Hit.ImpactPoint);
 		}
 	}
 }
@@ -2752,4 +3083,601 @@ void USlimeBodyComponent::SetRecalling(bool bInRecalling)
 	{
 		ClearRecallPullSpeedOverride();
 	}
+}
+
+void USlimeBodyComponent::TriggerDevourBubbleBurst(const FVector& WorldPosition)
+{
+ const FVector Center = Solver.GetShellCenter();
+ const FVector Axes(Solver.GetShellAxes());
+ FVector Forward(Solver.GetInertiaForward());
+ Forward = Forward.GetSafeNormal();
+ const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward).GetSafeNormal();
+ const FVector Rel = WorldPosition-Center;
+ FVector Local(FVector::DotProduct(Rel,Forward)/FMath::Max(Axes.X,1.0), FVector::DotProduct(Rel,Right)/FMath::Max(Axes.Y,1.0), Rel.Z/FMath::Max(Axes.Z,1.0));
+ Local = Local.GetClampedToMaxSize(0.7);
+ FBubbleBurst& Burst = DevourBursts[NextDevourBurst];
+ Burst.Local = Local;
+ Burst.Started = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+ Burst.Seed = FMath::FRandRange(1.f,1000.f);
+ NextDevourBurst = (NextDevourBurst+1)%2;
+}
+
+void USlimeBodyComponent::SetDigestBubbleSource(UMeshComponent* Source)
+{
+ DigestBubbleSource = Source;
+}
+
+void USlimeBodyComponent::UpdateBubbleVisuals(float DeltaTime)
+{
+ APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this,0);
+ if (!Camera || !SurfaceMesh) return;
+ if (!BubbleVisualMesh)
+ {
+  UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Characters/Slime/Materials/M_SlimeBubbleVisual.M_SlimeBubbleVisual"));
+  if (!Material) return;
+  BubbleVisualMesh = NewObject<UProceduralMeshComponent>(GetOwner(),TEXT("SlimeBubbleVisual"),RF_Transient);
+  BubbleVisualMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+  BubbleVisualMesh->SetCastShadow(false);
+  BubbleVisualMesh->SetCanEverAffectNavigation(false);
+  BubbleVisualMesh->TranslucencySortPriority=SurfaceMesh->TranslucencySortPriority+10;
+  BubbleVisualMesh->RegisterComponent();
+  BubbleVisualMesh->SetMaterial(0,UMaterialInstanceDynamic::Create(Material,this));
+ }
+ BubbleVisualMesh->SetVisibility(SurfaceMesh->IsVisible());
+ BubbleVisualMesh->SetHiddenInGame(SurfaceMesh->bHiddenInGame);
+ UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(BubbleVisualMesh->GetMaterial(0));
+ FLinearColor Tint(0.65f,0.85f,1.f);
+ if (UMaterialInstanceDynamic* BubbleBodyMID = Cast<UMaterialInstanceDynamic>(SurfaceMesh->GetMaterial(0)))
+  BubbleBodyMID->GetVectorParameterValue(FMaterialParameterInfo(TEXT("BaseColor")),Tint);
+ Material->SetVectorParameterValue(TEXT("BubbleTint"),FMath::Lerp(Tint,FLinearColor::White,0.55f));
+ Material->SetScalarParameterValue(TEXT("Brightness"),BubbleEdgeStrength);
+ Material->SetScalarParameterValue(TEXT("RimWidth"),BubbleRimWidth);
+ Material->SetScalarParameterValue(TEXT("CoreStrength"),BubbleCoreStrength);
+ const bool bFizz = bFizzBubbles && bLuminousSkinActive;
+ Material->SetScalarParameterValue(TEXT("FizzStyle"),bFizz ? 1.f : 0.f);
+ const FVector Center = GetShellCenter();
+ const FVector Axes(Solver.GetShellAxes());
+ const FVector FizzFwd = FVector(Solver.GetInertiaForward()).GetSafeNormal2D(KINDA_SMALL_NUMBER,FVector::ForwardVector);
+ const FVector FizzSide = FVector::CrossProduct(FVector::UpVector,FizzFwd).GetSafeNormal();
+ const FVector Right = Camera->GetCameraRotation().RotateVector(FVector::RightVector);
+ const FVector Up = Camera->GetCameraRotation().RotateVector(FVector::UpVector);
+ TArray<FVector> V, N;
+ TArray<int32> Indices;
+ TArray<FVector2D> UV;
+ TArray<FLinearColor> Colors;
+ TArray<FProcMeshTangent> Tangents;
+ auto Quad = [&](const FVector& P,float Radius,float Pop,float Fade,float Seed)
+ {
+  const int32 Start = V.Num();
+  const float Size = Radius*(1.f+1.1f*Pop)*1.3f;
+  for (int32 Corner=0; Corner<4; ++Corner)
+  {
+   const float X = (Corner==1 || Corner==2) ? 1.f : -1.f;
+   const float Y = Corner>=2 ? 1.f : -1.f;
+   V.Add(P+Right*Size*X+Up*Size*Y);
+   UV.Add(FVector2D((X+1.f)*0.5f,(Y+1.f)*0.5f));
+   Colors.Add(FLinearColor(Pop,Fade,Seed,1));
+   N.Add(-Camera->GetCameraRotation().Vector());
+  }
+  Indices.Append({Start,Start+1,Start+2,Start,Start+2,Start+3});
+ };
+ const auto& Vertices = Surface.GetVertices();
+ const auto& ClusterColors = Surface.GetColors();
+ // Reuse the actual surface to accept interior spawn points and find each upper exit.
+ // Missing/narrow columns are rejected; they must never become ground-level pop events.
+ auto Column = [&](const FVector& P,float Radius,float& Bottom,float& Top)
+ {
+  float LowerHit=BIG_NUMBER, UpperHit=-BIG_NUMBER, UpperNormalZ=1.f;
+  const FVector Offset=SurfaceMesh->GetComponentLocation();
+  for (int32 I=0; I+2<Surface.GetLiveVertexCount(); I+=3)
+  {
+   if (ClusterColors.IsValidIndex(I) && ClusterColors[I].R>0.001f) continue;
+   const FVector A=Vertices[I]+Offset, B=Vertices[I+1]+Offset, C=Vertices[I+2]+Offset;
+   const double Den=(B.Y-C.Y)*(A.X-C.X)+(C.X-B.X)*(A.Y-C.Y);
+   if (FMath::Abs(Den)<1.e-8) continue;
+   const double U=((B.Y-C.Y)*(P.X-C.X)+(C.X-B.X)*(P.Y-C.Y))/Den;
+   const double W=((C.Y-A.Y)*(P.X-C.X)+(A.X-C.X)*(P.Y-C.Y))/Den;
+   if (U<0 || W<0 || U+W>1) continue;
+   const float Z=U*A.Z+W*B.Z+(1-U-W)*C.Z;
+   LowerHit=FMath::Min(LowerHit,Z);
+   if (Z>UpperHit)
+   {
+    UpperHit=Z;
+    UpperNormalZ=FMath::Abs(FVector::CrossProduct(B-A,C-A).GetSafeNormal().Z);
+   }
+  }
+  if (UpperHit-LowerHit<Radius*6.f) return false;
+  Bottom=LowerHit+Radius*2.f;
+  Top=UpperHit-Radius/FMath::Max(UpperNormalZ,0.35f);
+  return Top-Bottom>Radius*3.f;
+ };
+ const int32 Count=bFizz ? FMath::Clamp(FizzBubbleCount,0,96) : FMath::Clamp(FineBubbleCount,0,32);
+ const int32 OldCount=VisibleBubbles.Num();
+ VisibleBubbles.SetNum(Count);
+ auto Respawn = [&](FVisibleBubble& B,bool Stagger)
+ {
+  B.bValid=false;
+  B.Radius=FMath::FRandRange(FineBubbleMinRadius,FMath::Max(FineBubbleMinRadius,FineBubbleMaxRadius))*FMath::FRandRange(BubbleSizeScaleMin,FMath::Max(BubbleSizeScaleMin,BubbleSizeScaleMax))*FMath::Max(BubbleVisualRadiusScale,0.1f);
+  B.Speed=FMath::FRandRange(0.13f,0.24f); B.Seed=FMath::FRand(); B.PopAge=-1;
+  // Fizz: two rising columns on one flank (shell-normalised fwd / side), smaller and faster.
+  const bool bMainColumn=FMath::FRand()<0.65f;
+  const FVector2D ColumnXY=bMainColumn ? FVector2D(-0.12f,0.34f) : FVector2D(0.16f,0.24f);
+  if (bFizz)
+  {
+   B.Radius*=FMath::Max(FizzRadiusScale,0.05f);
+   B.Speed=FMath::FRandRange(0.28f,0.5f);
+  }
+  for (int32 Attempt=0; Attempt<8; ++Attempt)
+  {
+   const float Angle=FMath::FRand()*2.f*PI;
+   const float Rad=Attempt==7 ? 0.f : FMath::Sqrt(FMath::FRand())*0.48f;
+   B.Local=FVector(FMath::Cos(Angle)*Rad,FMath::Sin(Angle)*Rad,0.f);
+   if (bFizz)
+   {
+    const float Pull=1.f-float(Attempt)/7.f;
+    const float Jitter=FMath::Sqrt(FMath::FRand())*FMath::Max(FizzColumnSpread,0.f);
+    const FVector2D XY=ColumnXY*Pull+FVector2D(FMath::Cos(Angle),FMath::Sin(Angle))*Jitter;
+    const FVector Flank=FizzFwd*XY.X+FizzSide*XY.Y;
+    B.Local=FVector(Flank.X,Flank.Y,0.f);
+   }
+   float Bottom,Top;
+   if (!Column(Center+B.Local*Axes,B.Radius,Bottom,Top)) continue;
+   const float Z=FMath::Lerp(Bottom,Top,Stagger ? FMath::FRandRange(0.15f,0.8f) : 0.15f);
+   B.Local.Z=(Z-Center.Z)/FMath::Max(Axes.Z,1.0);
+   B.bValid=true;
+   break;
+  }
+ };
+ for (int32 I=0; I<Count; ++I)
+ {
+  FVisibleBubble& B=VisibleBubbles[I];
+  if (I>=OldCount || !B.bValid) Respawn(B,true);
+  if (!B.bValid) continue;
+  if (B.PopAge>=0)
+  {
+   B.PopAge+=DeltaTime;
+   if (B.PopAge>=FMath::Max(BubblePopSeconds,0.01f)) Respawn(B,false);
+  }
+  else
+  {
+   B.Local.Z+=B.Speed*DeltaTime;
+   const FVector P=Center+B.Local*Axes;
+   float Bottom,Top;
+   if (!Column(P,B.Radius,Bottom,Top) || P.Z<Bottom)
+    Respawn(B,false);
+   else if (P.Z>=Top)
+   {
+    B.Local.Z=(Top-Center.Z)/FMath::Max(Axes.Z,1.0);
+    B.PopAge=0;
+   }
+  }
+  if (!B.bValid) continue;
+  const float Pop=B.PopAge>=0 ? FMath::Clamp(B.PopAge/FMath::Max(BubblePopSeconds,0.01f),0.f,1.f) : 0.f;
+  const float Growth=FMath::Clamp(0.92f+B.Local.Z*0.12f,0.82f,1.02f);
+  Quad(Center+B.Local*Axes,B.Radius*Growth,Pop,B.PopAge>=0 ? FMath::Pow(1-Pop,1.5f) : 0.8f,B.Seed);
+ }
+ const float Time=GetWorld()->GetTimeSeconds();
+ UMeshComponent* Source=DigestBubbleSource.Get();
+ const bool Digest=IsValid(Source) && Source->IsVisible();
+ const FVector Fwd=FVector(Solver.GetInertiaForward()).GetSafeNormal();
+ const FVector Side=FVector::CrossProduct(FVector::UpVector,Fwd).GetSafeNormal();
+ for (int32 I=0; I<FMath::Clamp(DevourBubbleCount,0,64); ++I)
+ {
+  FRandomStream Random(I*7919+713);
+  const float Seed=Random.FRand();
+  const FVector Direction=Random.VRand();
+  const float Radius=Random.FRandRange(FineBubbleMinRadius,FMath::Max(FineBubbleMinRadius,FineBubbleMaxRadius))*Random.FRandRange(BubbleSizeScaleMin,FMath::Max(BubbleSizeScaleMin,BubbleSizeScaleMax))*FMath::Max(BubbleVisualRadiusScale,0.1f)*FMath::Max(DevourBubbleRadiusScale,0.1f);
+  const float RiseSeconds=FMath::Max(DevourBubbleSeconds,0.1f)*Random.FRandRange(0.65f,1.0f);
+  const float OverflowSeconds=Random.FRandRange(0.20f,0.35f);
+  const float PopSeconds=FMath::Max(BubblePopSeconds,0.01f);
+  const float CycleSeconds=RiseSeconds+OverflowSeconds+PopSeconds;
+  float Age=FMath::Fmod(Time+Seed*CycleSeconds,CycleSeconds);
+  FVector Origin;
+  if (Digest)
+   Origin=Source->Bounds.Origin+Direction*(Source->Bounds.BoxExtent/FMath::Max(Source->BoundsScale,0.01f))*0.75;
+  else
+  {
+   const FBubbleBurst& Burst=DevourBursts[I%2];
+   Age=Time-Burst.Started;
+   if (Age<0 || Age>=CycleSeconds) continue;
+   Origin=Center+Fwd*Burst.Local.X*Axes.X+Side*Burst.Local.Y*Axes.Y+FVector::UpVector*Burst.Local.Z*Axes.Z;
+   Origin+=Direction*Radius*2.f;
+  }
+  // Re-centre emission points that fall outside a deformed body. Never emit from the floor.
+  float Bottom=0,Top=0;
+  bool bInterior=false;
+  for (int32 Attempt=0; Attempt<6; ++Attempt)
+  {
+   if (Column(Origin,Radius,Bottom,Top)) { bInterior=true; break; }
+   Origin.X=FMath::Lerp(Origin.X,Center.X,0.45);
+   Origin.Y=FMath::Lerp(Origin.Y,Center.Y,0.45);
+  }
+  if (!bInterior) continue;
+  const float Height=Top-Bottom;
+  Origin.Z=FMath::Clamp(Origin.Z,Bottom+Height*0.18f,Top-Height*0.20f);
+  const float Rise=FMath::Clamp(Age/RiseSeconds,0.f,1.f);
+  FVector P=Origin;
+  // Gentle horizontal drift forms a plume instead of an outward explosion on every side.
+  P.X+=FMath::Sin(Rise*PI+Seed*2*PI)*Radius*1.5f*Rise;
+  P.Y+=FMath::Cos(Rise*PI+Seed*2*PI)*Radius*1.5f*Rise;
+  float DriftBottom,DriftTop;
+  if (!Column(P,Radius,DriftBottom,DriftTop)) continue;
+  Top=DriftTop;
+  P.Z=FMath::Lerp(FMath::Min(Origin.Z,Top-Radius*2.f),Top,Rise);
+  float Pop=0;
+  const float FadeIn=FMath::Clamp(Age/0.12f,0.f,1.f);
+  float Fade=FadeIn*0.75f;
+  if (Age>=RiseSeconds)
+  {
+   const float OutsideAge=Age-RiseSeconds;
+   const float Travel=FMath::Clamp(OutsideAge/OverflowSeconds,0.f,1.f);
+   P.Z=Top+Travel*Height*FMath::Clamp(DevourBubbleOverflowHeight,0.02f,0.4f);
+   if (OutsideAge>=OverflowSeconds)
+   {
+    Pop=FMath::Clamp((OutsideAge-OverflowSeconds)/PopSeconds,0.f,1.f);
+    Fade*=FMath::Pow(1-Pop,1.5f);
+   }
+  }
+  Quad(P,Radius*FMath::Lerp(0.85f,1.05f,Rise),Pop,Fade,Seed);
+ }
+ BubbleVisualMesh->CreateMeshSection_LinearColor(0,V,Indices,N,UV,Colors,Tangents,false,false);
+}
+
+FVector2D USlimeBodyComponent::FootprintHalfAxesFromMoments(const FSlimeFloorFootprint& Footprint, const FVector2D& MajorDir)
+{
+	FVector2D Major = MajorDir.GetSafeNormal();
+	if (Major.IsNearlyZero())
+	{
+		Major = FVector2D(1.f, 0.f);
+	}
+	const FVector2D Minor(-Major.Y, Major.X);
+	auto Variance = [&Footprint](const FVector2D& Axis) -> double
+	{
+		return FMath::Max(
+			Axis.X * Axis.X * Footprint.Cxx + Axis.Y * Axis.Y * Footprint.Cyy + 2.0 * Axis.X * Axis.Y * Footprint.Cxy,
+			0.0);
+	};
+	const float Pad = 0.5f * FMath::Max(Footprint.CellSize, 0.f);
+	return FVector2D(
+		float(2.0 * FMath::Sqrt(Variance(Major))) + Pad,
+		float(2.0 * FMath::Sqrt(Variance(Minor))) + Pad);
+}
+
+float USlimeBodyComponent::GetDomeFootprintWeight() const
+{
+	if (!bVisualContactValid)
+	{
+		return 0.f;
+	}
+	const float Dome = FMath::SmoothStep(0.f, 1.f, ShapeBlend);
+	const float Spread = FMath::SmoothStep(0.f, 1.f, SpreadBlend);
+	return Dome * (1.f - Spread);
+}
+
+void USlimeBodyComponent::UpdateVisualContactFootprint()
+{
+	const FSlimeFloorFootprint& Footprint = Surface.GetBodyFloorFootprint();
+	const bool bUsable = !bClingVisual && FloorZ > -1.e8f && Footprint.IsValid();
+	const float Dt = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+	const float Alpha = ContactSmoothing > 0.f ? 1.f - FMath::Exp(-Dt / ContactSmoothing) : 1.f;
+	if (!bUsable)
+	{
+		bVisualContactValid = false;
+		return;
+	}
+
+	FVector Major = ContactMajorDir;
+	Major.Z = 0.f;
+	if (!Major.Normalize())
+	{
+		Major = FVector::ForwardVector;
+	}
+	const FVector2D Target = FootprintHalfAxesFromMoments(Footprint, FVector2D(Major.X, Major.Y));
+	if (!bVisualContactValid)
+	{
+		VisualContactHalfAxes = Target;
+		bVisualContactValid = true;
+	}
+	else
+	{
+		VisualContactHalfAxes = FMath::Lerp(VisualContactHalfAxes, Target, Alpha);
+	}
+}
+
+void USlimeBodyComponent::EnsureXRayOutlineMaterial()
+{
+	if (!bScreenSpaceXRay || XRayOutlineMID)
+	{
+		return;
+	}
+	UMaterialInterface* Parent = XRayOutlineMaterialPath.LoadSynchronous();
+	if (!Parent)
+	{
+		UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: X-ray outline material missing at %s"), *XRayOutlineMaterialPath.ToString());
+		return;
+	}
+	XRayOutlineMID = UMaterialInstanceDynamic::Create(Parent, this);
+	XRayOutlineMID->SetScalarParameterValue(TEXT("OcclusionBias"), XRayOcclusionBias);
+	XRayOutlineMID->SetScalarParameterValue(TEXT("OcclusionRamp"), XRayOcclusionRamp);
+}
+
+void USlimeBodyComponent::SetXRayDepthSuppressed(bool bSuppressed)
+{
+	if (bXRayDepthSuppressed == bSuppressed)
+	{
+		return;
+	}
+	bXRayDepthSuppressed = bSuppressed;
+	ApplyXRayRenderMode();
+}
+
+void USlimeBodyComponent::ApplyXRayRenderMode()
+{
+	if (!XRayMesh || XRayMesh->GetNumSections() == 0)
+	{
+		return;
+	}
+	if (bScreenSpaceXRay)
+	{
+		// Depth test off makes CanBeOccluded() false, so a fully hidden slime still writes CustomDepth.
+		// Translucent custom-depth writes need AllowTranslucentCustomDepthWrites; the main pass stays off.
+		if (!ResolvedXRayDepthProxy && !XRayDepthProxyMaterialPath.IsNull())
+		{
+			ResolvedXRayDepthProxy = XRayDepthProxyMaterialPath.LoadSynchronous();
+		}
+		UMaterialInterface* Proxy = ResolvedXRayDepthProxy;
+		if (!Proxy)
+		{
+			if (!bLoggedMissingXRayDepthProxy)
+			{
+				bLoggedMissingXRayDepthProxy = true;
+				UE_LOG(LogSlimeFable, Warning, TEXT("SlimeBodyComponent: X-ray depth proxy missing at %s; falling back to the default opaque material, so a fully hidden slime will be occlusion-culled."),
+					*XRayDepthProxyMaterialPath.ToString());
+			}
+			Proxy = UMaterial::GetDefaultMaterial(MD_Surface);
+		}
+		if (Proxy && XRayMesh->GetMaterial(0) != Proxy)
+		{
+			XRayMesh->SetMaterial(0, Proxy);
+		}
+		XRayMesh->SetRenderInMainPass(false);
+		XRayMesh->SetRenderInDepthPass(false);
+		XRayMesh->SetRenderCustomDepth(bXRayDepthSuppressed ? false : true);
+		XRayMesh->SetCustomDepthStencilWriteMask(ERendererStencilMask::ERSM_Default);
+		XRayMesh->SetCustomDepthStencilValue(1);
+		return;
+	}
+
+	XRayMesh->SetRenderInMainPass(true);
+	XRayMesh->SetRenderInDepthPass(true);
+	XRayMesh->SetRenderCustomDepth(false);
+	if (ResolvedXRayMaterial && XRayMesh->GetMaterial(0) != ResolvedXRayMaterial)
+	{
+		const UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(XRayMesh->GetMaterial(0));
+		if (!(Mid && Mid->Parent == ResolvedXRayMaterial))
+		{
+			XRayMesh->SetMaterial(0, ResolvedXRayMaterial);
+		}
+	}
+}
+
+void USlimeBodyComponent::UpdateContactFootprint()
+{
+	// Contact plane: the wall while clinging, otherwise the floor under the body.
+	FVector PlanePoint = FVector::ZeroVector;
+	FVector PlaneNormal = FVector::UpVector;
+	bool bHavePlane = false;
+	if (bClingVisual)
+	{
+		PlaneNormal = ClingNormal.GetSafeNormal();
+		PlanePoint = ClingPoint;
+		bHavePlane = !PlaneNormal.IsNearlyZero();
+	}
+	else if (FloorZ > -1.e8f)
+	{
+		PlanePoint = FVector(0.0, 0.0, FloorZ);
+		bHavePlane = true;
+	}
+	const bool bBodyVisible = !SurfaceMesh || (SurfaceMesh->IsVisible() && !SurfaceMesh->bHiddenInGame);
+
+	// Fit an ellipse to the body particles lying within one contact band of the plane.
+	// Runs while spread too, so the trail puddle can cover the whole sheet.
+	int32 ContactCount = 0;
+	FVector2D Mean = FVector2D::ZeroVector;
+	FVector2D Axes = FVector2D::ZeroVector;
+	FVector MajorDir = FVector::ForwardVector;
+	FVector TangentU = FVector::ForwardVector;
+	FVector TangentV = FVector::RightVector;
+	if (bHavePlane && bBodyVisible)
+	{
+		TangentU = FMath::Abs(PlaneNormal.Z) > 0.9
+			? FVector::ForwardVector
+			: FVector::CrossProduct(FVector::UpVector, PlaneNormal).GetSafeNormal();
+		TangentU = (TangentU - PlaneNormal * FVector::DotProduct(TangentU, PlaneNormal)).GetSafeNormal();
+		TangentV = FVector::CrossProduct(PlaneNormal, TangentU);
+		const float SizeScale = FMath::Max(Solver.GetSizeScale(), 0.05f);
+		const double Band = double(SolverParams.ParticleSpacing * SizeScale * 1.7f);
+		double SumU = 0.0, SumV = 0.0, SumUU = 0.0, SumVV = 0.0, SumUV = 0.0;
+		for (const SlimeSim::FSlimeParticle& Particle : Solver.GetParticles())
+		{
+			if (Particle.IsBallistic() || Particle.ShotId != 0)
+			{
+				continue;
+			}
+			const FVector Rel = FVector(Particle.Position) - PlanePoint;
+			const double Height = FVector::DotProduct(Rel, PlaneNormal);
+			if (Height > Band || Height < -Band)
+			{
+				continue;
+			}
+			const double U = FVector::DotProduct(Rel, TangentU);
+			const double V = FVector::DotProduct(Rel, TangentV);
+			SumU += U; SumV += V; SumUU += U * U; SumVV += V * V; SumUV += U * V;
+			++ContactCount;
+		}
+		if (ContactCount >= 6)
+		{
+			const double InvN = 1.0 / double(ContactCount);
+			Mean = FVector2D(SumU * InvN, SumV * InvN);
+			const double Cuu = FMath::Max(SumUU * InvN - Mean.X * Mean.X, 0.0);
+			const double Cvv = FMath::Max(SumVV * InvN - Mean.Y * Mean.Y, 0.0);
+			const double Cuv = SumUV * InvN - Mean.X * Mean.Y;
+			const double Half = 0.5 * (Cuu + Cvv);
+			const double Disc = FMath::Sqrt(FMath::Square(0.5 * (Cuu - Cvv)) + Cuv * Cuv);
+			const double Angle = 0.5 * FMath::Atan2(2.0 * Cuv, Cuu - Cvv);
+			// A uniformly filled disc of radius R has variance R^2/4 along any axis.
+			Axes.X = 2.0 * FMath::Sqrt(FMath::Max(Half + Disc, 0.0)) + ContactFootprintPadding;
+			Axes.Y = 2.0 * FMath::Sqrt(FMath::Max(Half - Disc, 0.0)) + ContactFootprintPadding;
+			MajorDir = TangentU * FMath::Cos(Angle) + TangentV * FMath::Sin(Angle);
+		}
+	}
+
+	const float Dt = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+	const float Alpha = ContactSmoothing > 0.f ? 1.f - FMath::Exp(-Dt / ContactSmoothing) : 1.f;
+	const float TargetFade = ContactCount >= 6 ? FMath::Clamp(float(ContactCount - 4) / 10.f, 0.f, 1.f) : 0.f;
+	ContactFadeSmoothed = FMath::Lerp(ContactFadeSmoothed, TargetFade, Alpha);
+	if (ContactCount >= 6)
+	{
+		const FVector Center = PlanePoint + TangentU * Mean.X + TangentV * Mean.Y;
+		const FVector CenterOnPlane = bClingVisual
+			? Center
+			: FVector(Center.X, Center.Y, FloorZ);
+		if (!bContactValid || FVector::DotProduct(ContactNormal, PlaneNormal) < 0.9)
+		{
+			ContactCenter = CenterOnPlane;
+			ContactNormal = PlaneNormal;
+			ContactMajorDir = MajorDir;
+			ContactHalfAxes = Axes;
+			bContactValid = true;
+		}
+		else
+		{
+			if (FVector::DotProduct(MajorDir, ContactMajorDir) < 0.0)
+			{
+				MajorDir = -MajorDir;
+			}
+			ContactCenter = FMath::Lerp(ContactCenter, CenterOnPlane, double(Alpha));
+			ContactNormal = PlaneNormal;
+			ContactMajorDir = FMath::Lerp(ContactMajorDir, MajorDir, double(Alpha)).GetSafeNormal();
+			ContactHalfAxes = FMath::Lerp(ContactHalfAxes, Axes, double(Alpha));
+		}
+	}
+
+	if (ContactFadeSmoothed <= 0.01f)
+	{
+		bContactValid = false;
+	}
+}
+
+void USlimeBodyComponent::UpdateContactDecal()
+{
+	const bool bSpreading = bSpread || SpreadBlend > 0.f;
+	const bool bShow = bContactDecal && bContactValid && !bSpreading && SurfaceMesh && GetOwner();
+	if (!bShow)
+	{
+		if (ContactDecal)
+		{
+			ContactDecal->SetVisibility(false);
+		}
+		return;
+	}
+	if (!ContactDecal)
+	{
+		UMaterialInterface* Material = ContactDecalMaterialPath.LoadSynchronous();
+		if (!Material)
+		{
+			return;
+		}
+		ContactDecal = NewObject<UDecalComponent>(GetOwner(), TEXT("SlimeContactDecal"), RF_Transient);
+		ContactDecal->SetUsingAbsoluteLocation(true);
+		ContactDecal->SetUsingAbsoluteRotation(true);
+		ContactDecal->SetUsingAbsoluteScale(true);
+		ContactDecal->SortOrder = -1;
+		ContactDecal->RegisterComponent();
+		ContactDecal->SetDecalMaterial(UMaterialInstanceDynamic::Create(Material, this));
+	}
+	ContactDecal->SetVisibility(true);
+
+	const float Extent = FMath::Max(ContactShadowExtent, 1.f);
+	// Decal X projects into the contact plane; Y follows the ellipse major axis.
+	ContactDecal->SetWorldLocationAndRotation(ContactCenter,
+		FRotationMatrix::MakeFromXY(-ContactNormal, ContactMajorDir).Rotator());
+	const FVector NewSize(FMath::Max(ContactDepth, 1.f),
+		FMath::Max(ContactHalfAxes.X, 1.0) * Extent,
+		FMath::Max(ContactHalfAxes.Y, 1.0) * Extent);
+	if (!ContactDecal->DecalSize.Equals(NewSize, 0.5))
+	{
+		ContactDecal->DecalSize = NewSize;
+		ContactDecal->MarkRenderStateDirty();
+	}
+
+	if (UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(ContactDecal->GetDecalMaterial()))
+	{
+		FLinearColor Tint(0.3f, 0.8f, 0.4f, 1.f);
+		if (UMaterialInstanceDynamic* BodyMid = Cast<UMaterialInstanceDynamic>(SurfaceMesh->GetMaterial(0)))
+		{
+			BodyMid->GetVectorParameterValue(FMaterialParameterInfo(TEXT("BaseColor")), Tint);
+		}
+		Mid->SetVectorParameterValue(TEXT("ContactColor"), Tint);
+		Mid->SetScalarParameterValue(TEXT("ContactFade"), ContactFadeSmoothed);
+		Mid->SetScalarParameterValue(TEXT("AmbientScale"), AmbientScale);
+		// Fitted contact edge relative to the decal half extent: the dark core ends exactly there.
+		Mid->SetScalarParameterValue(TEXT("FootprintRatio"), 1.f / Extent);
+		Mid->SetScalarParameterValue(TEXT("CausticStrength"), ContactCausticStrength);
+		Mid->SetVectorParameterValue(TEXT("PlanePoint"), FLinearColor(ContactCenter.X, ContactCenter.Y, ContactCenter.Z, 0.f));
+		Mid->SetVectorParameterValue(TEXT("PlaneNormal"), FLinearColor(ContactNormal.X, ContactNormal.Y, ContactNormal.Z, 0.f));
+	}
+}
+
+void USlimeBodyComponent::UpdateShotContactDecals()
+{
+ TSet<uint8> Visible;
+ if (bShotContactDecals && bContactDecal && !bShadowCastSuppressed)
+ for (const FSlimeSolver::FShotState& Shot:Solver.GetShotStates())
+ {
+  if ((bRecalling && !Shot.bKeepUntilMerged) || !Shot.bHasSupport || Shot.Phase==FSlimeSolver::EShotPhase::Separating || Shot.Phase==FSlimeSolver::EShotPhase::Merging) continue;
+  const float Height=FMath::Max(0.f,Shot.Center.Z-Solver.GetShotSupportHeight()-float(Shot.SupportPoint.Z));
+  const float Fade=1.f-FMath::Clamp(Height/FMath::Max(ContactFadeHeight,1.f),0.f,1.f);
+  if (Fade<=0.f) continue;
+  Visible.Add(Shot.Id);
+  TObjectPtr<UDecalComponent>& Decal=ShotContactDecals.FindOrAdd(Shot.Id);
+  if (!Decal)
+  {
+   UMaterialInterface* Material=ContactDecalMaterialPath.LoadSynchronous();
+   if (!Material) continue;
+   Decal=NewObject<UDecalComponent>(GetOwner(),NAME_None,RF_Transient);
+   Decal->SetDecalMaterial(UMaterialInstanceDynamic::Create(Material,this));
+   Decal->SortOrder=-1;
+   Decal->RegisterComponent();
+  }
+  const float R=Solver.GetMiniMembraneRadius()*FMath::Max(ContactShadowExtent,1.f);
+  Decal->DecalSize=FVector(FMath::Max(ContactDepth,1.f),R,R);
+  Decal->SetWorldLocationAndRotation(Shot.SupportPoint,FRotationMatrix::MakeFromX(-Shot.SupportNormal).Rotator());
+  Decal->MarkRenderStateDirty();
+  if (UMaterialInstanceDynamic* Mid=Cast<UMaterialInstanceDynamic>(Decal->GetDecalMaterial()))
+  {
+   FLinearColor Tint(0.3f,0.8f,0.4f,1.f);
+   if (SurfaceMesh) if (UMaterialInstanceDynamic* BodyMid=Cast<UMaterialInstanceDynamic>(SurfaceMesh->GetMaterial(0)))
+    BodyMid->GetVectorParameterValue(FMaterialParameterInfo(TEXT("BaseColor")),Tint);
+   Mid->SetVectorParameterValue(TEXT("ContactColor"),Tint);
+   Mid->SetScalarParameterValue(TEXT("ContactFade"),Fade);
+   Mid->SetScalarParameterValue(TEXT("AmbientScale"),AmbientScale);
+   Mid->SetScalarParameterValue(TEXT("FootprintRatio"),1.f/FMath::Max(ContactShadowExtent,1.f));
+   Mid->SetScalarParameterValue(TEXT("CausticStrength"),ContactCausticStrength);
+   Mid->SetVectorParameterValue(TEXT("PlanePoint"),FLinearColor(Shot.SupportPoint.X,Shot.SupportPoint.Y,Shot.SupportPoint.Z,0));
+   Mid->SetVectorParameterValue(TEXT("PlaneNormal"),FLinearColor(Shot.SupportNormal.X,Shot.SupportNormal.Y,Shot.SupportNormal.Z,0));
+  }
+ }
+ for (auto It=ShotContactDecals.CreateIterator();It;++It)
+  if (!Visible.Contains(It.Key())) { if (It.Value()) It.Value()->DestroyComponent(); It.RemoveCurrent(); }
+}
+
+void USlimeBodyComponent::ConfigureShotUmbrellas(float Height,float Follow,float Fall,float MaxFall)
+{
+ Solver.ConfigureUmbrellas(Height,Follow,Fall,MaxFall);
+ Solver.QueryUmbrellaGround=[this](const FVector& Position,FHitResult& Hit)
+ {
+  return TraceShotWorld(Hit,Position+FVector(0,0,5),Position-FVector(0,0,20000),0.f,true)
+   && !Hit.bStartPenetrating && Hit.ImpactNormal.Z>=0.65f;
+ };
 }

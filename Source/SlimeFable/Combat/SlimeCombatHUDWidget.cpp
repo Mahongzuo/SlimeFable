@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SlimeCombatHUDWidget.h"
+#include "Blueprint/SlateBlueprintLibrary.h"
+#include "Rendering/DrawElements.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Camera/CameraComponent.h"
@@ -167,7 +169,7 @@ void USlimeCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 {
-	if (SlotKeys.Num() == 4 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 7 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 4 && PlayerHealthBar && DeathText)
+	if (SlotKeys.Num() == 4 && UltimateBar && UnstuckButton && HotbarLabels.Num() == 8 && InteractPrompt && LockOnPanel && LaunchChargeBar && DevourHoldBar && SlotCdTexts.Num() == 4 && PlayerHealthBar && DeathText)
 	{
 		EnsureClickableSlots();
 		ApplyCombatHudSizes();
@@ -447,7 +449,7 @@ void USlimeCombatHUDWidget::BuildLayoutIfNeeded()
 		HotbarSlot->SetAutoSize(true);
 	}
 	HotbarLabels.Reset();
-	for (int32 Index = 0; Index < 7; ++Index)
+	for (int32 Index = 0; Index < 8; ++Index)
 	{
 		USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), *FString::Printf(TEXT("HotBox%d"), Index));
 		Box->SetWidthOverride(84.f);
@@ -831,6 +833,20 @@ void USlimeCombatHUDWidget::Refresh()
 		{
 			continue;
 		}
+		if (Index == 7)
+		{
+			FString ShapeName = TEXT("圆球");
+			if (UGameInstance* ShapeGI = GetGameInstance())
+			{
+				if (const USlimeGraphicsSettings* Graphics = ShapeGI->GetSubsystem<USlimeGraphicsSettings>())
+				{
+					ShapeName = Graphics->GetBodyShape() == ESlimeBodyShape::Dome ? TEXT("扁顶") : TEXT("圆球");
+				}
+			}
+			Label->SetText(FText::FromString(FString::Printf(TEXT("8\n%s"), *ShapeName)));
+			FMenuUIStyle::ApplyMixedMenuFont(Label, 20.f, FMenuUIStyle::TodayEdgeColor());
+			continue;
+		}
 		if (Index >= 6)
 		{
 			FString SkinName = TEXT("光谱");
@@ -842,6 +858,7 @@ void USlimeCombatHUDWidget::Refresh()
 					{
 					case ESlimeBodySkin::Classic: SkinName = TEXT("果冻"); break;
 					case ESlimeBodySkin::Volumetric: SkinName = TEXT("体积"); break;
+					case ESlimeBodySkin::Luminous: SkinName = TEXT("莹光"); break;
 					default: SkinName = TEXT("光谱"); break;
 					}
 				}
@@ -954,7 +971,7 @@ void USlimeCombatHUDWidget::Refresh()
 			{
 				if (USlimeAbilityComponent* Abilities = Pawn->FindComponentByClass<USlimeAbilityComponent>())
 				{
-					bShowCharge = Abilities->IsChargingLaunch();
+					bShowCharge = false;
 					Charge = Abilities->GetLaunchCharge();
 					Fill = Abilities->GetLaunchPreviewColor();
 				}
@@ -1417,7 +1434,14 @@ void USlimeCombatHUDWidget::ActivateElementSlot(int32 Index)
 		{
 			if (USlimeGraphicsSettings* Graphics = GI->GetSubsystem<USlimeGraphicsSettings>())
 			{
-				Graphics->CycleBodySkin();
+				if (Index == 7)
+				{
+					Graphics->CycleBodyShape();
+				}
+				else
+				{
+					Graphics->CycleBodySkin();
+				}
 			}
 		}
 		return;
@@ -1508,4 +1532,26 @@ void USlimeCombatHUDWidget::HandleUnstuckClicked()
 	{
 		Slime->Unstuck();
 	}
+}
+
+int32 USlimeCombatHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& Culling, FSlateWindowElementList& Elements, int32 Layer, const FWidgetStyle& Style, bool bParentEnabled) const
+{
+ const int32 Base=Super::NativePaint(Args,Geometry,Culling,Elements,Layer,Style,bParentEnabled);
+ const APlayerController* PC=GetOwningPlayer();
+ const APawn* Pawn=PC?PC->GetPawn():nullptr;
+ const USlimeAbilityComponent* Ability=Pawn?Pawn->FindComponentByClass<USlimeAbilityComponent>():nullptr;
+ if (!Ability || !Ability->IsAimingLaunch()) return Base;
+ FVector2D Absolute;
+ USlateBlueprintLibrary::ScreenToWidgetAbsolute(this,Ability->GetLaunchScreenCenter(),Absolute,true);
+ const FVector2D Center=Geometry.AbsoluteToLocal(Absolute);
+ const bool bReady=Ability->CanFireLaunch() && !Ability->IsLaunchPathBlocked();
+ FLinearColor Color=bReady?FMenuUIStyle::WarmTextColor():FMenuUIStyle::WarmMutedTextColor();
+ if (!bReady) Color.A*=0.5f;
+ const FVector2D Directions[]={FVector2D(1,0),FVector2D(-1,0),FVector2D(0,1),FVector2D(0,-1)};
+ for (const FVector2D& Direction:Directions)
+ {
+  TArray<FVector2D> Points={Center+Direction*4.f,Center+Direction*11.f};
+  FSlateDrawElement::MakeLines(Elements,Base+1,Geometry.ToPaintGeometry(),Points,ESlateDrawEffect::None,Color,true,1.5f);
+ }
+ return Base+1;
 }

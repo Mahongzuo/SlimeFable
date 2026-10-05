@@ -166,8 +166,14 @@ void FSlimeSolver::BuildDome(const FVector& RestCenter)
 	GravityScale = 1.f;
 	ShotStates.Reset();
 	ShotFloorOverrides.Reset();
+ ShotSupports.Reset();
+ UmbrellaReturns.Reset(); UmbrellaEligibleShots.Reset();
 	ShotMergeElapsed.Reset();
 	ShotImpactApplied.Reset();
+	ShotPaths.Reset();
+	ShotLifecycles.Reset();
+	ShotTargets.Reset();
+	IgnoreWorldShotIds.Reset();
 }
 
 void FSlimeSolver::EnsureScratchCapacity(int32 Count)
@@ -220,6 +226,19 @@ void FSlimeSolver::SetShotFloorZ(uint8 ShotId, float InFloorZ)
 	{
 		ShotFloorOverrides.Add(ShotId, InFloorZ);
 	}
+}
+
+void FSlimeSolver::SetShotSupport(uint8 Id, const FHitResult* Hit)
+{
+ FShotSupport& Ground=ShotSupports.FindOrAdd(Id);
+ Ground.bValid=Hit && Hit->ImpactNormal.Z>=0.65f;
+ if (Ground.bValid)
+ {
+  Ground.Point=Hit->ImpactPoint;
+  Ground.Normal=Hit->ImpactNormal;
+  SetShotFloorZ(Id,float(Ground.Point.Z));
+ }
+ else SetShotFloorZ(Id,-1.e9f);
 }
 
 void FSlimeSolver::ClearShotFloorOverrides()
@@ -275,6 +294,42 @@ void FSlimeSolver::RebuildShotStates()
 		{
 			Shot.MergeElapsed = *MergeTime;
 		}
+		if (const FShotLifecycle* State = ShotLifecycles.Find(Shot.Id))
+		{
+			Shot.Phase = State->Phase;
+			Shot.Age = State->Age;
+			Shot.LaunchDirection = FVector3f(State->Direction);
+			Shot.RemainingTime = FMath::Max(State->Life - State->Age, 0.f);
+		}
+		else if (Shot.MergeElapsed >= 0.f) Shot.Phase = EShotPhase::Merging;
+		if (const FShotPathFollow* Follow = ShotPaths.Find(Shot.Id))
+		{
+			if (Follow->bCannon)
+			{
+				Shot.AimTarget = Follow->Cannon.Target;
+				Shot.InitialVelocity = Follow->InitialVelocity;
+				Shot.FlightGravity = Follow->Cannon.Gravity;
+				Shot.FlightTime = Follow->Elapsed;
+			}
+		}
+  if (FShotSupport* Support=ShotSupports.Find(Shot.Id))
+  {
+   Shot.bHasSupport=Support->bValid;
+   Shot.SupportPoint=Support->Point;
+   Shot.SupportNormal=Support->Normal;
+   const float Gap=Shot.Center.Z-GetShotSupportHeight()-Support->Point.Z;
+   Shot.bGrounded=Support->bValid && Gap>=-6.f && Gap<=3.f &&
+    Shot.Phase!=EShotPhase::Separating && Shot.Phase!=EShotPhase::Flying && Shot.Phase!=EShotPhase::Merging;
+   if (Shot.bGrounded && !Support->bGrounded) ++Support->LandingEvent;
+   Support->bGrounded=Shot.bGrounded;
+   Shot.LandingEvent=Support->LandingEvent;
+  }
+  if (const FShotUmbrellaReturn* Umbrella=UmbrellaReturns.Find(Shot.Id))
+  {
+   Shot.bKeepUntilMerged=true;
+   Shot.bUmbrellaOpen=Umbrella->bOpen && Shot.MergeElapsed<0.f;
+   Shot.Phase=Shot.MergeElapsed>=0.f ? EShotPhase::Merging : EShotPhase::Returning;
+  }
 		Shot.bImpactApplied = ShotImpactApplied.Contains(Shot.Id);
 		ShotStates.Add(Shot);
 	}
@@ -1003,10 +1058,12 @@ void FSlimeSolver::Step(float Dt)
 	{
 		const float Base = MembraneRadius * Slack;
 		const float Stretch = InertiaAmount;
+		const float Wide = FMath::Lerp(1.f, DomeWidthScale, DomeBlend);
+		const float Tall = FMath::Lerp(1.f, DomeHeightScale, DomeBlend);
 		// Along move: elongate; across / up: squash — inertia trail, still one blob.
-		ShellAxes.X = Base * (1.f + 0.35f * Stretch);
-		ShellAxes.Y = Base * (1.f - 0.22f * Stretch);
-		ShellAxes.Z = Base * (1.f - 0.18f * Stretch);
+		ShellAxes.X = Base * Wide * (1.f + 0.35f * Stretch);
+		ShellAxes.Y = Base * Wide * (1.f - 0.22f * Stretch);
+		ShellAxes.Z = Base * Tall * (1.f - 0.18f * Stretch);
 		ShellBackShift = Base * 0.18f * Stretch;
 		if (SqueezeAmount > 0.05f && !SqueezeFreeDirection.IsNearlyZero())
 		{
@@ -1049,7 +1106,8 @@ void FSlimeSolver::Step(float Dt)
 	// Keep the centre filled while spread (no doughnut): boost concentration, do not weaken it.
 	const float Concentration = Params.Concentration * SettleBoost * (bSpread ? SpreadConcentrationScale : 1.f);
 	const float GripRadius = MembraneRadius * Params.GripRadiusScale;
-	const float UpwardRestore = Params.UpwardRestore * SettleBoost * (bSpread ? 1.f - SpreadBlend : 1.f);
+	const float DomeRestore = (bSpread || bCling) ? 1.f : FMath::Lerp(1.f, DomeRestoreScale, DomeBlend);
+	const float UpwardRestore = Params.UpwardRestore * SettleBoost * (bSpread ? 1.f - SpreadBlend : 1.f) * DomeRestore;
 	const bool bDrape = bSpread && bGroundField;
 	const float DrapeDampFactor = FMath::Exp(-DrapeViscosity * Dt);
 	const float Gravity = Params.Gravity * GravityScale;
@@ -1058,6 +1116,11 @@ void FSlimeSolver::Step(float Dt)
 	const float MiniGrip = MiniRadius * Params.GripRadiusScale;
 	const float MiniConcentration = Params.Concentration * 1.1f;
 	const float MiniMembraneK = Params.MembraneStiffness;
+	// Dome: membrane and concentration act in a squashed metric so the rest shape is the wide dome.
+	const FVector3f DomeMetric = (!bSpread && !bCling && DomeBlend > 0.f)
+		? FVector3f(FMath::Lerp(1.f, DomeWidthScale, DomeBlend), FMath::Lerp(1.f, DomeWidthScale, DomeBlend),
+			FMath::Lerp(1.f, DomeHeightScale, DomeBlend))
+		: FVector3f::OneVector;
 
 	// Shot COM lookup for ballistic cohesion (copied out of ParallelFor for thread safety).
 	TMap<uint8, FVector3f> ShotCenters;
@@ -1067,13 +1130,13 @@ void FSlimeSolver::Step(float Dt)
 	for (const FShotState& Shot : ShotStates)
 	{
 		ShotCenters.Add(Shot.Id, Shot.Center);
-		if (ShotTargets.Contains(Shot.Id))
+		if (Shot.Phase != EShotPhase::Active || ShotTargets.Contains(Shot.Id))
 		{
 			TargetedShotIds.Add(Shot.Id);
 		}
 	}
 
-	ParallelFor(Count, [this, Dt, &AnchorAccel, &BodyCenter, MembraneRadius, MembraneK, GripRadius, Concentration, UpwardRestore, Gravity, DampingFactor, bDrape, DrapeDampFactor, MiniRadius, MiniGrip, MiniConcentration, MiniMembraneK, &ShotCenters, &TargetedShotIds](int32 Index)
+	ParallelFor(Count, [this, Dt, &AnchorAccel, &BodyCenter, MembraneRadius, MembraneK, GripRadius, Concentration, UpwardRestore, Gravity, DampingFactor, bDrape, DrapeDampFactor, MiniRadius, MiniGrip, MiniConcentration, MiniMembraneK, DomeMetric, &ShotCenters, &TargetedShotIds](int32 Index)
 	{
 		FSlimeParticle& Particle = Particles[Index];
 		float ExtraDamping = 1.f;
@@ -1091,10 +1154,11 @@ void FSlimeSolver::Step(float Dt)
 			Accel += AnchorAccel;
 
 			const FVector3f Offset = Particle.Position - BodyCenter;
-			const float Distance = Offset.Size();
+			const FVector3f MetricOffset = Offset / DomeMetric;
+			const float Distance = MetricOffset.Size();
 			if (Distance > KINDA_SMALL_NUMBER)
 			{
-				const FVector3f ToCenter = -Offset / Distance;
+				const FVector3f ToCenter = -MetricOffset / Distance * DomeMetric;
 
 				// Soft sticky jelly (SIM): full stick inside rest radius, fade to grip shell.
 				float Stick = 0.f;
@@ -1204,10 +1268,35 @@ void FSlimeSolver::Step(float Dt)
 
 	// ---- Density constraint -----------------------------------------------------------
 
+	// Spread: solve the body in a laterally compressed metric, so incompressibility holds a wider,
+	// thinner single layer (rest spacing ParticleSpacing * K horizontally).
+	const float LateralK = bSpread ? FMath::Lerp(1.f, SpreadLateralScale, SpreadBlend) : 1.f;
+	const bool bLateralMetric = LateralK > 1.001f;
+	const FVector3f LateralPivot = BodyCenter;
+	auto ScaleBodyXY = [this, &LateralPivot](float Scale)
+	{
+		for (FSlimeParticle& Particle : Particles)
+		{
+			if (!Particle.IsBallistic())
+			{
+				Particle.PredictedPosition.X = LateralPivot.X + (Particle.PredictedPosition.X - LateralPivot.X) * Scale;
+				Particle.PredictedPosition.Y = LateralPivot.Y + (Particle.PredictedPosition.Y - LateralPivot.Y) * Scale;
+			}
+		}
+	};
+	if (bLateralMetric)
+	{
+		ScaleBodyXY(1.f / LateralK);
+	}
 	BuildGrid();
 	for (int32 Iteration = 0; Iteration < Params.DensityIterations; ++Iteration)
 	{
 		SolveDensity();
+	}
+	if (bLateralMetric)
+	{
+		ScaleBodyXY(LateralK);
+		BuildGrid();
 	}
 
 	// ---- Collision --------------------------------------------------------------------
@@ -1321,6 +1410,8 @@ void FSlimeSolver::Step(float Dt)
 	}, Count < GParallelMinBatch ? EParallelForFlags::ForceSingleThread : EParallelForFlags::None);
 
 			ApplyViscosity();
+	AdvanceShotLifecycles(Dt);
+	AdvanceUmbrellaReturns(Dt);
 	AdvanceKinematicShots(Dt);
 	ApplyShotTargets(Dt);
 
@@ -1337,6 +1428,7 @@ void FSlimeSolver::Step(float Dt)
 			{
 				continue;
 			}
+			if (ShotLifecycles.Contains(Particle.ShotId) || UmbrellaReturns.Contains(Particle.ShotId)) continue;
 			Particle.BallisticLife -= Dt;
 			if (Particle.BallisticLife > 0.f)
 			{
@@ -1375,6 +1467,8 @@ void FSlimeSolver::Step(float Dt)
 					ShotMergeElapsed.Remove(ShotId);
 					ShotImpactApplied.Remove(ShotId);
 					ShotFloorOverrides.Remove(ShotId);
+ ShotSupports.Remove(ShotId);
+ UmbrellaReturns.Remove(ShotId); UmbrellaEligibleShots.Remove(ShotId);
 					ShotPaths.Remove(ShotId);
 					ShotTargets.Remove(ShotId);
 				}
@@ -1856,9 +1950,12 @@ void FSlimeSolver::RemoveShotParticles(uint8 ShotId)
 	ShotMergeElapsed.Remove(ShotId);
 	ShotImpactApplied.Remove(ShotId);
 	ShotFloorOverrides.Remove(ShotId);
+ ShotSupports.Remove(ShotId);
+ UmbrellaReturns.Remove(ShotId); UmbrellaEligibleShots.Remove(ShotId);
 	ShotPaths.Remove(ShotId);
-	ShotTargets.Remove(ShotId);
+	ShotLifecycles.Remove(ShotId);
 	IgnoreWorldShotIds.Remove(ShotId);
+	ShotTargets.Remove(ShotId);
 	RebuildShotStates();
 	EnsureScratchCapacity(Particles.Num());
 }
@@ -1879,7 +1976,10 @@ void FSlimeSolver::RemoveAllClones()
 	ShotMergeElapsed.Reset();
 	ShotImpactApplied.Reset();
 	ShotFloorOverrides.Reset();
+ ShotSupports.Reset();
+ UmbrellaReturns.Reset(); UmbrellaEligibleShots.Reset();
 	ShotPaths.Reset();
+	ShotLifecycles.Reset();
 	ShotTargets.Reset();
 	IgnoreWorldShotIds.Reset();
 	EnsureScratchCapacity(Particles.Num());
@@ -1912,7 +2012,34 @@ void FSlimeSolver::ApplyMergeImpact(const FShotState& Shot)
 	LandingSettleRemaining = FMath::Max(LandingSettleRemaining, 1.1f);
 }
 
-int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path, uint8* OutShotId)
+int32 FSlimeSolver::LaunchCannon(const FSlimeCannonLaunch &Cannon, float Fraction, float Life, int32 MaxShots)
+{
+	FVector Velocity;
+	float Time;
+	if (!Cannon.Solve(GetBodyCenter()+Cannon.MuzzleOffset, Velocity, Time))
+		return 0;
+	uint8 Id = 0;
+	const int32 Count = LaunchChunk(Velocity, Fraction, Life, MaxShots, nullptr, &Id, true);
+	if (Count)
+	{
+  const FVector Desired=GetBodyCenter()+Cannon.SeparationStartOffset;
+  const FVector Delta=Desired-GetShotCenterWorld(Id);
+  for (FSlimeParticle& Particle:Particles) if (Particle.IsBallistic() && Particle.ShotId==Id)
+  { Particle.Position+=FVector3f(Delta); Particle.PredictedPosition=Particle.Position; }
+  ShotLifecycles.FindChecked(Id).SeparationOrigin=Desired;
+		FShotPathFollow Follow;
+		Follow.bActive = true;
+		Follow.bCannon = true;
+		Follow.Cannon = Cannon;
+		Follow.PrevCenter = GetShotCenterWorld(Id);
+		Follow.FlightStart = Follow.PrevCenter;
+		Follow.InitialVelocity = Velocity;
+		ShotPaths.Add(Id, MoveTemp(Follow));
+	}
+	return Count;
+}
+
+int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path, uint8* OutShotId, bool bAutoReturn)
 {
 	if (OutShotId)
 	{
@@ -1998,6 +2125,11 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 			// Peel clear of the absorb radius so the chunk is not immediately reabsorbed.
 			Clone.Position = Template.Position + Away * (GetScaledRestRadius() * 2.4f);
 		}
+		if (bAutoReturn)
+		{
+			Clone.Position = Center + Away * (GetScaledRestRadius() * 0.7f) + (Template.Position - Center) * MiniScale;
+			Clone.Velocity = FVector3f::ZeroVector;
+		}
 		Clone.PredictedPosition = Clone.Position;
 		Particles.Add(Clone);
 	}
@@ -2013,6 +2145,18 @@ int32 FSlimeSolver::LaunchChunk(const FVector& LaunchVelocity, float Fraction, f
 		ShotPaths.Add(ShotId, MoveTemp(Follow));
 	}
 
+	if (bAutoReturn)
+	{
+		UmbrellaEligibleShots.Add(ShotId);
+		FShotLifecycle State;
+		State.Life = FMath::Max(Life, 0.05f);
+		State.Separation = FMath::Min(SeparationSeconds, State.Life * 0.25f);
+		State.ReturnStart = FMath::Max(State.Separation, State.Life - ReturnSeconds);
+		State.Direction = FVector(Away);
+		State.LaunchVelocity = LaunchVelocity;
+		ShotLifecycles.Add(ShotId, State);
+		AddIgnoreWorldShot(ShotId);
+	}
 	EnsureScratchCapacity(Particles.Num());
 	ShotMergeElapsed.Remove(ShotId);
 	ShotImpactApplied.Remove(ShotId);
@@ -2035,8 +2179,7 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 
 	const FVector BodyCenter = GetBodyCenter();
 	const float ApproachSq = FMath::Square(ApproachRadius);
-	const float SurfaceStandoff = GetScaledRestRadius() * 0.85f;
-	const float CommitR = FMath::Max(CommitRadius, GetScaledRestRadius() * 0.55f);
+		const float CommitR = FMath::Max(CommitRadius, GetScaledRestRadius() * 0.55f);
 	const float CommitSq = FMath::Square(CommitR);
 	const float Hold = FMath::Max(HoldDuration, 0.1f);
 	const FVector3f Home(BodyCenter);
@@ -2047,11 +2190,19 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 
 	for (FShotState& Shot : ShotStates)
 	{
-		if (ShotTargets.Contains(Shot.Id))
-		{
-			continue;
-		}
 		const float DistSq = FVector3f::DistSquared(Shot.Center, Home);
+		if (FShotLifecycle* State = ShotLifecycles.Find(Shot.Id))
+		{
+			if (State->Phase == EShotPhase::Separating || State->Phase == EShotPhase::Merging) continue;
+			if (DistSq > ApproachSq) State->bContactAbsorbArmed = true;
+			if (!State->bContactAbsorbArmed || DistSq > ApproachSq) continue;
+			// Contact takes ownership from the timed return, without recalling sibling shots.
+			ShotPaths.Remove(Shot.Id);
+			ShotTargets.Remove(Shot.Id);
+			ShotLifecycles.Remove(Shot.Id);
+			IgnoreWorldShotIds.Add(Shot.Id);
+		}
+		else if (ShotTargets.Contains(Shot.Id)) continue;
 		float& MergeTime = ShotMergeElapsed.FindOrAdd(Shot.Id, -1.f);
 
 		if (DistSq > ApproachSq)
@@ -2073,14 +2224,16 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 			MergeTime += Dt;
 		}
 
+		Shot.Phase = EShotPhase::Merging;
+		Shot.MergeElapsed = MergeTime;
+
 		if (!ShotImpactApplied.Contains(Shot.Id))
 		{
 			ApplyMergeImpact(Shot);
 			ShotImpactApplied.Add(Shot.Id);
 		}
 
-		// Surface-seeking pull: approach the body skin, do not lerp into the COM
-		// (that reads as "sinking inside" instead of metaball edge fusion).
+		// Contact absorption sinks the mini into the body before committing destruction.
 		const float PullBlend = FMath::Clamp(MergeTime / Hold, 0.f, 1.f);
 		const float PullStrength = FMath::Lerp(120.f, 280.f, PullBlend);
 		for (FSlimeParticle& Particle : Particles)
@@ -2094,7 +2247,7 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 			FVector3f Target = Home;
 			if (Dist > KINDA_SMALL_NUMBER)
 			{
-				Target = Home + (FromHome / Dist) * SurfaceStandoff;
+				Target = Home;
 				const FVector3f ToTarget = Target - Particle.Position;
 				const float TargetDist = ToTarget.Size();
 				if (TargetDist > KINDA_SMALL_NUMBER)
@@ -2103,8 +2256,8 @@ int32 FSlimeSolver::UpdateSoftAbsorb(float Dt, float ApproachRadius, float Commi
 						Particle.Velocity,
 						HomeVel + (ToTarget / TargetDist) * PullStrength,
 						0.22f);
-					// Very weak position nudge — keep the blob outside so iso surfaces can fuse.
-					Particle.Position = FMath::Lerp(Particle.Position, Target, 0.02f * Dt * 60.f);
+					// Move into the body during the existing hold window.
+					Particle.Position = FMath::Lerp(Particle.Position, Target, FMath::Clamp(0.08f * Dt * 60.f, 0.f, 1.f));
 					Particle.PredictedPosition = Particle.Position;
 				}
 			}
@@ -2147,9 +2300,11 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 		return true;
 	}
 
-	ClearKinematicPaths();
+ RebuildShotStates();
+ for (const FShotState& Shot:ShotStates) TryBeginUmbrellaReturn(Shot.Id);
+ ClearKinematicPaths();
 
-	const FVector3f Home(Target);
+ const FVector3f Home(Target);
 	const float ArriveRadius = GetScaledRestRadius() * 0.8f;
 	const float ArriveSq = FMath::Square(ArriveRadius);
 	int32 StillOut = 0;
@@ -2158,7 +2313,7 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 
 	for (FSlimeParticle& Particle : Particles)
 	{
-		if (!Particle.IsBallistic())
+		if (!Particle.IsBallistic() || UmbrellaReturns.Contains(Particle.ShotId))
 		{
 			continue;
 		}
@@ -2186,6 +2341,7 @@ bool FSlimeSolver::RecallFragments(float Dt, const FVector& Target, float PullSp
 	// Kick impact once a shot crosses arrive radius.
 	for (const FShotState& Shot : ShotStates)
 	{
+  if (UmbrellaReturns.Contains(Shot.Id)) continue;
 		if (FVector3f::DistSquared(Shot.Center, Home) > ArriveSq)
 		{
 			continue;
@@ -2388,6 +2544,7 @@ void FSlimeSolver::ApplyShotTargets(float Dt)
 void FSlimeSolver::ClearKinematicPaths()
 {
 	ShotPaths.Reset();
+	ShotLifecycles.Reset();
 }
 
 bool FSlimeSolver::IsShotKinematic(uint8 ShotId) const
@@ -2449,18 +2606,33 @@ void FSlimeSolver::AdvanceKinematicShots(float Dt)
 	for (TPair<uint8, FShotPathFollow>& Pair : ShotPaths)
 	{
 		FShotPathFollow& Follow = Pair.Value;
-		if (!Follow.bActive || Follow.Points.Num() < 2)
+		if (!Follow.bActive || (!Follow.bCannon && Follow.Points.Num() < 2))
 		{
 			continue;
 		}
 
+		if (const FShotLifecycle* State = ShotLifecycles.Find(Pair.Key))
+		{
+			if (State->Phase != EShotPhase::Active && State->Phase != EShotPhase::Flying) continue;
+		}
 		const FVector CurrentCom = GetShotCenterWorld(Pair.Key);
-		Follow.PrevCenter = CurrentCom;
+		if (!Follow.bCannon) Follow.PrevCenter=CurrentCom;
+		else if (Follow.Elapsed>0.f) Follow.PrevCenter=FSlimeCannonLaunch::Position(Follow.FlightStart,Follow.InitialVelocity,Follow.Cannon.Gravity,Follow.Elapsed);
 		Follow.Elapsed += Dt;
 
-		FVector NewPos = Follow.Points.Last();
-		FVector NewVel = FVector::ZeroVector;
-		const bool bStillFlying = SampleShotPath(Follow, Follow.Elapsed, NewPos, NewVel);
+  FVector NewPos = FVector::ZeroVector, NewVel = FVector::ZeroVector;
+  bool bStillFlying = true;
+  if (Follow.bCannon)
+  {
+   NewPos=FSlimeCannonLaunch::Position(Follow.FlightStart,Follow.InitialVelocity,Follow.Cannon.Gravity,Follow.Elapsed);
+   NewVel=Follow.InitialVelocity-FVector(0,0,Follow.Cannon.Gravity*Follow.Elapsed);
+  }
+  else
+  {
+   bStillFlying=SampleShotPath(Follow,Follow.Elapsed,NewPos,NewVel);
+   NewPos+=Follow.StartOffset*FMath::Max(1.f-Follow.Elapsed/Follow.Duration,0.f);
+   NewVel-=Follow.StartOffset/Follow.Duration;
+  }
 
 		const FVector Delta = NewPos - CurrentCom;
 		for (FSlimeParticle& Particle : Particles)
@@ -2495,9 +2667,14 @@ void FSlimeSolver::EndKinematicShot(uint8 ShotId)
 {
 	if (FShotPathFollow* Follow = ShotPaths.Find(ShotId))
 	{
-		Follow->bActive = false;
-	}
-	ShotPaths.Remove(ShotId);
+  Follow->bActive = false;
+  if (Follow->bCannon)
+  {
+   if (FShotLifecycle* State=ShotLifecycles.Find(ShotId)) State->Phase=EShotPhase::Active;
+   ClearIgnoreWorldShot(ShotId);
+  }
+ }
+ ShotPaths.Remove(ShotId);
 }
 
 void FSlimeSolver::GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMotions) const
@@ -2505,11 +2682,18 @@ void FSlimeSolver::GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMoti
 	OutMotions.Reset();
 	for (const TPair<uint8, FShotPathFollow>& Pair : ShotPaths)
 	{
+		if (Pair.Value.bCannon)
+  {
+   const FShotLifecycle* State=ShotLifecycles.Find(Pair.Key);
+   if (!State || State->Phase!=EShotPhase::Flying) continue;
+  }
+  else if (IsIgnoreWorldShot(Pair.Key)) continue;
 		if (!Pair.Value.bActive)
 		{
 			continue;
 		}
 		FKinematicShotMotion Motion;
+		Motion.bCannon = Pair.Value.bCannon;
 		Motion.Id = Pair.Key;
 		Motion.PrevCenter = Pair.Value.PrevCenter;
 		Motion.Center = GetShotCenterWorld(Pair.Key);
@@ -2518,7 +2702,7 @@ void FSlimeSolver::GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMoti
 	}
 }
 
-void FSlimeSolver::SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint)
+void FSlimeSolver::SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint, const FHitResult* Support)
 {
 	const FVector Current = GetShotCenterWorld(ShotId);
 	const FVector Delta = WorldPoint - Current;
@@ -2532,10 +2716,226 @@ void FSlimeSolver::SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint)
 		Particle.PredictedPosition = Particle.Position;
 		Particle.Velocity = FVector3f::ZeroVector;
 	}
-	if (WorldPoint.Z > -1.e8f)
-	{
-		SetShotFloorZ(ShotId, float(WorldPoint.Z));
-	}
+	SetShotSupport(ShotId, Support);
 	EndKinematicShot(ShotId);
 	RebuildShotStates();
+}
+
+void FSlimeSolver::GetSeparatingShotIds(TArray<uint8>& OutIds) const
+{
+ OutIds.Reset();
+ for (const auto& Pair : ShotLifecycles) if (Pair.Value.Phase == EShotPhase::Separating) OutIds.Add(Pair.Key);
+}
+float FSlimeSolver::GetShotSeparationProgress(uint8 Id) const
+{
+ const FShotLifecycle* State = ShotLifecycles.Find(Id);
+ return State ? FMath::Clamp(State->Age / State->Separation, 0.f, 1.f) : 1.f;
+}
+void FSlimeSolver::AdvanceShotLifecycles(float Dt)
+{
+ if (ShotLifecycles.IsEmpty()) return;
+ RebuildShotStates();
+ const FVector Home = GetBodyCenter();
+ TArray<uint8> Finished;
+ for (auto& Pair : ShotLifecycles)
+ {
+  FShotLifecycle& State = Pair.Value;
+  State.Age += Dt;
+  const FVector Current = GetShotCenterWorld(Pair.Key);
+  FVector Target = Current;
+  bool bMove = false;
+  if (State.Phase == EShotPhase::Separating)
+  {
+   float T = FMath::Clamp(State.Age / State.Separation, 0.f, 1.f);
+   Target = Home + State.Direction * FMath::Lerp(GetScaledRestRadius()*0.7f, GetScaledRestRadius()+MiniMembraneRadius*1.65f, T*T*(3.f-2.f*T));
+   if (FShotPathFollow* Follow=ShotPaths.Find(Pair.Key); Follow && Follow->bCannon)
+   {
+    Target=FMath::Lerp(State.SeparationOrigin,Home+Follow->Cannon.MuzzleOffset,T*T*(3.f-2.f*T));
+    FHitResult Obstruction;
+    if (TraceSeparation && TraceSeparation(Current,Target,MiniMembraneRadius,Obstruction))
+    {
+     Target=Current;
+     State.bCancelled=true;
+     State.Phase=EShotPhase::Merging;
+     State.ReturnOrigin=Current;
+     State.ReturnStart=State.Age;
+     State.Life=State.Age+0.4f;
+     ShotPaths.Remove(Pair.Key);
+     T=0.f;
+    }
+   }
+   bMove = true;
+   if (T >= 1.f)
+   {
+    State.Phase = EShotPhase::Active;
+    if (FShotPathFollow* Follow = ShotPaths.Find(Pair.Key))
+    {
+     if (Follow->bCannon)
+     {
+      float Time;
+      Follow->FlightStart=Target;
+      // Actual detached position is authoritative; never steer toward the aim point in flight.
+      if (Follow->Cannon.Solve(Target,Follow->InitialVelocity,Time))
+      {
+       State.Phase=EShotPhase::Flying;
+       State.LaunchVelocity=Follow->InitialVelocity;
+       Follow->Elapsed=0.f;
+      }
+      else
+      {
+       Follow->bActive=false;
+       State.LaunchVelocity=FVector::ZeroVector;
+       State.bCancelled=true;
+       State.Phase=EShotPhase::Merging;
+       State.ReturnOrigin=Target;
+       State.ReturnStart=State.Age;
+       State.Life=State.Age+0.4f;
+      }
+     }
+     else { Follow->StartOffset=Target-Follow->Points[0]; ClearIgnoreWorldShot(Pair.Key); }
+     Follow->PrevCenter = Target;
+    }
+    else ClearIgnoreWorldShot(Pair.Key);
+   }
+  }
+  if (State.Age >= State.ReturnStart && (State.Phase == EShotPhase::Active || State.Phase == EShotPhase::Flying))
+  {
+   State.Phase = EShotPhase::Returning;
+   State.ReturnOrigin = Current;
+   ShotTargets.Remove(Pair.Key);
+   ShotPaths.Remove(Pair.Key);
+   ShotMergeElapsed.Remove(Pair.Key);
+   AddIgnoreWorldShot(Pair.Key);
+  }
+  if (State.Phase==EShotPhase::Returning && TryBeginUmbrellaReturn(Pair.Key)) continue;
+  if (State.Phase == EShotPhase::Returning || State.Phase == EShotPhase::Merging)
+  {
+   const float Duration = FMath::Max(State.Life-State.ReturnStart, 0.01f);
+   const float Fusion = State.bCancelled ? Duration : FMath::Min(0.4f, Duration * 0.25f);
+   const float Travel = State.bCancelled ? 0.f : FMath::Max(Duration-Fusion, 0.01f);
+   const float Elapsed = State.Age-State.ReturnStart;
+   const float T = FMath::Clamp(Elapsed/FMath::Max(Travel,0.01f), 0.f, 1.f);
+   const FVector Side = (State.ReturnOrigin-Home).GetSafeNormal(UE_SMALL_NUMBER, State.Direction);
+   const FVector Destination=Home+Side*(GetScaledRestRadius()*0.85f);
+   const int32 Hop=FMath::Min(FMath::FloorToInt(T*4.f),3);
+   const float HopT=FMath::Clamp(T*4.f-Hop,0.f,1.f);
+   if (State.HopIndex!=Hop)
+   {
+    State.HopIndex=Hop;
+    State.HopStart=Current;
+    State.HopEnd=FMath::Lerp(Current,Destination,1.f/float(4-Hop));
+   }
+   // Follow a moving parent during each hop; terrain is sampled at the landing point,
+   // not by treating interpolated endpoint Z as a floor.
+   State.HopEnd.X=FMath::Lerp(State.HopStart.X,Destination.X,1.f/float(4-Hop));
+   State.HopEnd.Y=FMath::Lerp(State.HopStart.Y,Destination.Y,1.f/float(4-Hop));
+   FHitResult Landing;
+   if (QueryGround && QueryGround(State.HopEnd,Landing))
+    State.HopEnd.Z=Landing.ImpactPoint.Z+GetShotSupportHeight();
+   Target=FMath::Lerp(State.HopStart,State.HopEnd,HopT);
+   Target.Z+=ReturnHopHeight*FMath::Sin(HopT*PI);
+   FHitResult Ground;
+   SetShotSupport(Pair.Key,QueryGround && QueryGround(Target,Ground) ? &Ground : nullptr);
+   bMove = true;
+   if (Elapsed >= Travel)
+   {
+    State.Phase = EShotPhase::Merging;
+    const float Blend = FMath::Clamp((Elapsed-Travel)/Fusion, 0.f, 1.f);
+    ShotMergeElapsed.FindOrAdd(Pair.Key) = Elapsed-Travel;
+    Target = State.bCancelled ? FMath::Lerp(State.ReturnOrigin,Home,Blend) : Home+Side*GetScaledRestRadius()*0.85f*(1.f-Blend);
+    if (!ShotImpactApplied.Contains(Pair.Key))
+    {
+     for (const FShotState& Shot : ShotStates) if (Shot.Id==Pair.Key) { ApplyMergeImpact(Shot); break; }
+     ShotImpactApplied.Add(Pair.Key);
+    }
+    if (Blend >= 1.f) Finished.Add(Pair.Key);
+   }
+  }
+  if (bMove)
+  {
+   const FVector3f Delta(Target-Current);
+   for (FSlimeParticle& Particle : Particles) if (Particle.IsBallistic() && Particle.ShotId==Pair.Key)
+   {
+    Particle.Position += Delta;
+    Particle.PredictedPosition = Particle.Position;
+    Particle.Velocity = (State.Phase==EShotPhase::Active || State.Phase==EShotPhase::Flying) ? FVector3f(State.LaunchVelocity) : FVector3f(AnchorVelocity);
+   }
+  }
+ }
+ for (uint8 Id : Finished) RemoveShotParticles(Id);
+ RebuildShotStates();
+}
+
+bool FSlimeSolver::TryBeginUmbrellaReturn(uint8 Id)
+{
+ if (UmbrellaReturns.Contains(Id)) return true;
+ if (!UmbrellaEligibleShots.Contains(Id) || !QueryUmbrellaGround) return false;
+ if (const FShotLifecycle* State=ShotLifecycles.Find(Id))
+  if (State->Phase==EShotPhase::Separating || State->Phase==EShotPhase::Flying || State->Phase==EShotPhase::Merging) return false;
+ const FVector Current=GetShotCenterWorld(Id);
+ FHitResult Ground;
+ const bool bFloor=QueryUmbrellaGround(Current,Ground);
+ const float Height=bFloor ? float(Current.Z-Ground.ImpactPoint.Z)-GetShotSupportHeight() : BIG_NUMBER;
+ if (Height<=UmbrellaHeight) return false;
+ bool bDescending=Current.Z>GetBodyCenter().Z+20.f;
+ for (const FShotState& Shot:ShotStates) if (Shot.Id==Id) bDescending|=Shot.Velocity.Z<-10.f;
+ if (!bDescending) return false;
+ FShotUmbrellaReturn Entry; Entry.ControlCenter=Current;
+ UmbrellaReturns.Add(Id,Entry);
+ ShotPaths.Remove(Id); ShotTargets.Remove(Id);
+ AddIgnoreWorldShot(Id);
+ return true;
+}
+void FSlimeSolver::AdvanceUmbrellaReturns(float Dt)
+{
+ if (UmbrellaReturns.IsEmpty()) return;
+ RebuildShotStates();
+ const FVector Home=GetBodyCenter();
+ for (auto& Pair:UmbrellaReturns)
+ {
+  const uint8 Id=Pair.Key;
+  FShotUmbrellaReturn& State=Pair.Value;
+  if (const float* Merge=ShotMergeElapsed.Find(Id); Merge && *Merge>=0.f) { State.bOpen=false; continue; }
+  const FVector Actual=GetShotCenterWorld(Id);
+  const FVector Current=State.ControlCenter;
+  if (FVector::DistSquared(Current,Home)<FMath::Square(GetScaledRestRadius()*0.7f)) { State.bOpen=false; continue; }
+  const FVector XY(Home.X-Current.X,Home.Y-Current.Y,0);
+  FVector Next=Current+XY.GetClampedToMaxSize(UmbrellaFollowSpeed*Dt);
+  FHitResult Floor;
+  const bool bFloor=QueryUmbrellaGround && QueryUmbrellaGround(Next,Floor);
+  const double FloorCenterZ=bFloor ? Floor.ImpactPoint.Z+GetShotSupportHeight() : -1.e9;
+  const float Height=float(Current.Z-FloorCenterZ);
+  const bool bDown=Home.Z<Current.Z-2.f;
+  State.bOpen=bDown && (!bFloor || Height>UmbrellaHeight);
+  if (bFloor && Height<30.f && Home.Z<FloorCenterZ+60.f)
+  {
+   State.HopTime+=Dt;
+   Next.Z=FloorCenterZ+ReturnHopHeight*FMath::Abs(FMath::Sin(State.HopTime*PI/0.55f));
+   State.bOpen=false;
+  }
+  else
+  {
+   const float Speed=bDown ? FMath::Lerp(UmbrellaFallSpeed,UmbrellaMaxFallSpeed,FMath::Clamp(float(Current.Z-Home.Z)/600.f,0.f,1.f)) : UmbrellaFollowSpeed;
+   Next.Z=FMath::FInterpConstantTo(Current.Z,Home.Z,Dt,Speed);
+   if (bFloor) Next.Z=FMath::Max(Next.Z,FloorCenterZ);
+  }
+  SetShotSupport(Id,bFloor && Next.Z-FloorCenterZ<35.f ? &Floor : nullptr);
+  const FVector3f Delta(Next-Actual);
+  const FVector3f MoveVelocity((Next-Current)/FMath::Max(Dt,0.001f));
+  State.ControlCenter=Next;
+  for (FSlimeParticle& Particle:Particles) if (Particle.IsBallistic() && Particle.ShotId==Id)
+  {
+   Particle.Position+=Delta;
+   Particle.PredictedPosition=Particle.Position;
+   Particle.Velocity=MoveVelocity;
+  }
+ }
+ RebuildShotStates();
+}
+void FSlimeSolver::RemoveUnprotectedShots()
+{
+ RebuildShotStates();
+ TArray<uint8> Remove;
+ for (const FShotState& Shot:ShotStates) if (!UmbrellaReturns.Contains(Shot.Id)) Remove.Add(Shot.Id);
+ for (uint8 Id:Remove) RemoveShotParticles(Id);
 }

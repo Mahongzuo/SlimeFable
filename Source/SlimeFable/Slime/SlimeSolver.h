@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "SlimeTypes.h"
 
 /**
@@ -19,12 +20,24 @@
 class SLIMEFABLE_API FSlimeSolver
 {
 public:
+	enum class EShotPhase : uint8 { Separating, Flying, Active, Returning, Merging };
+
 	struct FShotState
 	{
 		uint8 Id = 0;
+		EShotPhase Phase = EShotPhase::Active;
+		FVector3f LaunchDirection = FVector3f::ForwardVector;
+		float Age = 0.f;
+		float RemainingTime = 0.f;
+		FVector AimTarget = FVector::ZeroVector, InitialVelocity = FVector::ZeroVector;
+		float FlightGravity = 0.f, FlightTime = 0.f;
 		FVector3f Center = FVector3f::ZeroVector;
 		FVector3f Velocity = FVector3f::ZeroVector;
 		float FloorZ = -1.e9f;
+  FVector SupportPoint=FVector::ZeroVector, SupportNormal=FVector::UpVector;
+  bool bHasSupport=false, bGrounded=false;
+  bool bUmbrellaOpen=false, bKeepUntilMerged=false;
+  uint32 LandingEvent=0;
 		float MergeElapsed = -1.f;
 		bool bImpactApplied = false;
 		int32 Count = 0;
@@ -36,6 +49,7 @@ public:
 		FVector PrevCenter = FVector::ZeroVector;
 		FVector Center = FVector::ZeroVector;
 		float Radius = 18.f;
+		bool bCannon = false;
 	};
 
 	/** Builds the particle set as a dome resting on RestCenter's Z. */
@@ -82,6 +96,24 @@ public:
 	/** 0 = dome, 1 = fully flattened. Blends shell height, vertical anchor and upward restore. */
 	void SetSpreadBlend(float InBlend) { SpreadBlend = FMath::Clamp(InBlend, 0.f, 1.f); }
 
+	/**
+	 * Resting Dome silhouette (ground state only). Blend 0 = ball, 1 = dome: the shell's horizontal
+	 * axes scale by WidthScale, the vertical by HeightScale, and upward restore by RestoreScale.
+	 */
+	void SetDomeShape(float InBlend, float InWidthScale, float InHeightScale, float InRestoreScale)
+	{
+		DomeBlend = FMath::Clamp(InBlend, 0.f, 1.f);
+		DomeWidthScale = FMath::Max(InWidthScale, 0.5f);
+		DomeHeightScale = FMath::Clamp(InHeightScale, 0.2f, 1.5f);
+		DomeRestoreScale = FMath::Clamp(InRestoreScale, 0.f, 1.f);
+	}
+
+	/**
+	 * Horizontal metric stretch for the density constraint while spread: the fluid's lateral rest
+	 * spacing becomes ParticleSpacing * Scale, so the sheet thins into a wider single layer.
+	 */
+	void SetSpreadLateralScale(float InScale) { SpreadLateralScale = FMath::Clamp(InScale, 1.f, 4.f); }
+
 	/** Fallback floor when a shot has no per-shot trace yet. */
 	void SetFragmentFloorZ(float InFloorZ) { FragmentFloorZ = float(InFloorZ); }
 
@@ -89,6 +121,14 @@ public:
 	void SetShotFloorZ(uint8 ShotId, float InFloorZ);
 
 	void ClearShotFloorOverrides();
+ float GetShotSupportHeight() const { return FMath::Max(MiniMembraneRadius, Params.ParticleSpacing * 2.f) * 0.55f; }
+ void SetShotSupport(uint8 Id, const FHitResult* Hit);
+ TFunction<bool(const FVector&, FHitResult&)> QueryGround;
+ TFunction<bool(const FVector&, FHitResult&)> QueryUmbrellaGround;
+ void ConfigureUmbrellas(float Height,float Follow,float Fall,float MaxFall)
+ { UmbrellaHeight=FMath::Max(Height,0.f); UmbrellaFollowSpeed=FMath::Max(Follow,10.f); UmbrellaFallSpeed=FMath::Max(Fall,30.f); UmbrellaMaxFallSpeed=FMath::Max(MaxFall,UmbrellaFallSpeed); }
+ void RemoveUnprotectedShots();
+ TFunction<bool(const FVector&, const FVector&, float, FHitResult&)> TraceSeparation;
 
 	/** Hard ceiling plane, or a large value when the sky is clear. */
 	void SetCeilingZ(float InCeilingZ) { CeilingZ = float(InCeilingZ); }
@@ -226,7 +266,8 @@ public:
 	 *  Clones ~Fraction of body particles into a ballistic mini-slime without shrinking the body.
 	 *  Honours MaxActiveShots. Returns how many clone particles were spawned.
 	 */
-	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path = nullptr, uint8* OutShotId = nullptr);
+	int32 LaunchCannon(const FSlimeCannonLaunch& Cannon, float Fraction, float Life, int32 MaxShots);
+	int32 LaunchChunk(const FVector& LaunchVelocity, float Fraction, float Life, int32 MaxActiveShots, const FSlimeLaunchPath* Path = nullptr, uint8* OutShotId = nullptr, bool bAutoReturn = false);
 
 	/** Steer a flying clone toward a world point. Call every tick to keep it pinned. */
 	void SetShotTarget(uint8 ShotId, const FVector& Target, float PullSpeed);
@@ -251,8 +292,11 @@ public:
 	bool IsShotTargeted(uint8 ShotId) const { return ShotId != 0 && ShotTargets.Contains(ShotId); }
 
 	void ClearKinematicPaths();
+	void SetShotLifecycleParams(float Separation, float Return, float Hop) { SeparationSeconds = FMath::Max(Separation, 0.02f); ReturnSeconds = FMath::Max(Return, 0.1f); ReturnHopHeight = FMath::Max(Hop, 0.f); }
+	void GetSeparatingShotIds(TArray<uint8>& OutIds) const;
+	float GetShotSeparationProgress(uint8 Id) const;
 	void GetKinematicShotMotions(TArray<FKinematicShotMotion>& OutMotions) const;
-	void SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint);
+	void SnapKinematicShotTo(uint8 ShotId, const FVector& WorldPoint, const FHitResult* Support = nullptr);
 
 	/** Steers fragments home. Returns true once every clone has entered soft-merge or been removed. */
 	bool RecallFragments(float Dt, const FVector& Target, float PullSpeed);
@@ -281,6 +325,7 @@ private:
 	void ClampToShotShell(FVector3f& InOutPoint, const FVector3f& ShotCenter) const;
 	void LiftShotCentersAboveFloor();
 	void AdvanceKinematicShots(float Dt);
+	void AdvanceShotLifecycles(float Dt);
 	void ApplyShotTargets(float Dt);
 	void EndKinematicShot(uint8 ShotId);
 	bool IsShotKinematic(uint8 ShotId) const;
@@ -377,6 +422,11 @@ private:
 	float SpreadPush = 0.f;
 	float SpreadHalfHeight = 2.5f;
 	float SpreadConcentrationScale = 1.15f;
+	float SpreadLateralScale = 1.f;
+	float DomeBlend = 0.f;
+	float DomeWidthScale = 1.4f;
+	float DomeHeightScale = 0.55f;
+	float DomeRestoreScale = 0.35f;
 	float GravityScale = 1.f;
 	float MiniMembraneRadius = 18.f;
 	float LaunchFractionCached = 0.3f;
@@ -389,15 +439,26 @@ private:
 	TArray<SlimeSim::FSlimeCollider> Colliders;
 	TArray<FShotState> ShotStates;
 	TMap<uint8, float> ShotFloorOverrides;
+ struct FShotSupport
+ {
+  FVector Point=FVector::ZeroVector, Normal=FVector::UpVector;
+  bool bValid=false, bGrounded=false;
+  uint32 LandingEvent=0;
+ };
+ TMap<uint8,FShotSupport> ShotSupports;
 	/** Persist merge timers across RebuildShotStates. */
 	TMap<uint8, float> ShotMergeElapsed;
 	TSet<uint8> ShotImpactApplied;
 
 	struct FShotPathFollow
 	{
+		FSlimeCannonLaunch Cannon;
+		bool bCannon = false;
+		FVector FlightStart = FVector::ZeroVector, InitialVelocity = FVector::ZeroVector;
 		TArray<FVector> Points;
 		float Duration = 0.f;
 		float Elapsed = 0.f;
+		FVector StartOffset = FVector::ZeroVector;
 		FVector PrevCenter = FVector::ZeroVector;
 		bool bActive = false;
 	};
@@ -405,6 +466,31 @@ private:
 	static bool SampleShotPath(const FShotPathFollow& Follow, float Time, FVector& OutPos, FVector& OutVel);
 
 	TMap<uint8, FShotPathFollow> ShotPaths;
+	struct FShotLifecycle
+	{
+		float Age = 0.f, Life = 10.f, Separation = 0.22f, ReturnStart = 7.f;
+		EShotPhase Phase = EShotPhase::Separating;
+		FVector Direction = FVector::ForwardVector, LaunchVelocity = FVector::ZeroVector;
+		FVector ReturnOrigin = FVector::ZeroVector;
+  FVector SeparationOrigin=FVector::ZeroVector;
+  FVector HopStart=FVector::ZeroVector, HopEnd=FVector::ZeroVector;
+  int32 HopIndex=-1;
+  bool bCancelled=false;
+		bool bContactAbsorbArmed = false;
+	};
+	TMap<uint8, FShotLifecycle> ShotLifecycles;
+ struct FShotUmbrellaReturn
+ {
+  bool bOpen=true;
+  FVector ControlCenter=FVector::ZeroVector;
+  float HopTime=0.f;
+ };
+ TMap<uint8,FShotUmbrellaReturn> UmbrellaReturns;
+ TSet<uint8> UmbrellaEligibleShots;
+ float UmbrellaHeight=120.f, UmbrellaFollowSpeed=420.f, UmbrellaFallSpeed=180.f, UmbrellaMaxFallSpeed=260.f;
+ bool TryBeginUmbrellaReturn(uint8 Id);
+ void AdvanceUmbrellaReturns(float Dt);
+	float SeparationSeconds = 0.22f, ReturnSeconds = 3.f, ReturnHopHeight = 20.f;
 
 	struct FShotTarget
 	{

@@ -48,6 +48,7 @@ enum class ESlimeInputAction : uint8
 	BuildCatalog UMETA(DisplayName = "建造目录"),
 	BuildClearMode UMETA(DisplayName = "建造清除"),
 	Stats UMETA(DisplayName = "属性"),
+	BodyShape UMETA(DisplayName = "史莱姆形态"),
 	COUNT UMETA(Hidden)
 };
 
